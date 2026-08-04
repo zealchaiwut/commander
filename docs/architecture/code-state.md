@@ -30,16 +30,16 @@ Files changed: **15**
 | File | Commits |
 |------|---------|
 | `apps/dashboard/static/project.html` | 535 |
-| `apps/dashboard/server.py` | 397 |
-| `services/sprint_manager/sprint_manager.py` | 287 |
+| `apps/dashboard/server.py` | 399 |
+| `services/sprint_manager/sprint_manager.py` | 288 |
 | `apps/dashboard/static/dist/bundle.js.map` | 209 |
 | `apps/dashboard/static/dist/bundle.js` | 199 |
-| `CHANGELOG.md` | 119 |
+| `CHANGELOG.md` | 120 |
 | `apps/dashboard/static/app.js` | 106 |
 | `apps/dashboard/static/src/sprint-board/board-render.js` | 91 |
 | `apps/dashboard/static/index.html` | 75 |
-| `apps/dashboard/db.py` | 71 |
-| `apps/dashboard/routers/__init__.py` | 51 |
+| `apps/dashboard/db.py` | 72 |
+| `apps/dashboard/routers/__init__.py` | 52 |
 | `README.md` | 51 |
 | `apps/dashboard/static/src/sprint-board/history.js` | 48 |
 | `apps/dashboard/startup.py` | 45 |

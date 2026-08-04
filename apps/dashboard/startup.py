@@ -4499,15 +4499,38 @@ def children_of(parent_label: str, project_root: Path | None = None, project: st
     return sorted(children, key=_sprint_label_sub_index)
 
 
-def _sprint_merge_parent_label(project_root: Path, label: str) -> str:
-    """Immediate parent for a sprint branch merge (plan.json parent, else base)."""
+def _sprint_merge_parent_label(project_root: Path, label: str, *, project: str | None = None) -> str:
+    """Immediate parent for a sprint branch merge (issue #2048).
+
+    Resolution order (ADR-4: DB is authoritative):
+    1. DB ``sprints.immediate_parent`` column.
+    2. plan.json ``parent`` field (dual-write fallback).
+    3. Base sprint label — last resort; warns loudly (data defect).
+    """
     if not _is_child_sprint_label(label):
         return _sprint_label_base(label)
+
+    # 1. DB lookup.
+    row = db.get_sprint(label, project=project or None)
+    db_parent = (row.get("immediate_parent") or "").strip() if row else ""
+    if db_parent and _SPRINT_LABEL_RE.match(db_parent):
+        return db_parent
+
+    # 2. plan.json fallback.
     plan = _read_plan_json(project_root, label)
     parent = (plan.get("parent") or "").strip() if plan else ""
     if parent and _SPRINT_LABEL_RE.match(parent):
         return parent
-    return _sprint_label_base(label)
+
+    # 3. Neither source has the immediate parent — warn loudly.
+    base = _sprint_label_base(label)
+    logging.warning(
+        "[lineage] immediate parent not found for %r in DB or plan.json — "
+        "falling back to base label %r (may bypass intermediate rerun branches). "
+        "Run _backfill_immediate_parent_labels() to repair (issue #2048).",
+        label, base,
+    )
+    return base
 
 
 _BULK_COMPLETE_CHILD_READY_STATES: frozenset[str] = frozenset({
@@ -5057,7 +5080,7 @@ def _merge_steps_for_sprint_chain(project_root: Path, repo: str, base_label: str
     base_branch = _sprint_branch_name(base_label)
     children = children_of(base_label, project_root, project=repo or None)
     for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
-        parent_label = _sprint_merge_parent_label(project_root, child_label)
+        parent_label = _sprint_merge_parent_label(project_root, child_label, project=repo or None)
         child_branch = _sprint_branch_name(child_label)
         parent_branch = _sprint_branch_name(parent_label)
         if _branch_has_unmerged_commits(repo, child_branch, parent_branch):
@@ -5097,7 +5120,7 @@ def _sprint_merge_chain_pending(project_root: Path, repo: str, base_label: str) 
     base_branch = _sprint_branch_name(base_label)
     children = children_of(base_label, project_root, project=repo or None)
     for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
-        parent_label = _sprint_merge_parent_label(project_root, child_label)
+        parent_label = _sprint_merge_parent_label(project_root, child_label, project=repo or None)
         child_branch = _sprint_branch_name(child_label)
         parent_branch = _sprint_branch_name(parent_label)
         if _branch_has_unmerged_commits(repo, child_branch, parent_branch):
@@ -5143,6 +5166,7 @@ def _finish_merge_steps(project_root: Path, repo: str, label: str) -> list[dict]
             return _merge_steps_for_sprint_chain(project_root, repo, base_label)
         # Nested child (parent is not base) or other children in flight — only fold to plan parent.
         steps: list[dict] = []
+        parent_label = _sprint_merge_parent_label(project_root, label, project=repo or None)
         child_branch = _sprint_branch_name(label)
         parent_branch = _sprint_branch_name(parent_label)
         if _branch_has_unmerged_commits(repo, child_branch, parent_branch):

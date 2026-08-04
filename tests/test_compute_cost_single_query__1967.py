@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, str(_SCRIPTS_DIR))
 
 import export_hermes_report
-from export_hermes_report import _compute_cost, _query_token_usage
+from export_hermes_report import _compute_cost
 
 
 @pytest.fixture

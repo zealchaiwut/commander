@@ -1,6 +1,6 @@
 # 2026-07-02-4-consolidate-lineage-into-db
 
-> Status: decided | provisional
+> Status: decided | implemented
 
 ## Context
 
@@ -32,10 +32,17 @@ interactive timeouts; operator may veto): add `immediate_parent` column beside
   (`routers/sprint_run.py`) alongside the existing plan.json `parent` write,
   creating a placeholder `draft` row for queued children if none exists yet.
 - Value survives the later `running` transition unchanged.
-- Merge-topology resolvers (`_sprint_merge_parent_label`,
-  `_merge_steps_for_sprint_chain` in `startup.py`) still read plan.json first —
-  switching them to prefer the DB column is follow-up work, not done here.
+- **Merge-topology resolvers now read DB first** (`_sprint_merge_parent_label` in
+  `startup.py` and `_immediate_parent_branch` in `sprint_manager.py`), falling
+  back to plan.json when DB `immediate_parent` is NULL (dual-write gap), then to
+  the base sprint branch with a loud warning.
+- `_backfill_immediate_parent_labels()` in `db.py` (called from
+  `_create_sprint_lifecycle_tables`) heals NULL rows by reading plan.json —
+  mirrors the `_backfill_child_parent_labels()` pattern for `parent_label`.
+- Missing `immediate_parent` is now a loud data-defect warning, not a silent
+  fallback to the wrong base.
 
 ## Implemented-by (#N)
 
-#1691 (`fix/1686-1698-flow-decisions`)
+#1691 (`fix/1686-1698-flow-decisions`) — column added, write wired up
+#2048 (`feature/2048-lineage-sprints-immediate-parent-is-writ`) — readers switched to DB, backfill added, loud fallback

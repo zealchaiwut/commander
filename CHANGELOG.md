@@ -1,5 +1,53 @@
 # Changelog
 
+## Sprint 1015
+
+Reliability, lineage-correctness, and docs-accuracy fixes. **DB authoritative for sprint lineage (#2048):** `_sprint_merge_parent_label` in `startup.py` now resolves a child sprint's immediate merge parent from the `sprints.immediate_parent` DB column first (ADR-4), falling back to plan.json then the base label with a loud warning; a one-time `_backfill_immediate_parent_labels` heal in `db.py` copies `plan.json.parent` into any child row left NULL, so git merge topology no longer silently rides plan.json. **Periodic DB corruption detection (#2037):** a new `_periodic_db_integrity_loop` runs `PRAGMA quick_check` every 30 minutes (`db.check_db_quick` / `db.alert_if_corrupt`), logging CRITICAL and broadcasting a `db_corruption_alert` event so corruption is caught mid-run instead of sitting undetected until the next restart. **Missing advertised endpoint (#2051):** `GET /api/debug/token-usage/by-agent-model` (advertised in CLAUDE.md but returning 404) is now wired up via `routers/token_usage_debug.py`; also backfilled CHANGELOG/todo for manual sprints viz9001/9002, refreshed `frontend-map.md` + `2.3a`, clarified deliberated-vs-auto-adopted ADRs in `decisions/README.md`, and added `scripts/run_post_sprint.py`. **Stale test fixed (#2035):** `test_1411__worktree_pool.py` rewritten for the shared-venv pool design (was asserting a per-slot venv).
+
+- [#2035](https://github.com/zealchaiwut/commander/issues/2035) Fix stale test_1411__worktree_pool.py — shared-venv pool design — 2026-08-03
+- [#2037](https://github.com/zealchaiwut/commander/issues/2037) Periodic PRAGMA quick_check to detect DB corruption mid-run — 2026-08-03
+- [#2048](https://github.com/zealchaiwut/commander/issues/2048) Make DB authoritative for sprint immediate_parent lineage — 2026-08-03
+- [#2051](https://github.com/zealchaiwut/commander/issues/2051) Expose GET /api/debug/token-usage/by-agent-model + docs backfill — 2026-08-03
+
+## Sprint viz9002 _(manual sprint — backfilled 2026-08-03; documenter did not run)_
+
+ADR capture, Brain search tab, sprint-runner hardening, and three reliability fixes.
+**ADR series (#2027):** `scripts/log_decision.py` + `/decide` slash command; thirteen ADRs filed in `docs/decisions/` (Q1–Q3 deliberated; Q4–Q13 auto-adopted provisional recommendations).
+**Brain search tab (#2028):** `GET /api/brain/search` (SQLite FTS5) + `GET /api/brain/panels`; new top-nav Brain tab replacing the deleted Metrics/Logs tabs.
+**OAuth/auth preflight (#2029):** fail-fast `gh auth status` check at sprint start before dispatching any agents.
+**Non-fatal sprint finalization (#2030):** sprint finalization continues on a hard crash rather than leaving tickets in limbo.
+**False-orphan sweep fix (#2031):** auto-reconcile sweep no longer flags passing sprints as orphaned (#1887 regression fix).
+**Worktree-pool self-heal (#2032):** missing pool slot is rebuilt automatically on next `acquire()`.
+**Auto-escalate dead-lettered tickets (#2033):** tickets that fail the dead-letter threshold twice are auto-escalated to the operator.
+
+- [#2026](https://github.com/zealchaiwut/commander/issues/2026) Fill sprint retro Key Learnings + feed into planning — 2026-08-01
+- [#2027](https://github.com/zealchaiwut/commander/issues/2027) docs/decisions/ ADR series + /decide capture command — 2026-08-01
+- [#2028](https://github.com/zealchaiwut/commander/issues/2028) Brain search: GET /api/brain/search (SQLite FTS5) + Brain tab — 2026-08-02
+- [#2029](https://github.com/zealchaiwut/commander/issues/2029) OAuth/auth preflight at sprint start (fail fast) — 2026-08-02
+- [#2030](https://github.com/zealchaiwut/commander/issues/2030) Non-fatal sprint finalization on hard crash — 2026-08-02
+- [#2031](https://github.com/zealchaiwut/commander/issues/2031) Fix false-orphan sweep flagging passing sprints (#1887) — 2026-08-02
+- [#2032](https://github.com/zealchaiwut/commander/issues/2032) Worktree-pool self-heal on missing slot — 2026-08-03
+- [#2033](https://github.com/zealchaiwut/commander/issues/2033) Auto-escalate repeat dead-lettered tickets — 2026-08-03
+
+## Sprint viz9001 _(manual sprint — backfilled 2026-07-31; documenter did not run)_
+
+Failures inbox, persistence of agent narratives, reasoning view, dev-report landing, and UI cleanup.
+**Unified failures endpoint (#2019):** `GET /api/failures` — normalized failure rows from three SQLite sources (events, agent_runs, agents) behind a single endpoint.
+**Failures inbox tab (#2020):** new top-level Failures tab in the dashboard replacing the deleted Logs & Activity tab.
+**Persist agent narrative (#2021):** `agent_runs.final_message` now written on dispatch completion; was NULL for all ~26k non-test rows before this sprint.
+**Reasoning view (#2022):** `GET /api/runs/{id}/reasoning` + collapsible reasoning panel in the dashboard.
+**Dev Report landing (#2023):** auto-refresh live strip on `home.html`; `GET /api/dev-report` now regenerates on `?force=1`.
+**Remove dead views (#2024):** deleted dead/orphaned dashboard views and their backend wiring.
+**Remove Analytics + Logs tabs (#2025):** top-nav Logs and Metrics/Analytics tabs deleted; backend routes preserved; legacy deep-links redirect to Failures inbox.
+
+- [#2019](https://github.com/zealchaiwut/commander/issues/2019) Unified failures endpoint: GET /api/failures — 2026-07-31
+- [#2020](https://github.com/zealchaiwut/commander/issues/2020) Failures inbox: top-level dashboard tab — 2026-07-31
+- [#2021](https://github.com/zealchaiwut/commander/issues/2021) Persist agent final narrative to agent_runs — 2026-07-31
+- [#2022](https://github.com/zealchaiwut/commander/issues/2022) Reasoning view: GET /api/runs/{id}/reasoning + panel — 2026-07-31
+- [#2023](https://github.com/zealchaiwut/commander/issues/2023) Dev Report landing: live auto-refresh strip — 2026-07-31
+- [#2024](https://github.com/zealchaiwut/commander/issues/2024) Remove dead/orphaned dashboard views + wiring — 2026-07-31
+- [#2025](https://github.com/zealchaiwut/commander/issues/2025) Remove Analytics + Logs top-nav tabs (keep routes) — 2026-07-31
+
 ## Sprint 1014
 
 Two correctness fixes to sprint-count reconciliation and cross-project docs isolation. **Unified settled_done formula (#2049):** reconcile recomputed a sprint's denormalized counts (`settled_done`, `uat_count`, `failure_count`) with its own inline formula that disagreed with the one `sprint_artifact_service` uses at materialize time — so a fully-settled sprint could flip from 10/10 to 0/10 after a reconcile pass. `_reconcile_counts` in `sprint_reconcile_service.py` now delegates to the canonical `_compute_summary_counts`, and the dead `_settled_done_from_columns` helper was removed from `startup.py`; the nav pill's "N done" chip is relabeled "N settled" to match. **Brain cross-project docs bleed (#2052):** `resolve_clone_root` in `docs_service.py` walked `main`→`prd` before falling back to `uat`, so the Brain/docs endpoints could serve a stale or wrong clone's docs. Nested-layout resolution now prefers `uat` (the develop-tracking clone with the most current docs) first, in explicit `uat`→`main`→`prd` order, so each project's docs come from its own develop branch.

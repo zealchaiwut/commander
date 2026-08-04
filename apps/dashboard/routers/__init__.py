@@ -63,6 +63,7 @@ from .estimate_jobs import router as estimate_jobs_router
 from .dev_report import router as dev_report_router
 from .failures import router as failures_router
 from .brain import router as brain_router
+from .token_usage_debug import router as token_usage_debug_router
 
 __all__ = [
     "activity_router",
@@ -122,4 +123,5 @@ __all__ = [
     "dev_report_router",
     "failures_router",
     "brain_router",
+    "token_usage_debug_router",
 ]

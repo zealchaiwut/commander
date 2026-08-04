@@ -2777,8 +2777,12 @@ def _sprint_db_mark_merged_completed(
                 ended_at=extra_fields.get("ended_at"),
                 project=project or "",
             )
-        except Exception:
-            pass
+        except Exception as _rtm_exc:
+            logger.warning(
+                "_sprint_db_mark_merged_completed: record_sprint_ready_to_merge"
+                " failed for %r: %s",
+                sprint_label, _rtm_exc,
+            )
         try:
             row = db.get_sprint(sprint_label, project=project or None)
             current = db.canonical_lifecycle((row or {}).get("state") or "draft")
@@ -5156,7 +5160,7 @@ def _finish_merge_steps(project_root: Path, repo: str, label: str) -> list[dict]
     """
     base_label = _sprint_label_base(label)
     if _is_child_sprint_label(label):
-        parent_label = _sprint_merge_parent_label(project_root, label)
+        parent_label = _sprint_merge_parent_label(project_root, label, project=repo or None)
         others_unsettled = [
             c for c in _bulk_complete_unsettled_children(project_root, base_label, project=repo)
             if c != label

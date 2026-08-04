@@ -9,6 +9,7 @@ import project modules regardless of the working directory pytest is invoked fro
 from __future__ import annotations
 
 import os
+import re
 import sys
 import threading
 from functools import partial
@@ -362,3 +363,76 @@ def _assert_db_not_in_repo() -> None:
                     returncode=1,
                 )
     yield
+
+
+# ── Sprint JSON write guard (issue #2166) ─────────────────────────────────────
+
+# Matches sprint-NNN.json and sprint-NNN-plan.json (but not other files).
+_SPRINT_JSON_RE = re.compile(r"^sprint-\d[\w.-]*(?:-plan)?\.json$")
+
+
+def _find_production_sprints_dir() -> Path:
+    """Locate the real .commander/sprints/ directory that the live dashboard uses.
+
+    Supports two layouts:
+    - Nested (worktree inside .commander/runtime/...): walk up from _REPO_ROOT to
+      find the first ancestor directory named ".commander"; its sprints/ subdir is
+      the production directory.
+    - Flat (project root == repo root): the production dir is _REPO_ROOT/.commander/sprints.
+    """
+    current = _REPO_ROOT.resolve()
+    while current.parent != current:
+        current = current.parent
+        if current.name == ".commander":
+            return current / "sprints"
+    # Flat layout: .commander lives inside the repo root.
+    return _REPO_ROOT / ".commander" / "sprints"
+
+
+# The real .commander/sprints/ directory where production sprint JSON lives.
+_REAL_SPRINTS_DIR = _find_production_sprints_dir()
+
+
+def _real_sprint_file_snapshot() -> frozenset:
+    """Snapshot sprint JSON filenames currently in the real .commander/sprints/ dir."""
+    if not _REAL_SPRINTS_DIR.exists():
+        return frozenset()
+    return frozenset(
+        p for p in _REAL_SPRINTS_DIR.iterdir()
+        if p.is_file() and _SPRINT_JSON_RE.match(p.name)
+    )
+
+
+def _check_leaked_sprint_files(before: frozenset, after: frozenset) -> None:
+    """Raise AssertionError if sprint JSON files were written since the snapshot.
+
+    Exported so the regression test (test_2166__sprint_json_write_guard.py) can
+    call this helper directly to verify the detection logic is behavioral, not
+    a source-regex check (per issue #1746).
+    """
+    leaked = after - before
+    if leaked:
+        raise AssertionError(
+            f"\nSAFETY ABORT: test wrote sprint JSON to the real .commander/sprints/ directory!\n"
+            f"  File(s): {sorted(f.name for f in leaked)}\n"
+            "Tests must never write sprint JSON to the production sprints dir — "
+            "mock _project_root_path or _commander_dir to redirect writes to tmp_path "
+            "(see issue #2166)."
+        )
+
+
+@pytest.fixture(autouse=True)
+def _sprint_json_no_real_dir_write():
+    """Fail a test that writes sprint JSON to the real .commander/sprints/ directory.
+
+    Takes a filesystem snapshot before and after each test. Any sprint-*.json or
+    sprint-*-plan.json file that newly appears in the real sprints directory during
+    the test is removed and the test is failed loudly (issue #2166).
+    """
+    before = _real_sprint_file_snapshot()
+    yield
+    after = _real_sprint_file_snapshot()
+    leaked = after - before
+    for leaked_file in leaked:
+        leaked_file.unlink(missing_ok=True)
+    _check_leaked_sprint_files(before, after)

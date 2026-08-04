@@ -277,7 +277,7 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
             parent = "develop"
             parent_branch = "develop"
         else:
-            parent = srv._sprint_merge_parent_label(project_root, lbl)
+            parent = srv._sprint_merge_parent_label(project_root, lbl, project=repo)
             parent_branch = srv._sprint_branch_name(parent)
         branch = srv._sprint_branch_name(lbl)
         completed = False
@@ -786,7 +786,7 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
         base = "develop"
         target_name = "develop"
     else:
-        parent_label = srv._sprint_merge_parent_label(project_root, label)
+        parent_label = srv._sprint_merge_parent_label(project_root, label, project=repo)
         base = srv._sprint_branch_name(parent_label)
         target_name = parent_label
 
@@ -796,7 +796,20 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
     # the lineage to find the next surviving ancestor branch and retarget there.
     if not is_base and srv._gh_branch_exists(repo, head) and not srv._gh_branch_exists(repo, base):
         _current = parent_label
+        _visited: set[str] = set()
+        _MAX_LINEAGE_DEPTH = 50
         while True:
+            if _current in _visited or len(_visited) >= _MAX_LINEAGE_DEPTH:
+                raise HTTPException(
+                    409,
+                    detail=(
+                        f"Sprint lineage is self-referential or too deep (depth {len(_visited)}, "
+                        f"stopped at {_current!r}). The ancestry chain from {parent_label!r} "
+                        "did not converge to a base sprint within the allowed depth. "
+                        "Inspect and repair the sprint lineage manually."
+                    ),
+                )
+            _visited.add(_current)
             if not srv._is_child_sprint_label(_current):
                 # _current is the base sprint label — check its branch
                 _base_sprint_br = srv._sprint_branch_name(_current)
@@ -807,7 +820,7 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
                     base = "develop"
                     target_name = "develop"
                 break
-            _grandparent = srv._sprint_merge_parent_label(project_root, _current)
+            _grandparent = srv._sprint_merge_parent_label(project_root, _current, project=repo)
             _gp_branch = srv._sprint_branch_name(_grandparent)
             if srv._gh_branch_exists(repo, _gp_branch):
                 base = _gp_branch
@@ -830,7 +843,7 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
                             f"complete {_child_lbl} before completing base {label}"
                         ),
                     )
-                _cp_lbl = srv._sprint_merge_parent_label(project_root, _child_lbl)
+                _cp_lbl = srv._sprint_merge_parent_label(project_root, _child_lbl, project=repo)
                 _cp_br = srv._sprint_branch_name(_cp_lbl)
                 _eff_base = _cp_br if srv._gh_branch_exists(repo, _cp_br) else "develop"
                 if srv._branch_has_unmerged_commits(repo, _child_br, _eff_base):

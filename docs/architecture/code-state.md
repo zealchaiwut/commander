@@ -1,4 +1,4 @@
-# Code State — sprint-1016
+# Code State — sprint-1018.1
 
 _Deterministic snapshot generated at sprint finish. Do not hand-edit — regenerated each sprint._
 
@@ -15,43 +15,42 @@ _Deterministic snapshot generated at sprint finish. Do not hand-edit — regener
 - **`docs/`** — Project documentation
 - **`alembic/`** — Database migration scripts
 
-## Recent Deltas (sprint-1016)
+## Recent Deltas (sprint-1018.1)
 
-Files changed: **15**
+Files changed: **8**
 
-- `apps/` — 6 file(s)
-- `tests/` — 4 file(s)
-- `docs/` — 2 file(s)
-- `scripts/` — 2 file(s)
+- `tests/` — 5 file(s)
 - `(root)/` — 1 file(s)
+- `apps/` — 1 file(s)
+- `docs/` — 1 file(s)
 
 ## Hot Files (last 90 days)
 
 | File | Commits |
 |------|---------|
-| `apps/dashboard/static/project.html` | 535 |
+| `apps/dashboard/static/project.html` | 537 |
 | `apps/dashboard/server.py` | 399 |
 | `services/sprint_manager/sprint_manager.py` | 288 |
 | `apps/dashboard/static/dist/bundle.js.map` | 209 |
 | `apps/dashboard/static/dist/bundle.js` | 199 |
-| `CHANGELOG.md` | 120 |
+| `CHANGELOG.md` | 122 |
 | `apps/dashboard/static/app.js` | 106 |
 | `apps/dashboard/static/src/sprint-board/board-render.js` | 91 |
 | `apps/dashboard/static/index.html` | 75 |
-| `apps/dashboard/db.py` | 72 |
+| `apps/dashboard/db.py` | 73 |
 | `apps/dashboard/routers/__init__.py` | 52 |
 | `README.md` | 51 |
 | `apps/dashboard/static/src/sprint-board/history.js` | 48 |
-| `apps/dashboard/startup.py` | 45 |
+| `apps/dashboard/startup.py` | 46 |
 | `SCHEMA.md` | 45 |
 | `apps/dashboard/github_client.py` | 42 |
 | `apps/dashboard/static/src/sprint-board/index.js` | 40 |
 | `apps/dashboard/routers/sprint_history_service.py` | 38 |
 | `services/sprint_manager/estimate_issue.py` | 37 |
-| `docs/architecture/code-state.md` | 33 |
+| `docs/architecture/code-state.md` | 36 |
 
 ## Generated
 
-Sprint: `sprint-1016`  
-Timestamp: `2026-08-03T13:43:49Z`  
+Sprint: `sprint-1018.1`  
+Timestamp: `2026-08-04T02:06:06Z`  
 _Generated deterministically — no LLM required._

@@ -1685,6 +1685,13 @@
     .loading-msg {
       color: var(--text-sub); font-size: 13px; padding: 48px 0; text-align: center;
     }
+    .tkt-retry-btn {
+      background: none; border: 1px solid var(--border);
+      border-radius: 6px; padding: 3px 10px;
+      color: var(--text); font-size: 12px; cursor: pointer;
+      display: inline-flex; align-items: center;
+    }
+    .tkt-retry-btn:hover { border-color: var(--blue); color: var(--blue); }
 
     /* ── Sprint Mgmt sticky area (toolbar + label filters) ── */
     .smgmt-sticky-area {
@@ -2236,7 +2243,6 @@
       .hist-badge { flex-shrink: 1; flex-grow: 0; }
     }
     @media (max-width: 600px) {
-      .fbox-table th:nth-child(2), .fbox-table td:nth-child(2), .fbox-table th:nth-child(6), .fbox-table td:nth-child(6) { display: none; }
       .hist-card-mini { white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
       .hist-progress  { white-space: nowrap; max-width: 80px; overflow: hidden; text-overflow: ellipsis; }
       .hist-card-head {

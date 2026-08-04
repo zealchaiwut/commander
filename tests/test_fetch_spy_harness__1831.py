@@ -16,12 +16,6 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 _FRONTEND_TEST = _REPO_ROOT / "tests" / "frontend" / "call-budget-page-load.test.mjs"
 
 
-def _parse_tap_fail_count(output: str) -> int:
-    """Return the failure count from Node's TAP '# fail N' summary line, or 0 if absent."""
-    m = re.search(r"# fail\s+(\d+)", output)
-    return int(m.group(1)) if m else 0
-
-
 def test_call_budget_page_load_test_file_exists():
     """call-budget-page-load.test.mjs must exist in tests/frontend/."""
     assert _FRONTEND_TEST.exists(), (
@@ -72,7 +66,8 @@ def test_node_test_suite_zero_failures():
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
     output = result.stdout + result.stderr
-    failure_count = _parse_tap_fail_count(output)
+    m = re.search(r"fail\s+(\d+)", output)
+    failure_count = int(m.group(1)) if m else 0
     assert failure_count == 0, (
         f"Test suite must report 0 failures, got {failure_count}. Output:\n{output}"
     )

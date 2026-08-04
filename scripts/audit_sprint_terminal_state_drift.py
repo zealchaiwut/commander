@@ -69,6 +69,16 @@ def audit(project_filter: str = "", apply: bool = False) -> list[dict]:
         if derived == canonical:
             continue  # agrees — no drift
 
+        if canonical == "needs_rework" and derived == "ready_to_merge":
+            # Never auto-upgrade needs_rework -> ready_to_merge from issues_json
+            # alone (issue #2194) — matches the invariant in
+            # sprint_reconcile_service._outcome_reconcile_row: only the live
+            # GitHub signal (_github_reconcile_row) may confirm a sprint is
+            # actually mergeable, since issues_json/agent_status/failure_reason
+            # doesn't capture every legitimate needs_rework cause (gate
+            # failures, contamination, manual overrides, dead-lettered tickets).
+            continue
+
         entry = {
             "label": label,
             "project": project,

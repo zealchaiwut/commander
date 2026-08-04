@@ -1125,8 +1125,8 @@ def _create_sprint_lifecycle_tables(conn: sqlite3.Connection) -> None:
     conn.execute(_SPRINTS_TABLE_DDL)
     _migrate_sprints_run_artifacts(conn)
     _backfill_child_parent_labels(conn)
-    _backfill_immediate_parent_labels(conn)
     _backfill_sprint_project(conn)
+    _backfill_immediate_parent_labels(conn)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS sprint_ticket_order (
@@ -1288,8 +1288,8 @@ def _backfill_immediate_parent_labels(
         if parent_val:
             conn.execute(
                 "UPDATE sprints SET immediate_parent = ? "
-                " WHERE label = ? AND immediate_parent IS NULL",
-                (parent_val, label),
+                " WHERE label = ? AND project = ? AND immediate_parent IS NULL",
+                (parent_val, label, project),
             )
             updated += 1
         else:

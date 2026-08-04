@@ -413,6 +413,61 @@ class TestBackfillImmediateParent:
             "Warning must name the unresolvable sprint label"
         )
 
+    def test_backfill_does_not_leak_across_projects(self, isolated_db, tmp_path):
+        """issue #2192: same sprint label in two projects must not cross-contaminate.
+
+        Both rows share label 'sprint-72.1' and start with NULL immediate_parent.
+        Each project has its own plan.json with a DIFFERENT parent. The backfill's
+        UPDATE must be scoped by project — otherwise resolving project A's parent
+        first blanket-updates project B's row too (matched by label alone), and
+        project B's own (correct) resolution then becomes a no-op because its row
+        no longer satisfies 'immediate_parent IS NULL'.
+        """
+        projects_base = tmp_path / "projects_base"
+        proj_a_sprints = projects_base / "proj-a" / ".commander" / "sprints"
+        proj_b_sprints = projects_base / "proj-b" / ".commander" / "sprints"
+        proj_a_sprints.mkdir(parents=True)
+        proj_b_sprints.mkdir(parents=True)
+        (proj_a_sprints / "sprint-72.1-plan.json").write_text(
+            json.dumps({"parent": "sprint-72-A"})
+        )
+        (proj_b_sprints / "sprint-72.1-plan.json").write_text(
+            json.dumps({"parent": "sprint-72-B"})
+        )
+        projects_file = tmp_path / "projects.json"
+        projects_file.write_text(json.dumps([
+            {"repo": "owner/proj-a"},
+            {"repo": "owner/proj-b"},
+        ]))
+
+        _insert_sprint("sprint-72.1", "owner/proj-a", immediate_parent=None)
+        _insert_sprint("sprint-72.1", "owner/proj-b", immediate_parent=None)
+
+        with db.get_conn() as conn:
+            db._backfill_immediate_parent_labels(
+                conn, projects_base=projects_base, projects_file=projects_file,
+            )
+            conn.commit()
+
+        with db.get_conn() as conn:
+            row_a = conn.execute(
+                "SELECT immediate_parent FROM sprints WHERE label = ? AND project = ?",
+                ("sprint-72.1", "owner/proj-a"),
+            ).fetchone()
+            row_b = conn.execute(
+                "SELECT immediate_parent FROM sprints WHERE label = ? AND project = ?",
+                ("sprint-72.1", "owner/proj-b"),
+            ).fetchone()
+
+        assert row_a[0] == "sprint-72-A", (
+            f"project owner/proj-a must keep its own parent, got {row_a[0]!r}"
+        )
+        assert row_b[0] == "sprint-72-B", (
+            f"project owner/proj-b must keep its own parent, got {row_b[0]!r}. "
+            "A value of 'sprint-72-A' means project A's backfill leaked into "
+            "project B's row (issue #2192 — UPDATE not scoped by project)."
+        )
+
     def test_backfill_does_not_overwrite_existing(self, isolated_db):
         """Rows already having immediate_parent are left untouched."""
         sprints_dir = self._make_sprints_dir(isolated_db)

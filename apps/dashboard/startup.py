@@ -2777,8 +2777,12 @@ def _sprint_db_mark_merged_completed(
                 ended_at=extra_fields.get("ended_at"),
                 project=project or "",
             )
-        except Exception:
-            pass
+        except Exception as _rtm_exc:
+            logger.warning(
+                "_sprint_db_mark_merged_completed: record_sprint_ready_to_merge"
+                " failed for %r: %s",
+                sprint_label, _rtm_exc,
+            )
         try:
             row = db.get_sprint(sprint_label, project=project or None)
             current = db.canonical_lifecycle((row or {}).get("state") or "draft")

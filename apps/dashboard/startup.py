@@ -5156,7 +5156,7 @@ def _finish_merge_steps(project_root: Path, repo: str, label: str) -> list[dict]
     """
     base_label = _sprint_label_base(label)
     if _is_child_sprint_label(label):
-        parent_label = _sprint_merge_parent_label(project_root, label)
+        parent_label = _sprint_merge_parent_label(project_root, label, project=repo or None)
         others_unsettled = [
             c for c in _bulk_complete_unsettled_children(project_root, base_label, project=repo)
             if c != label

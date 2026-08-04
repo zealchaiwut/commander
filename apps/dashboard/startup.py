@@ -2770,14 +2770,15 @@ def _sprint_db_mark_merged_completed(
     # partial_finished is derived-only but may appear on legacy rows; treat like
     # ready_to_merge for post-merge settlement.
     if current in ("draft", "planned", "unknown", "partial_finished"):
-        _sprint_db_set_state(
-            sprint_label,
-            project,
-            "ready_to_merge",
-            actor="manager",
-            end_reason=extra_fields.get("end_reason") or "merge_sprint",
-            ended_at=extra_fields.get("ended_at"),
-        )
+        try:
+            db.record_sprint_ready_to_merge(
+                sprint_label,
+                end_reason=extra_fields.get("end_reason") or "merge_sprint",
+                ended_at=extra_fields.get("ended_at"),
+                project=project or "",
+            )
+        except Exception:
+            pass
         try:
             row = db.get_sprint(sprint_label, project=project or None)
             current = db.canonical_lifecycle((row or {}).get("state") or "draft")
@@ -4498,15 +4499,38 @@ def children_of(parent_label: str, project_root: Path | None = None, project: st
     return sorted(children, key=_sprint_label_sub_index)
 
 
-def _sprint_merge_parent_label(project_root: Path, label: str) -> str:
-    """Immediate parent for a sprint branch merge (plan.json parent, else base)."""
+def _sprint_merge_parent_label(project_root: Path, label: str, *, project: str | None = None) -> str:
+    """Immediate parent for a sprint branch merge (issue #2048).
+
+    Resolution order (ADR-4: DB is authoritative):
+    1. DB ``sprints.immediate_parent`` column.
+    2. plan.json ``parent`` field (dual-write fallback).
+    3. Base sprint label — last resort; warns loudly (data defect).
+    """
     if not _is_child_sprint_label(label):
         return _sprint_label_base(label)
+
+    # 1. DB lookup.
+    row = db.get_sprint(label, project=project or None)
+    db_parent = (row.get("immediate_parent") or "").strip() if row else ""
+    if db_parent and _SPRINT_LABEL_RE.match(db_parent):
+        return db_parent
+
+    # 2. plan.json fallback.
     plan = _read_plan_json(project_root, label)
     parent = (plan.get("parent") or "").strip() if plan else ""
     if parent and _SPRINT_LABEL_RE.match(parent):
         return parent
-    return _sprint_label_base(label)
+
+    # 3. Neither source has the immediate parent — warn loudly.
+    base = _sprint_label_base(label)
+    logging.warning(
+        "[lineage] immediate parent not found for %r in DB or plan.json — "
+        "falling back to base label %r (may bypass intermediate rerun branches). "
+        "Run _backfill_immediate_parent_labels() to repair (issue #2048).",
+        label, base,
+    )
+    return base
 
 
 _BULK_COMPLETE_CHILD_READY_STATES: frozenset[str] = frozenset({
@@ -5056,7 +5080,7 @@ def _merge_steps_for_sprint_chain(project_root: Path, repo: str, base_label: str
     base_branch = _sprint_branch_name(base_label)
     children = children_of(base_label, project_root, project=repo or None)
     for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
-        parent_label = _sprint_merge_parent_label(project_root, child_label)
+        parent_label = _sprint_merge_parent_label(project_root, child_label, project=repo or None)
         child_branch = _sprint_branch_name(child_label)
         parent_branch = _sprint_branch_name(parent_label)
         if _branch_has_unmerged_commits(repo, child_branch, parent_branch):
@@ -5096,7 +5120,7 @@ def _sprint_merge_chain_pending(project_root: Path, repo: str, base_label: str) 
     base_branch = _sprint_branch_name(base_label)
     children = children_of(base_label, project_root, project=repo or None)
     for child_label in sorted(children, key=_sprint_label_sub_index, reverse=True):
-        parent_label = _sprint_merge_parent_label(project_root, child_label)
+        parent_label = _sprint_merge_parent_label(project_root, child_label, project=repo or None)
         child_branch = _sprint_branch_name(child_label)
         parent_branch = _sprint_branch_name(parent_label)
         if _branch_has_unmerged_commits(repo, child_branch, parent_branch):
@@ -5132,16 +5156,17 @@ def _finish_merge_steps(project_root: Path, repo: str, label: str) -> list[dict]
     """
     base_label = _sprint_label_base(label)
     if _is_child_sprint_label(label):
+        parent_label = _sprint_merge_parent_label(project_root, label)
         others_unsettled = [
             c for c in _bulk_complete_unsettled_children(project_root, base_label, project=repo)
             if c != label
         ]
-        if not others_unsettled:
-            # Lineage otherwise settled — settle the whole chain to develop.
+        if not others_unsettled and parent_label == base_label:
+            # Direct child of base, lineage otherwise settled — settle the full chain to develop.
             return _merge_steps_for_sprint_chain(project_root, repo, base_label)
-        # Other children still in flight — only fold this child up to its parent.
+        # Nested child (parent is not base) or other children in flight — only fold to plan parent.
         steps: list[dict] = []
-        parent_label = _sprint_merge_parent_label(project_root, label)
+        parent_label = _sprint_merge_parent_label(project_root, label, project=repo or None)
         child_branch = _sprint_branch_name(label)
         parent_branch = _sprint_branch_name(parent_label)
         if _branch_has_unmerged_commits(repo, child_branch, parent_branch):
@@ -5316,7 +5341,7 @@ def _bulk_complete_collect_issues(repo: str, project_root: Path, base_label: str
         raise HTTPException(400, detail=f"Bulk complete requires a base sprint label, got {base_label!r}")
     # A base sprint with zero DB children is a clean, single-attempt sprint
     # (no rework ever needed) — not an error state (issue #1758).
-    child_labels = children_of(base_label, project_root)
+    child_labels = children_of(base_label, project_root, project=repo)
     all_labels = [base_label, *child_labels]
     sprint_issues: list[dict] = []
     seen_nums: set[int] = set()

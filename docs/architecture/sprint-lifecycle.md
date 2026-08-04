@@ -337,6 +337,59 @@ Sequencing to be agreed; each theme is independently shippable.
 | 1 | Lifecycle foundation — new enum in DB + legacy display mapping; derived `partial_finished`; remove all same-label re-dispatch paths | `apps/dashboard/db.py`, `server.py` dispatch routes, `static/src/sprint-board/run-controls.js` |
 | 2 | Branch/merge model — children off base; per-pass merge to active sprint branch; Merge Sprint (merge children in order → base → develop → close issues/PRs, keep labels); cancel → `needs_rework` + reason to summary issue | `services/sprint_manager/sprint_manager.py`, finish-sprint endpoint |
 | 3 | Reconciliation service — **shipped** as `routers/sprint_reconcile_service.py` + per-sprint preview/apply endpoints (`sprint_history.py`); end-of-run disk→DB ingest shipped (`db.ingest_sprint_run_artifact`). Render-time disk reads NOT fully removed — history/live/nav/home still have disk fallbacks (see `1_state-and-source-of-truth.md` §1.7) | `routers/sprint_reconcile_service.py`, `routers/sprint_history_service.py` |
+
+## Reconcile Guarantee Scope (issue #2167)
+
+`reconcile`/`reconcile-preview` (`GET /api/sprints/{label}/reconcile-preview`,
+`POST /api/sprints/{label}/reconcile`) offer **two distinct guarantees**, each
+with its own blind spot:
+
+### 1. DB-vs-GitHub consistency check (`_github_reconcile_row`)
+
+Compares the stored DB lifecycle state against GitHub's current label state
+(via `_has_rework_tickets`, mirror-backed). Catches drift caused by:
+- Labels applied/removed on GitHub without a corresponding DB write
+- Orphaned running sprints whose manager process died
+- Superseded ancestors that should be promoted to `completed`
+
+**Blind spot:** this check can only detect *inconsistency between two
+surfaces* — if DB and GitHub both agree on the same wrong value (e.g. both say
+`ready_to_merge` when tickets were dead-lettered without GitHub labels), it
+returns `would_change: false` and misses the error.
+
+### 2. Ticket-outcome validation check (`_outcome_reconcile_row`) — added #2167
+
+Recomputes what the terminal state *should* be from `issues_json` — the
+ticket-outcome snapshot stored at sprint end — by applying the same
+`_any_failed` rule used by `sprint_manager.py`:
+
+```
+any_failed = any(
+    agent_status == "failed"
+    or failure_reason
+    for ticket in issues_json
+)
+terminal_state = "needs_rework" if any_failed else "ready_to_merge"
+```
+
+Catches drift caused by:
+- Terminal-state logic changing between the sprint's run and today
+- Dead-lettered tickets (RETRY_EXHAUSTED, HANG, etc.) that skip the GitHub
+  `needs-rework` label per sprint_manager intent but still represent failed
+  work at the sprint level
+
+**Only downgrades `ready_to_merge → needs_rework`.** Does not upgrade
+`needs_rework → ready_to_merge` — that is the GitHub-signal check's job, using
+the live rework-ticket count.
+
+**Exposed in the preview response** as `outcome_mismatch: bool` and
+`outcome_derived_state: str|null` so callers can distinguish which check fired.
+
+### One-time drift audit
+
+`scripts/audit_sprint_terminal_state_drift.py` scans all tracked sprints for
+this class of drift and optionally corrects them with `--apply`. Run after
+deploying this change to repair any sprints already affected.
 | 4 | UI — board: unified badges, no cancelled/run-stats, re-run confirmation modal with ticket-move list; History: `partial_finished`, DB-only duration, auto-refresh, state-gated verbs; run-stats ✕ only on `needs_rework` | `static/src/sprint-board/board-render.js`, `rerun-modal.js`, `project.html` History section |
 
 ## Composite-Key Invariant — (label, project) scope (issue #1465)

@@ -46,7 +46,7 @@ _BACKUP_INTERVAL_SECS: int = 3600  # 1 hour
 _MIN_SIZE_RATIO: float = 0.10
 
 
-# ── Internal helpers ──────────────────────────────────────────────────────────
+# ── Internal helpers ─────────────────────────────────────────────────────────
 
 def _check_integrity(db_path: Path) -> str:
     """Run PRAGMA integrity_check on db_path.  Returns 'ok' or an error string.
@@ -86,7 +86,7 @@ def _prev_valid_backup_size(backup_dir: Path) -> Optional[int]:
     return None
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
+# ── Public API ───────────────────────────────────────────────────────────────
 
 def backup_db_local(
     db_path: Path,
@@ -115,12 +115,14 @@ def backup_db_local(
             "— existing rotation is untouched",
             src_status,
         )
-        raise RuntimeError(f"backup refused: source DB is corrupt ({src_status})")
+        raise RuntimeError(
+            f"backup refused: source DB is corrupt ({src_status})"
+        )
 
     # ── Size reference for ratio guard ───────────────────────────────────────
     prev_size = _prev_valid_backup_size(backup_dir)
 
-    # ── Write backup via SQLite online-backup API ─────────────────────────────
+    # ── Write backup via SQLite online-backup API ────────────────────────────
     backup_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
     dest = backup_dir / f"{db_path.name}.{ts}.bak"
@@ -171,15 +173,15 @@ def backup_db_local(
             except OSError:
                 pass
             _logger.critical(
-                "BACKUP DISCARDED — result (%d B) is < %.0f %% of the previous "
-                "good backup (%d B) — existing rotation is untouched",
+                "BACKUP DISCARDED — result (%d B) is < %.0f %% of the "
+                "previous good backup (%d B) — rotation untouched",
                 dest_size,
                 _MIN_SIZE_RATIO * 100,
                 prev_size,
             )
             raise RuntimeError(
-                f"backup refused: result ({dest_size} B) is drastically smaller "
-                f"than the previous good backup ({prev_size} B)"
+                f"backup refused: result ({dest_size} B) is drastically "
+                f"smaller than the previous good backup ({prev_size} B)"
             )
 
     # ── AC2: post-write verification ─────────────────────────────────────────
@@ -195,12 +197,15 @@ def backup_db_local(
             copy_status,
         )
         raise RuntimeError(
-            f"backup refused: backup copy failed integrity_check ({copy_status})"
+            "backup refused: backup copy failed integrity_check "
+            f"({copy_status})"
         )
 
     # ── AC4: prune only after a verified backup is written ───────────────────
     _prune_backups(backup_dir, n_keep)
-    _logger.info("local backup written and verified: %s (%d B)", dest, dest_size)
+    _logger.info(
+        "local backup written and verified: %s (%d B)", dest, dest_size
+    )
     return dest
 
 
@@ -229,7 +234,7 @@ def _prune_backups(backup_dir: Path, n_keep: int) -> None:
 
 
 def list_local_backups(backup_dir: Path) -> list[Path]:
-    """Return .bak files in backup_dir sorted newest-first. Returns [] if dir missing."""
+    """Return .bak files in backup_dir newest-first; [] if dir missing."""
     if not backup_dir.exists():
         return []
     return sorted(backup_dir.glob("*.bak"), key=lambda p: p.name, reverse=True)
@@ -245,10 +250,24 @@ def _run_local_backup_in_thread() -> None:
             try:
                 dest = backup_db_local(db_path, backup_dir)
                 _logger.info("local backup written: %s", dest)
+                # Drive WAL checkpointing so the WAL file does not grow
+                # unboundedly; pairs with the backup tick (issue #2013).
+                try:
+                    import db as _db_mod  # noqa: PLC0415 — lazy import
+                    busy, log, ckpt = _db_mod.run_wal_checkpoint(db_path)
+                    _logger.debug(
+                        "WAL checkpoint after backup: "
+                        "busy=%d log=%d checkpointed=%d",
+                        busy, log, ckpt,
+                    )
+                except Exception:
+                    _logger.warning(
+                        "WAL checkpoint failed (non-fatal)", exc_info=True
+                    )
             except RuntimeError as exc:
                 # backup_db_local raises RuntimeError for validated refusals
-                # (corrupt source, 0-byte result, failed copy verify).  The
-                # root cause is already logged at CRITICAL inside backup_db_local.
+                # (corrupt source, 0-byte result, failed copy verify).
+                # Root cause logged at CRITICAL inside backup_db_local.
                 _logger.warning(
                     "local backup refused — existing rotation intact: %s", exc
                 )
@@ -266,13 +285,13 @@ def _schedule_next() -> None:
 
 
 def start_local_backup_scheduler() -> None:
-    """Register the hourly local backup timer.  Call once at server startup.  Idempotent.
+    """Register hourly local backup timer.  Call once at startup.  Idempotent.
 
-    Also registers the backup directory with db.py so that _startup_integrity_check
-    can name a VERIFIED backup in its restore hint rather than merely the newest
-    file by mtime (issue #2036).  Mirrors what the dead duplicate in
-    services/sprint_manager/backup.py already does via db.set_local_backup_dir(),
-    but for the LIVE scheduler path.
+    Also registers the backup directory with db.py so that
+    _startup_integrity_check can name a VERIFIED backup in its restore hint
+    rather than merely the newest file by mtime (issue #2036).  Mirrors what
+    the dead duplicate in services/sprint_manager/backup.py does via
+    db.set_local_backup_dir(), but for the LIVE scheduler path.
     """
     global _local_scheduler_started
     if _local_scheduler_started:
@@ -285,7 +304,7 @@ def start_local_backup_scheduler() -> None:
     if db_path_str:
         _backup_dir = Path(db_path_str).parent / ".commander" / "db-backups"
         try:
-            import db as _db_mod  # noqa: PLC0415 — lazy to avoid circular import at module load
+            import db as _db_mod  # noqa: PLC0415 — lazy import
             _db_mod.set_local_backup_dir(_backup_dir)
         except Exception:
             _logger.warning(

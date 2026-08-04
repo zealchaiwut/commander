@@ -641,14 +641,25 @@ async def run_issues_sync_loop(
                         _inv(repo)
                     except Exception as _exc:
                         logger.warning("board invalidation failed for %s: %s", repo, _exc)
-            except Exception as exc:  # never let the background task die
+            except Exception as exc:
+                # Disk I/O error means DB corruption — run integrity_check, log
+                # CRITICAL with restore hint, and abort the loop so the server
+                # does not 500-loop indefinitely (issue #2012).
+                _db = db_module
+                if _db is None:
+                    import db as _db  # type: ignore[assignment]  # noqa: PLC0415
+                _db.handle_runtime_disk_io_error(exc)  # no-op for non-disk-IO; raises for disk-IO
                 logger.warning("issues mirror sync error for %s: %s", repo, exc)
             # Milestones mirror (issue #877): kept fresh on the same sweep so the
             # GET milestones endpoint serves from the local DB at zero quota.
             try:
                 import github_milestones
                 github_milestones.sync_milestones_mirror(repo, db_module=db_module)
-            except Exception as exc:  # never let the background task die
+            except Exception as exc:
+                _db = db_module
+                if _db is None:
+                    import db as _db  # type: ignore[assignment]  # noqa: PLC0415
+                _db.handle_runtime_disk_io_error(exc)  # abort on disk I/O (issue #2012)
                 logger.warning("milestones mirror sync error for %s: %s", repo, exc)
             # Open-set reconcile (#756): periodic safety net that closes mirror
             # rows the incremental poll missed closing — runs every Nth sweep so
@@ -657,6 +668,10 @@ async def run_issues_sync_loop(
                 try:
                     reconcile_closed_issues(repo, db_module=db_module)
                 except Exception as exc:
+                    _db = db_module
+                    if _db is None:
+                        import db as _db  # type: ignore[assignment]  # noqa: PLC0415
+                    _db.handle_runtime_disk_io_error(exc)  # abort on disk I/O (issue #2012)
                     logger.warning("issues mirror reconcile error for %s: %s", repo, exc)
         count += 1
         if iterations is not None and count >= iterations:

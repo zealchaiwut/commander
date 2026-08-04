@@ -516,12 +516,25 @@ def _plan_has_parent(label: str, cfg: Optional["SprintConfig"] = None) -> bool:
 
 
 def _immediate_parent_branch(label: str, cfg: Optional["SprintConfig"] = None) -> str:
-    """Branch a child sprint promotes into at run-end: its plan.json ``parent``
-    (the immediate parent in the rerun chain, e.g. 94.2 → 94.1), falling back to
-    the base sprint branch when no parent is recorded. This keeps the run-end PR
-    on the SAME immediate-parent chain that Complete / Bulk complete merge, so
-    they reuse one PR instead of creating a conflicting child→base fan-in PR.
+    """Branch a child sprint promotes into at run-end (issue #2048).
+
+    Resolution order (ADR-4: DB is authoritative):
+    1. DB ``sprints.immediate_parent`` column — canonical store.
+    2. plan.json ``parent`` field — dual-write fallback during backfill gap.
+    3. Base sprint branch — last resort; warns loudly (data defect).
     """
+    # 1. DB lookup (best-effort — DB may not be reachable from sprint_manager).
+    try:
+        import db  # apps/dashboard on sys.path (line 142)
+        project = (cfg.repo_name or "") if cfg else ""
+        row = db.get_sprint(label, project=project or None)
+        db_parent = (row.get("immediate_parent") or "").strip() if row else ""
+        if db_parent and re.match(r"^sprint-\d+(\.\d+)*$", db_parent):
+            return f"sprint/{db_parent}"
+    except (Exception, SystemExit):
+        pass
+
+    # 2. plan.json fallback (dual-write, used during backfill gap).
     path = _plan_json_path(label, cfg)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -530,7 +543,21 @@ def _immediate_parent_branch(label: str, cfg: Optional["SprintConfig"] = None) -
             return f"sprint/{parent}"
     except Exception:
         pass
-    return _base_sprint_branch(label)
+
+    # 3. Neither DB nor plan.json has the immediate parent — warn loudly.
+    base = _base_sprint_branch(label)
+    structured_log.warn(
+        "immediate_parent_missing",
+        f"[lineage] immediate parent not found for {label!r} in DB or plan.json — "
+        f"falling back to base branch {base!r} (may bypass intermediate rerun branches). "
+        "Run _backfill_immediate_parent_labels() to repair (issue #2048).",
+        label=label,
+    )
+    sys.stdout.write(
+        f"⚠️  [lineage] WARNING: immediate_parent missing for {label!r}; "
+        f"falling back to {base!r}. This is a data defect — run backfill to repair.\n"
+    )
+    return base
 
 
 def _plan_json_set_state_sm(

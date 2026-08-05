@@ -484,7 +484,19 @@ def _lifecycle_display_state(lifecycle: str, end_reason: str | None, issues: lis
     """Correct mis-tagged terminal rows before History renders them (issue #1137)."""
     if lifecycle in ("completed", "deleted"):
         return lifecycle
-    if lifecycle in ("needs_rework", "failed") and _issues_all_shipped(issues):
+    # "ticket-failures" is the sprint manager's own explicit classification —
+    # a real gate failure/exhausted fix-loop occurred, even if the ticket's
+    # work eventually merged. Do not let "all issues show merged/completed"
+    # silently discard that (issue #2199, perf-coach sprint-121 — end_reason
+    # was "ticket-failures" but every ticket had eventually merged). This
+    # promotion stays for every other end_reason (the case it was added for,
+    # issue #1137/perf-coach sprint-83, whose end_reason was never
+    # "ticket-failures").
+    if (
+        lifecycle in ("needs_rework", "failed")
+        and (end_reason or "") != "ticket-failures"
+        and _issues_all_shipped(issues)
+    ):
         return "ready_to_merge"
     if lifecycle != "needs_rework" or (end_reason or "") != "natural":
         return lifecycle
@@ -504,10 +516,18 @@ def _clear_stale_failure_signals(rec: dict) -> None:
     st = (rec.get("lifecycle_state") or "").lower()
     if st in ("completed", "deleted"):
         return
-    if (rec.get("end_reason") or "").strip() == "bulk_complete":
+    end_reason = (rec.get("end_reason") or "").strip()
+    if end_reason == "bulk_complete":
         return
     issues = rec.get("issues") or []
     if not _issues_all_shipped(issues):
+        return
+    # See _lifecycle_display_state (issue #2199): "ticket-failures" is the
+    # sprint manager's own explicit failure classification and must survive
+    # here too — this function runs last, in _finalize_lineage, and would
+    # otherwise silently re-clear it right after _lifecycle_display_state
+    # correctly kept it.
+    if end_reason == "ticket-failures" and st in ("needs_rework", "failed"):
         return
     rec["failed_tickets"] = []
     rec["failure_reason"] = None

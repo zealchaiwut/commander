@@ -43,7 +43,7 @@ def _uat_server_reachable() -> bool:
 # Modules that require a live UAT server — skipped when server is not reachable.
 _LIVE_SERVER_TEST_MODULES = frozenset({
     "test_projbyslug_population__1978",
-    "test_bulk_move_new_sprint_clear_selection__1760",
+    "test_bulk_move_new_sprint_clear_selection__1760",  # no self-skip: BASE_URL fallback "http://localhost:" passes startswith("http"), so tests fail with httpx.ConnectError without this guard
     "test_create_ticket_json__2070",
     "test_dev_report_api__1960",
 })

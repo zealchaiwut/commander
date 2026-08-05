@@ -53,6 +53,7 @@ review, health gating, and promotion.
 - `finish_feature.py` [GH] — merge feature branch to target branch after tests pass; `--issue N [--repo owner/repo] [--target-branch BRANCH]` (Tester-only)
 - `sprint_estimator.py` — estimate effort/risk for all backlog tickets in a sprint (Sonnet); `<sprint-label> [--repo owner/repo] [--config PATH]`
 - `sprint_review.py` — generate sprint review summary (Haiku); `--sprint-label LABEL [--repo owner/repo]`
+- `run_post_sprint.py` — run post-sprint write-back steps (documenter, review) for a manually-driven sprint; `--sprint-label LABEL [--repo owner/repo] [--dry-run] [--skip-documenter] [--skip-review]`
 - `sprint_planner.py` [GH] — conversational CLI to plan the next sprint; (interactive, auto-detects sprint number)
 - `sprint_init.py` — bootstrap a project for sprint_manager (.commander/sprint.yaml); `--repo owner/repo --repo-root PATH --coder-worktree PATH --tester-worktree PATH`
 - `run_suite_health_gate.py` — run full pytest suite health gate for a sprint; `--sprint-label LABEL [--sprints-dir PATH] [--timeout SECONDS]`
@@ -106,6 +107,7 @@ Scripts for repair, backfill, calibration, migration, cleanup, and diagnostics.
 - `backfill_agent_runs_project.py` [DB] — attribute empty agent_runs.project rows; `(--dry-run|--apply) [--db PATH]`
 - `backfill_sprint_project.py` [DB] — attribute empty sprints.project rows; `(--dry-run|--apply) [--db PATH]`
 - `audit_sprint_collisions.py` — read-only audit for sprint label collisions across projects; `[--db PATH] [--runtime-dir PATH]`
+- `audit_sprint_terminal_state_drift.py` [DB] — one-time audit (and optional repair) for terminal state drift: stored state vs what `_any_failed` would derive from issues_json; `[--db PATH] [--project OWNER/REPO] [--apply]`
 - `repair_sprint_collisions.py` [DB] — surgical DB repair for cross-project sprint label collision; `(--dry-run|--apply)`
 - `repair_sprint_inbox_from_github.py` [DB] — fix stale sprint lifecycle rows vs GitHub truth; `--project PROJECT (--dry-run|--apply) [--limit N]`
 - `repair_sprint_lineage.py` [DB] — rebuild sprint lineage DB rows from GitHub truth; `(--dry-run|--apply) --project PROJECT [--db PATH]`

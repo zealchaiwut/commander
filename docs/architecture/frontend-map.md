@@ -19,18 +19,20 @@ Top-level tabs (each is a `switchTab('<id>')` target):
   - sub-view `history` — finished-sprint history
 - **`tickets`** — single ticket create/draft
 - **`bulk-create`** — bulk ticket draft → review → post pipeline
-- **`logs`** — Logs & Activity
-  - sub-views: `timeline`, `issues`, `raw`, `activity`, `search`
+- **`failures`** — Failures inbox: normalized view of failed tickets/agents (added #2019/#2020)
+- **`brain`** — Brain: FTS5 doc search + pre-built panels (added #2028)
 - **`deploy`** — Deploy & environments
-- **`metrics`** — Metrics / Analytics
-  - sub-views (`anlShowTab`): `calibration`, `metrics`, `status`, `trends`
 - **`settings`** — Settings & sync
+
+> **Deleted tabs (removed 2026-07-30 by #2024/#2025):** `logs` (Logs & Activity)
+> and `metrics` (Metrics / Analytics) were removed from the top nav; their backend
+> routes remain in `routers/logs.py`, `routers/analytics.py` etc. and redirect
+> legacy deep-links to the Failures inbox (see `routers/pages.py`).
 
 Modals / overlays (not tabs, but distinct views):
 
 - **Add Project modal** (`apmSwitchTab`): `init`, `add`
-- **Notes editor** (`_ntBodyTab`): `write`, `preview`
-- **Live View** — sprint live stream panel (opened from the board / logs)
+- **Live View** — sprint live stream panel (opened from the board)
 
 Page shell (loaded on every view, before any tab is shown): version banner,
 GitHub-auth indicator, and the project header.
@@ -65,31 +67,23 @@ Every view above, with the endpoints it calls. Paths use `:var` for path params.
 |------|-----------|
 | `bulk-create` | `POST /api/tickets/bulk`, `GET /api/tickets/bulk/:job_id`, `GET /api/tickets/bulk/:job_id/stream` (SSE), `POST /api/tickets/bulk/:job_id/estimate-draft`, `POST /api/tickets/bulk/:job_id/redraft`, `POST /api/tickets/bulk/:job_id/retry`, `POST /api/tickets/bulk/:job_id/retry-all`, `POST /api/tickets/bulk/:job_id/retry-with-body`, `POST /api/tickets/bulk/:job_id/retry-with-image`, `POST /api/tickets/bulk/:job_id/skip`, `POST /api/tickets/bulk/:job_id/stop`, `POST /api/tickets/bulk/:job_id/post-selected`, `POST /api/tickets/bulk/:job_id/size-remedy-comment`, `POST /api/tickets/bulk/:job_id/size-remedy-images`, `DELETE /api/tickets/bulk/:job_id` |
 
-### `logs`
+### `failures`
 
 | View | API calls |
 |------|-----------|
-| `logs` › `timeline` | `GET /api/logs/runs`, `GET /api/sprints/:label/dispatch-log` |
-| `logs` › `issues` | `GET /api/sprints/:label/issue/:issue_num/log`, `GET /api/sprints/:label/state-full` |
-| `logs` › `raw` | `GET /api/sprints/:label/dispatch-log` |
-| `logs` › `activity` | `GET /api/projects/:slug/events`, `GET /api/events` |
-| `logs` › `search` | `GET /api/logs/search`, `POST /api/logs/sync-github` |
-| `logs` › Live View | `GET /api/sprints/:label/live`, `GET /api/sprints/:label/live/stream` (SSE) |
+| `failures` | `GET /api/failures?project=:slug[&since=…][&category=…]` |
+
+### `brain`
+
+| View | API calls |
+|------|-----------|
+| `brain` | `GET /api/brain/search?q=:query[&project=:slug]`, `GET /api/brain/panels?project=:slug` |
 
 ### `deploy`
 
 | View | API calls |
 |------|-----------|
 | `deploy` | `GET /api/deploy/overview`, `GET /api/projects/:slug/environments`, `GET /api/projects/:slug/environments/:env/run-state`, `GET /api/projects/:slug/environments/:env/deploy-status`, `POST /api/projects/:slug/environments/:env/deploy`, `POST /api/projects/:slug/environments/:env/restart`, `POST /api/projects/:slug/environments/:env/stop`, `POST /api/projects/:slug/environments/:env/start`, `POST /api/deploy/promote` |
-
-### `metrics`
-
-| View | API calls |
-|------|-----------|
-| `metrics` › `metrics` | `GET /api/metrics/sprints`, `GET /api/projects/:slug/analytics/metrics` |
-| `metrics` › `calibration` | `GET /api/calibration`, `GET /api/projects/:slug/analytics/calibration`, `POST /api/maintenance/calibration/rebuild` (stale-cache Rebuild link) |
-| `metrics` › `status` | `GET /api/sprint-status`, `POST /api/sprint-status` |
-| `metrics` › `trends` | `GET /api/sprints/:label/estimate-vs-actual`, `GET /api/sprints/:label/outcome`, `GET /api/estimates/batch` |
 
 ### `settings`
 

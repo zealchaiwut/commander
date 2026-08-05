@@ -22,6 +22,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -248,7 +249,7 @@ def build_commander_report(
             "run_id": <str>,
             "trigger": {"by": <str>, "confirmed_at": <ISO-8601>, "mode": <str>},
             "branch": <str>,
-            "summary": {"attempted": <int>, "completed": <int>, "failed": <int>, "skipped": <int>},
+            "summary": {"attempted": <int>, "completed": <int>, "failed": <int>, "skipped": <int>, "needs_review": <int>},
             "completed": [{"ticket_id", "title", "commits", "tests", "merged_to", "pr_url"}],
             "needs_review": [{"ticket_id", "title", "commits", "tests"}],
             "dead_letter": [{"ticket_id", "title", "attempts", "last_error"}],
@@ -268,7 +269,7 @@ def build_commander_report(
     issues = state_data.get("issues") or []
     completed_list: list = []
     needs_review_list: list = []
-    dead_letter_list: list = []
+    _status_dead_letter_list: list = []
     n_completed = n_failed = n_skipped = 0
 
     for iss in issues:
@@ -281,14 +282,14 @@ def build_commander_report(
             completed_list.append({
                 "ticket_id": ticket_id,
                 "title": title,
-                "commits": [],
-                "tests": [],
+                "commits": list(iss.get("feature_commits") or []),
+                "tests": list(iss.get("tester_test_files") or []),
                 "merged_to": f"sprint/{sprint_label}",
                 "pr_url": str(iss.get("pr_url") or ""),
             })
         elif status in ("failed", "error"):
             n_failed += 1
-            dead_letter_list.append({
+            _status_dead_letter_list.append({
                 "ticket_id": ticket_id,
                 "title": title,
                 "attempts": int(iss.get("tester_attempt_count") or 1),
@@ -300,10 +301,19 @@ def build_commander_report(
             needs_review_list.append({
                 "ticket_id": ticket_id,
                 "title": title,
-                "commits": [],
-                "tests": [],
+                "commits": list(iss.get("feature_commits") or []),
+                "tests": list(iss.get("tester_test_files") or []),
             })
         # pending / queued / other statuses are not yet attempted — excluded from counts
+
+    # Use persisted dead_letter registry (#1942) as source of truth when available;
+    # fall back to status-derived reconstruction only when the field is absent or empty.
+    _persisted_dead_letter = state_data.get("dead_letter")
+    dead_letter_list: list = (
+        list(_persisted_dead_letter)
+        if _persisted_dead_letter
+        else _status_dead_letter_list
+    )
 
     n_attempted = n_completed + n_failed + n_skipped + len(needs_review_list)
 
@@ -321,7 +331,7 @@ def build_commander_report(
     ]
 
     return {
-        "run_id": confirmed_at,
+        "run_id": str(uuid.uuid4()),
         "triggered_by": _triggered_by,
         "trigger": {
             "by": _triggered_by or "sprint_manager",
@@ -334,6 +344,7 @@ def build_commander_report(
             "completed": n_completed,
             "failed": n_failed,
             "skipped": n_skipped,
+            "needs_review": len(needs_review_list),
         },
         "completed": completed_list,
         "needs_review": needs_review_list,
@@ -471,7 +482,7 @@ def _monitor_worker(
     except Exception as exc:
         logger.warning("sprint webhook: failed to build payload for %s: %s", sprint_label, exc)
         payload = {
-            "run_id": started_at or sprint_label,
+            "run_id": str(uuid.uuid4()),
             "trigger": {"by": "sprint_manager", "confirmed_at": started_at or "", "mode": "auto"},
             "branch": f"sprint/{sprint_label}",
             "summary": {"attempted": 0, "completed": 0, "failed": 0, "skipped": 0},

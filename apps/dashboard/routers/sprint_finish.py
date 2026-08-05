@@ -234,6 +234,10 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
 
     all_labels, sprint_issues = srv._bulk_complete_collect_issues(repo, project_root, base_label)
 
+    # A base sprint with zero DB children is a clean, single-attempt sprint
+    # (no rework ever needed) — not an error state (issue #1758). Do not
+    # reject here; all_labels == [base_label] is handled fine below.
+
     unsettled_children = srv._bulk_complete_unsettled_children(project_root, base_label, project=repo)
     children_all_completed = not unsettled_children
     if not children_all_completed:
@@ -271,7 +275,7 @@ def get_sprint_bulk_complete_preview(owner: str, repo_name: str, label: str):
             parent = "develop"
             parent_branch = "develop"
         else:
-            parent = srv._sprint_merge_parent_label(project_root, lbl)
+            parent = srv._sprint_merge_parent_label(project_root, lbl, project=repo)
             parent_branch = srv._sprint_branch_name(parent)
         branch = srv._sprint_branch_name(lbl)
         completed = False
@@ -780,9 +784,74 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
         base = "develop"
         target_name = "develop"
     else:
-        parent_label = srv._sprint_merge_parent_label(project_root, label)
+        parent_label = srv._sprint_merge_parent_label(project_root, label, project=repo)
         base = srv._sprint_branch_name(parent_label)
         target_name = parent_label
+
+    # AC1 (issue #1934): when the immediate parent branch has been deleted (merged
+    # and pruned), _branch_has_unmerged_commits returns False for the missing base,
+    # producing a silent no-op while the child's commits remain stranded.  Walk up
+    # the lineage to find the next surviving ancestor branch and retarget there.
+    if not is_base and srv._gh_branch_exists(repo, head) and not srv._gh_branch_exists(repo, base):
+        _current = parent_label
+        _visited: set[str] = set()
+        _MAX_LINEAGE_DEPTH = 50
+        while True:
+            if _current in _visited or len(_visited) >= _MAX_LINEAGE_DEPTH:
+                raise HTTPException(
+                    409,
+                    detail=(
+                        f"Sprint lineage is self-referential or too deep (depth {len(_visited)}, "
+                        f"stopped at {_current!r}). The ancestry chain from {parent_label!r} "
+                        "did not converge to a base sprint within the allowed depth. "
+                        "Inspect and repair the sprint lineage manually."
+                    ),
+                )
+            _visited.add(_current)
+            if not srv._is_child_sprint_label(_current):
+                # _current is the base sprint label — check its branch
+                _base_sprint_br = srv._sprint_branch_name(_current)
+                if srv._gh_branch_exists(repo, _base_sprint_br):
+                    base = _base_sprint_br
+                    target_name = _current
+                else:
+                    base = "develop"
+                    target_name = "develop"
+                break
+            _grandparent = srv._sprint_merge_parent_label(project_root, _current, project=repo)
+            _gp_branch = srv._sprint_branch_name(_grandparent)
+            if srv._gh_branch_exists(repo, _gp_branch):
+                base = _gp_branch
+                target_name = _grandparent
+                break
+            _current = _grandparent
+
+    # AC2 (issue #1934): refuse the base complete-step while any child sprint
+    # still has a live branch (running or with unmerged commits).  A deleted child
+    # branch means its work already merged up; a live branch means it has not.
+    if is_base:
+        for _child_lbl in srv.children_of(label, project_root, project=repo):
+            _child_br = srv._sprint_branch_name(_child_lbl)
+            if srv._gh_branch_exists(repo, _child_br):
+                if srv._is_sprint_running(project_root, _child_lbl):
+                    raise HTTPException(
+                        409,
+                        detail=(
+                            f"Child sprint {_child_lbl} is still running — "
+                            f"complete {_child_lbl} before completing base {label}"
+                        ),
+                    )
+                _cp_lbl = srv._sprint_merge_parent_label(project_root, _child_lbl, project=repo)
+                _cp_br = srv._sprint_branch_name(_cp_lbl)
+                _eff_base = _cp_br if srv._gh_branch_exists(repo, _cp_br) else "develop"
+                if srv._branch_has_unmerged_commits(repo, _child_br, _eff_base):
+                    raise HTTPException(
+                        409,
+                        detail=(
+                            f"Child sprint {_child_lbl} has unmerged commits on "
+                            f"{_child_br} — run complete-step on {_child_lbl} first"
+                        ),
+                    )
 
     # 1) Merge this step (skip if already merged). Conflict → 409, stop & resume.
     merged = False
@@ -842,7 +911,17 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
     if is_base:
         try:
             _labels, sprint_issues = srv._bulk_complete_collect_issues(repo, project_root, label)
+            # AC3 (issue #1934): skip tickets whose sprint label belongs to a child
+            # with a live branch (commits not yet in develop).  Defense-in-depth:
+            # AC2 normally prevents reaching here when children are unmerged.
+            _unmerged_child_labels: set[str] = {
+                cl for cl in srv.children_of(label, project_root, project=repo)
+                if srv._gh_branch_exists(repo, srv._sprint_branch_name(cl))
+            }
             for iss in sprint_issues:
+                _iss_label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+                if _unmerged_child_labels & _iss_label_names:
+                    continue
                 try:
                     srv.github_client.close_issue(iss["number"], repo_name=repo, reason="completed")
                     closed_tickets.append(iss["number"])

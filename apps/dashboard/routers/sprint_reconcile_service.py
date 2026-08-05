@@ -259,6 +259,58 @@ def _issues_from_agent_runs(label: str, project: str = "") -> list[dict]:
     return result
 
 
+def _derive_terminal_state_from_issues_json(issues_json_str: str) -> str | None:
+    """Apply the _any_failed rule to stored issues_json.
+
+    Mirrors sprint_manager.py's terminal-state classification:
+      any_failed = any(
+          agent_status == "failed"
+          or failure_reason
+          or (status == "skipped" and category)
+          for iss in issues
+      )
+    In issues_json, category is not stored, but failure_reason is always set
+    alongside category, so checking agent_status and failure_reason is equivalent.
+
+    Returns 'needs_rework' or 'ready_to_merge', or None when issues_json is empty.
+    """
+    try:
+        issues = json.loads(issues_json_str or "[]")
+    except (ValueError, TypeError):
+        return None
+    if not issues:
+        return None
+    any_failed = any(
+        (iss.get("agent_status") or "").lower() == "failed"
+        or bool(iss.get("failure_reason"))
+        for iss in issues
+    )
+    return "needs_rework" if any_failed else "ready_to_merge"
+
+
+def _outcome_reconcile_row(row: dict) -> dict | None:
+    """Return a patch when issues_json ticket outcomes contradict the stored terminal state.
+
+    Only downgrades ready_to_merge → needs_rework (the misclassification class
+    from issue #2167: dead-lettered tickets that lacked GitHub needs-rework labels
+    were invisible to the GitHub-signal check but are visible in issues_json).
+    Never upgrades needs_rework → ready_to_merge — that is _github_reconcile_row's
+    job, using the live GitHub signal.
+    """
+    stored = row.get("state") or ""
+    canonical = _db().canonical_lifecycle(stored)
+    if canonical != "ready_to_merge":
+        return None
+    derived = _derive_terminal_state_from_issues_json(row.get("issues_json") or "[]")
+    if derived == "needs_rework":
+        return {
+            "state": "needs_rework",
+            "end_reason": row.get("end_reason") or "outcome-reclassification",
+            "_outcome_reason": "outcome-reclassification",
+        }
+    return None
+
+
 def _reconcile_counts(label: str, row: dict, project: str = "") -> bool:
     """Re-derive issues_json and count columns from agent_runs for a terminal sprint.
 
@@ -383,8 +435,12 @@ def reconcile_sprint_label(label: str, project: str) -> bool:
         return False
     _eff_project = project or row.get("project") or ""
     patch = _github_reconcile_row(label, _eff_project, row)
+    # Additive: ticket-outcome check catches dead-lettered failures that the
+    # GitHub-label check misses (no needs-rework label on the ticket itself).
+    outcome_patch = _outcome_reconcile_row(row)
+    effective_patch = patch or outcome_patch
     lifecycle_updated = False
-    if patch:
+    if effective_patch:
         # Issue #1697: a confirmed-orphan running sprint settles via
         # running->{ready_to_merge,needs_rework}, which db.py's edge guard
         # only allows for actor="manager" (running->terminal is otherwise
@@ -402,13 +458,13 @@ def reconcile_sprint_label(label: str, project: str) -> bool:
         _state_before = row.get("state") or ""
         lifecycle_updated = transition_sprint_state(
             label,
-            patch["state"],
+            effective_patch["state"],
             actor=_actor,
-            end_reason=patch.get("end_reason"),
+            end_reason=effective_patch.get("end_reason"),
             project=_eff_project,
-            ended_at=patch.get("ended_at"),
+            ended_at=effective_patch.get("ended_at"),
         )
-        if lifecycle_updated and patch["state"] == "completed":
+        if lifecycle_updated and effective_patch["state"] == "completed":
             # Audit trail for sweep-driven completion of a superseded ancestor —
             # the silent, event-less lifecycle rewrite was half the hermes
             # zombie-lineage bug. Writer-side only: reconcile_preview calls
@@ -422,7 +478,7 @@ def reconcile_sprint_label(label: str, project: str) -> bool:
                     target=label,
                     detail={
                         "from_state": _state_before,
-                        "end_reason": patch.get("end_reason"),
+                        "end_reason": effective_patch.get("end_reason"),
                         "trigger": "reconcile_sweep",
                     },
                     action_id=str(uuid.uuid4()),
@@ -858,7 +914,9 @@ def reconcile_preview(label: str, project: str) -> dict:
     eff_project = project or row.get("project") or ""
     db_state = db.canonical_lifecycle(row.get("state") or "")
     patch = _github_reconcile_row(label, eff_project, row)  # no write
-    proposed_state = patch["state"] if patch else db_state
+    outcome_patch = _outcome_reconcile_row(row)             # no write
+    effective_patch = patch or outcome_patch
+    proposed_state = effective_patch["state"] if effective_patch else db_state
 
     checks: list[dict] = []
     all_clear: bool | None = None
@@ -888,8 +946,12 @@ def reconcile_preview(label: str, project: str) -> dict:
         "project": eff_project,
         "db_state": db_state,
         "github_state": proposed_state,
-        "would_change": bool(patch),
-        "reason": (patch or {}).get("end_reason"),
+        "would_change": bool(effective_patch),
+        "reason": (effective_patch or {}).get("end_reason"),
+        "outcome_mismatch": outcome_patch is not None,
+        "outcome_derived_state": _derive_terminal_state_from_issues_json(
+            row.get("issues_json") or "[]"
+        ),
         "checks": checks,
         "all_clear": all_clear,
     }

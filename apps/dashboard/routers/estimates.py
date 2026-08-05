@@ -399,10 +399,14 @@ def _outcome_from_ingested_row(
     except Exception:
         pass
 
+    # "ticket-failures" is the sprint manager's own explicit failure
+    # classification -- do not let "no open GitHub ticket" (has_rework=False)
+    # silently discard it just because the ticket's work eventually merged
+    # after exhausting its fix-loop (issue #2200, same pattern as #2197/#2199).
     if is_cancelled:
         pane_state = "cancelled"
         sprint_status = "stopped"
-    elif _has_rework_tickets(sprint_label, project):
+    elif _has_rework_tickets(sprint_label, project) or (end_reason or "") == "ticket-failures":
         pane_state = "has_rework"
         sprint_status = "stopped"
     else:
@@ -831,12 +835,17 @@ def get_sprint_outcome(sprint_label: str, project: str):
     if sprint_status is None:
         raise HTTPException(404, detail=f"Cannot determine outcome for {sprint_label!r}")
 
-    # Derive 4-state outcome for pane coloring
+    # Derive 4-state outcome for pane coloring.
+    # "ticket-failures" is the sprint manager's own explicit failure
+    # classification -- do not let "no open GitHub ticket" (has_rework=False)
+    # silently discard it just because the ticket's work eventually merged
+    # after exhausting its fix-loop (issue #2200, same pattern as #2197/#2199).
+    _outcome_end_reason = (ingested or {}).get("end_reason") or sprint_json.get("end_reason")
     if plan_state == "needs_rework":
         pane_state = "has_rework"
     elif is_cancelled:
         pane_state = "cancelled"
-    elif _has_rework_tickets(sprint_label, project):
+    elif _has_rework_tickets(sprint_label, project) or _outcome_end_reason == "ticket-failures":
         pane_state = "has_rework"
     else:
         pane_state = "completed"

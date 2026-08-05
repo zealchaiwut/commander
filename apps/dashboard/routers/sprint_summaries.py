@@ -553,9 +553,16 @@ def get_sprint_summaries(project: str):
                         pass
                     break
 
+            # "ticket-failures" is the sprint manager's own explicit failure
+            # classification -- do not let "no open GitHub ticket"
+            # (has_rework=False) silently discard it just because the
+            # ticket's work eventually merged after exhausting its fix-loop
+            # (issue #2200, same pattern as #2197/#2199).
+            _summ_row = db.get_sprint(sprint_label, project=project or None)
+            _summ_end_reason = (_summ_row or {}).get("end_reason")
             if is_cancelled:
                 outcome = "cancelled"
-            elif srv._has_rework_tickets(sprint_label, project):
+            elif srv._has_rework_tickets(sprint_label, project) or _summ_end_reason == "ticket-failures":
                 outcome = "has_rework"
             else:
                 outcome = "completed"

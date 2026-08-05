@@ -199,13 +199,23 @@ def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
             # GitHub shows no open rework / unfinished work tickets → the sprint's
             # work has settled, so promote to ready_to_merge.
             #
-            # Do NOT gate this on issues_json's `failed`/`failure_reason`: that is a
-            # stale snapshot from the ORIGINAL run and survives even after the failed
-            # ticket was re-run and passed in a child sprint. Trusting it left
-            # vector-search-demo sprint-15 stuck in needs_rework (reconcile returned
-            # would_change=false), which disabled Bulk complete. The live GitHub signal
-            # (has_rework) is authoritative; a genuinely-unfinished ticket would still
-            # be open/not-done and keep has_rework True.
+            # Do NOT blindly gate this on issues_json's `failed`/`failure_reason`
+            # alone: that is a stale snapshot from the ORIGINAL run and must not
+            # block promotion when the failed ticket was re-run and passed in a
+            # later child sprint (vector-search-demo sprint-15 — reconcile
+            # returned would_change=false forever, disabling Bulk complete).
+            # But it must also not be ignored outright: a ticket can be closed
+            # without ever being fixed (perf-coach sprint-121 — no rerun/child
+            # sprint exists in its lineage), and trusting "no open GitHub
+            # ticket" alone there just flip-flops this sprint against
+            # _outcome_reconcile_row's downgrade on every reconcile pass
+            # (issue #2197). Only promote when either issues_json shows no
+            # real failure, or a later lineage member actually completed —
+            # proof the failure was addressed somewhere in the chain, not
+            # just closed.
+            outcome = _derive_terminal_state_from_issues_json(row.get("issues_json") or "[]")
+            if outcome == "needs_rework" and not _lineage_has_later_completed(label, project):
+                return None
             return {"state": "ready_to_merge", "end_reason": row.get("end_reason") or "github-reconcile"}
     return None
 

@@ -582,12 +582,32 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
     # Honesty guard: refuse to complete a lineage whose member sprints still have
     # open rework / SIT / unfinished work tickets — those need Re-run, not Complete.
     # Mirror-backed (_has_rework_tickets reads the local issues mirror), no GH calls.
+    #
+    # issue #2206: _has_rework_tickets alone reads False for a member whose
+    # tickets are all closed WITHOUT ever being fixed (end_reason=
+    # "ticket-failures" — perf-coach sprint-121's shape). Left unguarded,
+    # Complete/Bulk Complete would sail through and overwrite that member's
+    # DB state to "completed", destroying the classification #2197/#2199/
+    # #2200/#2202/#2204/#2205 all depend on being preserved. Same fix shape
+    # as those issues: also block on the DB row's own end_reason -- UNLESS a
+    # later lineage member already completed (a genuine rerun fixed it, the
+    # hermes-agent cascade-completion shape this function itself supports),
+    # matching #2197's exact carve-out.
+    try:
+        from routers.sprint_reconcile_service import _lineage_has_later_completed
+    except Exception:
+        _lineage_has_later_completed = None
     _has_rework = getattr(srv, "_has_rework_tickets", None)
     if _has_rework is not None:
         rework_members: list[str] = []
         for lbl in all_labels:
             try:
-                if _has_rework(lbl, repo):
+                _row = srv.db.get_sprint(lbl, project=repo)
+                _end_reason_blocks = (
+                    (_row or {}).get("end_reason") == "ticket-failures"
+                    and not (_lineage_has_later_completed and _lineage_has_later_completed(lbl, repo))
+                )
+                if _has_rework(lbl, repo) or _end_reason_blocks:
                     rework_members.append(lbl)
             except Exception:
                 pass
@@ -763,12 +783,32 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
 
     # Honesty guard: a sprint with open rework / SIT / unfinished work tickets is
     # not done — Re-run it, don't Complete. Mirror-backed, no GitHub calls.
+    #
+    # issue #2206: also block when the DB row's own end_reason is
+    # "ticket-failures" — _has_rework_tickets alone reads False once a
+    # failed sprint's tickets are all closed without being fixed, which
+    # would otherwise let Complete overwrite the DB state and destroy that
+    # classification. Same fix shape as #2197/#2199/#2200/#2202/#2204/#2205.
+    # Carve-out for a genuine rerun fix (a later lineage member already
+    # completed — the hermes-agent cascade shape below), matching #2197.
+    try:
+        from routers.sprint_reconcile_service import _lineage_has_later_completed
+    except Exception:
+        _lineage_has_later_completed = None
     _has_rework = getattr(srv, "_has_rework_tickets", None)
     if _has_rework is not None:
         try:
             _rework = _has_rework(label, repo)
         except Exception:
             _rework = False
+        try:
+            _row = srv.db.get_sprint(label, project=repo)
+            if (_row or {}).get("end_reason") == "ticket-failures" and not (
+                _lineage_has_later_completed and _lineage_has_later_completed(label, repo)
+            ):
+                _rework = True
+        except Exception:
+            pass
         if _rework:
             raise HTTPException(
                 409,

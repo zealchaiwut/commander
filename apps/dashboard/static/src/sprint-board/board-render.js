@@ -1656,6 +1656,15 @@ export function _smgmtCardHtml(
               )
               .join("")
           : "";
+      // issue #2205: `tickets` is the live open-GitHub-ticket list — empty
+      // for a needs_rework sprint whose tickets all closed without being
+      // fixed (a "stale — no tickets" zombie, e.g. perf-coach sprint-121).
+      // Falling back to it left the header rollup reading "0 tickets" right
+      // next to a "needs rework" badge. Fall back to the historical
+      // outcome.issues list, same as the completed-state branch below.
+      if (tickets.length === 0 && (outcome.issues || []).length > 0) {
+        rollupItems = outcome.issues.map((i) => ({ number: i.number }));
+      }
     } else {
       outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
       // Tickets re-run into a child sprint (e.g. #572/#574 → sprint-63.1) belong

@@ -393,10 +393,17 @@ def _build_outcome_inline(label: str, project: str, lifecycle_state: str) -> Opt
             agent = (iss.get("agent_status") or "").lower()
             fr = iss.get("failure_reason")
             st = (iss.get("state") or "").lower()
-            if st == "merged" or agent in ("completed", "done"):
-                outcome = "done"
-            elif agent == "failed" or fr:
+            # issue #2205: check failure_reason FIRST -- a ticket that merged
+            # only after exhausting its fix-loop still carries a
+            # failure_reason annotation (state="merged" AND failure_reason
+            # set). Checking "merged" first classified it as a clean "done",
+            # so this per-issue list never agreed with failed_count computed
+            # elsewhere (e.g. _build_finish_card_inline), which does treat
+            # failure_reason as authoritative regardless of eventual state.
+            if agent == "failed" or fr:
                 outcome = "failed"
+            elif st == "merged" or agent in ("completed", "done"):
+                outcome = "done"
             else:
                 outcome = "skipped"
             result_issues.append({

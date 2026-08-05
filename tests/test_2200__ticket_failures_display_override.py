@@ -172,3 +172,47 @@ class TestSprintSummariesPreservesTicketFailures:
             "Summaries pane must preserve ticket-failures classification, "
             f"got outcome={matches[0]['outcome']!r}"
         )
+
+
+# ── issue #2202: finish-card rework_count must not read 0 for a ticket- ───────
+# ── failures sprint whose tickets are all closed ───────────────────────────
+
+class TestFinishCardReworkCountFallsBackToFailedCount:
+    def test_rework_count_uses_failed_count_when_live_count_is_zero(self, tmp_path):
+        from fastapi.testclient import TestClient
+        client = TestClient(srv.app)
+        project_root = tmp_path / "proj"
+        _seed_ticket_failures_sprint(project_root)
+
+        with patch("server._project_root_path", return_value=project_root), \
+             patch("server._is_sprint_running", return_value=False), \
+             patch("server._has_rework_tickets", return_value=False), \
+             patch("server._count_rework_tickets", return_value=0):
+            resp = client.get(f"/api/sprints/{_LABEL}/finish-card", params={"project": _PROJECT})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["state"] == "has_rework"
+        assert data["failed_count"] == 2
+        assert data["rework_count"] == 2, (
+            "rework_count must fall back to failed_count when the live "
+            "open-ticket count is 0 but the sprint has a real recorded "
+            f"failure, got rework_count={data['rework_count']!r}"
+        )
+
+    def test_rework_count_prefers_live_count_when_nonzero(self, tmp_path):
+        """Regression guard: a genuinely open rework ticket still wins."""
+        from fastapi.testclient import TestClient
+        client = TestClient(srv.app)
+        project_root = tmp_path / "proj"
+        _seed_ticket_failures_sprint(project_root)
+
+        with patch("server._project_root_path", return_value=project_root), \
+             patch("server._is_sprint_running", return_value=False), \
+             patch("server._has_rework_tickets", return_value=True), \
+             patch("server._count_rework_tickets", return_value=1):
+            resp = client.get(f"/api/sprints/{_LABEL}/finish-card", params={"project": _PROJECT})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["rework_count"] == 1

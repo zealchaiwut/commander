@@ -202,7 +202,12 @@ def get_sprint_finish_card(sprint_label: str, project: str):
         rework_count = 0
     elif srv._has_rework_tickets(sprint_label, project) or _fc_end_reason == "ticket-failures":
         card_state = "has_rework"
-        rework_count = srv._count_rework_tickets(sprint_label, project)
+        # _count_rework_tickets only counts currently-OPEN GitHub tickets
+        # labeled needs-rework -- 0 for a ticket-failures sprint whose
+        # tickets were all closed without being fixed (issue #2202). Fall
+        # back to the historical failed_count in that case, matching
+        # board_service.py's already-correct _build_finish_card_inline.
+        rework_count = srv._count_rework_tickets(sprint_label, project) or failed_count
     else:
         card_state = "completed"
         rework_count = 0

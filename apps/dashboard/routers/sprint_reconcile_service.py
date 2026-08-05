@@ -215,6 +215,21 @@ def _github_reconcile_row(label: str, project: str, row: dict) -> dict | None:
             # just closed.
             outcome = _derive_terminal_state_from_issues_json(row.get("issues_json") or "[]")
             if outcome == "needs_rework" and not _lineage_has_later_completed(label, project):
+                # issue #2208: the fix may not have come via a same-lineage
+                # rerun at all — a failed ticket can be independently picked
+                # up and fixed under a completely unrelated later sprint
+                # (perf-coach sprint-121's #1420/#1525, closed via
+                # sprint-122/122.1). If every failed ticket's LATEST
+                # agent_runs outcome (across any sprint) is done, and this
+                # sprint's own branch already shipped, there is nothing left
+                # to rework — complete it outright rather than leaving it
+                # stuck forever with no actionable Re-run.
+                if _base_branch_merged_to_develop(label, project) and _failed_tickets_resolved_by_later_run(row):
+                    return {
+                        "state": "completed",
+                        "end_reason": "resolved-in-later-sprint",
+                        "ended_at": row.get("ended_at"),
+                    }
                 return None
             return {"state": "ready_to_merge", "end_reason": row.get("end_reason") or "github-reconcile"}
     return None
@@ -555,6 +570,48 @@ def _base_branch_merged_to_develop(label: str, project: str) -> bool:
     except Exception:
         return False
     return f"sprint/{base}" in merged
+
+
+def _failed_tickets_resolved_by_later_run(row: dict) -> bool:
+    """True when every ticket *row* recorded as failed has since reached a
+    done outcome in a LATER agent_runs row — possibly under a completely
+    unrelated sprint, not just a same-lineage rerun (issue #2208).
+
+    _lineage_has_later_completed only recognizes a fix delivered via a
+    same-lineage child (sprint-N -> sprint-N.1). perf-coach sprint-121's two
+    failed tickets were never reworked via a sprint-121 child — they were
+    independently picked up again and fixed under unrelated later sprint
+    numbers (sprint-122, sprint-122.1). Reuses the same "last definitive
+    outcome per ticket wins" convention already established by
+    _issues_from_agent_runs (issue #1882): agent_runs_for_issue with no
+    sprint_label filter returns every run across every sprint, ordered by id
+    (chronological) — the LAST row's outcome is the ticket's current word,
+    regardless of which sprint most recently touched it.
+    """
+    try:
+        issues = json.loads(row.get("issues_json") or "[]")
+    except (ValueError, TypeError):
+        return False
+    failed_numbers = {
+        iss.get("ticket_id") or iss.get("number")
+        for iss in issues
+        if (iss.get("agent_status") or "").lower() == "failed" or iss.get("failure_reason")
+    }
+    failed_numbers.discard(None)
+    if not failed_numbers:
+        return False
+    db = _db()
+    for num in failed_numbers:
+        try:
+            runs = db.agent_runs_for_issue(int(num))
+        except Exception:
+            return False
+        if not runs:
+            return False
+        last_outcome = (runs[-1].get("outcome") or "").strip().lower()
+        if last_outcome not in _AGENT_RUN_DONE:
+            return False
+    return True
 
 
 def _terminalize_superseded_orphans(project: str) -> list[str]:

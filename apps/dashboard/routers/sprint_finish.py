@@ -592,20 +592,38 @@ async def bulk_complete_sprint(owner: str, repo_name: str, label: str, body: Bul
     # as those issues: also block on the DB row's own end_reason -- UNLESS a
     # later lineage member already completed (a genuine rerun fixed it, the
     # hermes-agent cascade-completion shape this function itself supports),
-    # matching #2197's exact carve-out.
+    # matching #2197's exact carve-out. Also allow through when every failed
+    # ticket was independently fixed under a DIFFERENT, unrelated later
+    # sprint and this sprint's own branch already merged (issue #2208 —
+    # perf-coach sprint-121's #1420/#1525, fixed via sprint-122/122.1, not a
+    # sprint-121 rerun child).
     try:
-        from routers.sprint_reconcile_service import _lineage_has_later_completed
+        from routers.sprint_reconcile_service import (
+            _lineage_has_later_completed,
+            _failed_tickets_resolved_by_later_run,
+            _base_branch_merged_to_develop,
+        )
     except Exception:
         _lineage_has_later_completed = None
+        _failed_tickets_resolved_by_later_run = None
+        _base_branch_merged_to_develop = None
     _has_rework = getattr(srv, "_has_rework_tickets", None)
     if _has_rework is not None:
         rework_members: list[str] = []
         for lbl in all_labels:
             try:
                 _row = srv.db.get_sprint(lbl, project=repo)
+                _resolved_elsewhere = bool(
+                    _failed_tickets_resolved_by_later_run
+                    and _base_branch_merged_to_develop
+                    and _row
+                    and _failed_tickets_resolved_by_later_run(_row)
+                    and _base_branch_merged_to_develop(lbl, repo)
+                )
                 _end_reason_blocks = (
                     (_row or {}).get("end_reason") == "ticket-failures"
                     and not (_lineage_has_later_completed and _lineage_has_later_completed(lbl, repo))
+                    and not _resolved_elsewhere
                 )
                 if _has_rework(lbl, repo) or _end_reason_blocks:
                     rework_members.append(lbl)
@@ -791,10 +809,19 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
     # classification. Same fix shape as #2197/#2199/#2200/#2202/#2204/#2205.
     # Carve-out for a genuine rerun fix (a later lineage member already
     # completed — the hermes-agent cascade shape below), matching #2197.
+    # Also allow through when every failed ticket was independently fixed
+    # under a DIFFERENT, unrelated later sprint and this sprint's own branch
+    # already merged (issue #2208).
     try:
-        from routers.sprint_reconcile_service import _lineage_has_later_completed
+        from routers.sprint_reconcile_service import (
+            _lineage_has_later_completed,
+            _failed_tickets_resolved_by_later_run,
+            _base_branch_merged_to_develop,
+        )
     except Exception:
         _lineage_has_later_completed = None
+        _failed_tickets_resolved_by_later_run = None
+        _base_branch_merged_to_develop = None
     _has_rework = getattr(srv, "_has_rework_tickets", None)
     if _has_rework is not None:
         try:
@@ -803,8 +830,16 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
             _rework = False
         try:
             _row = srv.db.get_sprint(label, project=repo)
+            _resolved_elsewhere = bool(
+                _failed_tickets_resolved_by_later_run
+                and _base_branch_merged_to_develop
+                and _row
+                and _failed_tickets_resolved_by_later_run(_row)
+                and _base_branch_merged_to_develop(label, repo)
+            )
             if (_row or {}).get("end_reason") == "ticket-failures" and not (
-                _lineage_has_later_completed and _lineage_has_later_completed(label, repo)
+                (_lineage_has_later_completed and _lineage_has_later_completed(label, repo))
+                or _resolved_elsewhere
             ):
                 _rework = True
         except Exception:

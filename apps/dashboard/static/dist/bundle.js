@@ -6270,6 +6270,9 @@ Resolve manually and re-run Bulk complete.`,
         ticketsContainerHtml = tickets.length > 0 ? tickets.map(
           (t) => _smgmtTicketRowHtml(t, label, _elapsedByNum[t.number] ?? null)
         ).join("") : "";
+        if (tickets.length === 0 && (outcome.issues || []).length > 0) {
+          rollupItems = outcome.issues.map((i) => ({ number: i.number }));
+        }
       } else {
         outcomeBandHtml = _smgmtOutcomeBandHtml(label, outcome);
         const _movedToChild = /* @__PURE__ */ new Set();

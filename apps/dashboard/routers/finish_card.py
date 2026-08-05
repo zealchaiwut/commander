@@ -192,10 +192,15 @@ def get_sprint_finish_card(sprint_label: str, project: str):
         if fc_ended_ts else None
     )
 
+    # "ticket-failures" is the sprint manager's own explicit failure
+    # classification -- do not let "no open GitHub ticket" (has_rework=False)
+    # silently discard it just because the ticket's work eventually merged
+    # after exhausting its fix-loop (issue #2200, same pattern as #2197/#2199).
+    _fc_end_reason = (_fc_db_row or {}).get("end_reason")
     if fc_is_cancelled:
         card_state = "cancelled"
         rework_count = 0
-    elif srv._has_rework_tickets(sprint_label, project):
+    elif srv._has_rework_tickets(sprint_label, project) or _fc_end_reason == "ticket-failures":
         card_state = "has_rework"
         rework_count = srv._count_rework_tickets(sprint_label, project)
     else:

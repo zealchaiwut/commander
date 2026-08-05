@@ -3536,10 +3536,14 @@ def _outcome_from_ingested_row(
     except Exception:
         pass
 
+    # "ticket-failures" is the sprint manager's own explicit failure
+    # classification -- do not let "no open GitHub ticket" (has_rework=False)
+    # silently discard it just because the ticket's work eventually merged
+    # after exhausting its fix-loop (issue #2200, same pattern as #2197/#2199).
     if is_cancelled:
         pane_state = "cancelled"
         sprint_status = "stopped"
-    elif _has_rework_tickets(sprint_label, project):
+    elif _has_rework_tickets(sprint_label, project) or (end_reason or "") == "ticket-failures":
         pane_state = "has_rework"
         sprint_status = "stopped"
     else:

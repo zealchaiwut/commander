@@ -138,8 +138,23 @@ def get_sprint_finish_card(sprint_label: str, project: str):
     if _fc_db_row and not _fc_db_row.get("run_ingested_at"):
         try:
             db.ingest_sprint_run_artifact(sprint_label, fc_state_data, project=project)
+            _fc_db_row = db.get_sprint(sprint_label, project=project or None)
         except Exception:
             pass
+
+    # issue #2204: once ingested, the DB row (issues_json/end_reason) is kept
+    # fresh by reconciliation; the on-disk state.json is a one-time snapshot
+    # from the ORIGINAL run and never updated afterward. Reading counts from
+    # disk here defeated the Rec 2d convergence above -- board_service.py's
+    # _build_finish_card_inline (the board's actual render path) already
+    # reads counts from the DB row; mirror that here so the standalone
+    # endpoint (still hit per-sprint by board-render.js) agrees with it.
+    _fc_db_issues_raw: Optional[list] = None
+    if _fc_db_row and _fc_db_row.get("run_ingested_at"):
+        try:
+            _fc_db_issues_raw = json.loads(_fc_db_row.get("issues_json") or "[]")
+        except (json.JSONDecodeError, TypeError):
+            _fc_db_issues_raw = None
 
     def _fc_parse_iso(s: Optional[str]) -> Optional[float]:
         if not s:
@@ -175,12 +190,31 @@ def get_sprint_finish_card(sprint_label: str, project: str):
         if not has_pending:
             fc_sprint_status = "stopped" if has_failed else "completed"
 
-    done_count    = sum(1 for i in fc_issues_raw if i.get("status") == "done")
-    failed_count  = sum(1 for i in fc_issues_raw if i.get("agent_status") == "failed" or i.get("failure_reason"))
-    skipped_count = sum(
-        1 for i in fc_issues_raw
-        if i.get("status") == "skipped" and not (i.get("agent_status") == "failed" or i.get("failure_reason"))
-    )
+    if _fc_db_issues_raw is not None:
+        # DB-sourced (issue #2204): same classification as
+        # board_service._build_finish_card_inline — DB issues_json uses
+        # `state` ("merged"/"closed"/"open"), not disk state.json's `status`.
+        done_count = sum(
+            1 for i in _fc_db_issues_raw
+            if (i.get("state") or "").lower() == "merged"
+            or (i.get("agent_status") or "").lower() in ("completed", "done")
+        )
+        failed_count = sum(
+            1 for i in _fc_db_issues_raw
+            if (i.get("agent_status") or "").lower() == "failed" or i.get("failure_reason")
+        )
+        skipped_count = sum(
+            1 for i in _fc_db_issues_raw
+            if (i.get("status") or "").lower() == "skipped"
+            and not ((i.get("agent_status") or "").lower() == "failed" or i.get("failure_reason"))
+        )
+    else:
+        done_count    = sum(1 for i in fc_issues_raw if i.get("status") == "done")
+        failed_count  = sum(1 for i in fc_issues_raw if i.get("agent_status") == "failed" or i.get("failure_reason"))
+        skipped_count = sum(
+            1 for i in fc_issues_raw
+            if i.get("status") == "skipped" and not (i.get("agent_status") == "failed" or i.get("failure_reason"))
+        )
 
     fc_ended_ts: Optional[float] = None
     for iss in fc_issues_raw:
@@ -224,12 +258,12 @@ def get_sprint_finish_card(sprint_label: str, project: str):
         "sprint_number":     sprint_number,
         "state":             card_state,
         "lifecycle":         db.canonical_lifecycle(card_state),
-        "end_reason":        fc_sprint_json.get("end_reason"),
+        "end_reason":        _fc_end_reason or fc_sprint_json.get("end_reason"),
         "done_count":        done_count,
         "failed_count":      failed_count,
         "skipped_count":     skipped_count,
         "rework_count":      rework_count,
-        "wall_clock_secs":   fc_state_data.get("wall_clock_secs", 0.0),
+        "wall_clock_secs":   (_fc_db_row or {}).get("wall_clock_secs") or fc_state_data.get("wall_clock_secs", 0.0),
         "ended_at":          ended_at,
         "summary_issue_url": summary_issue_url,
         "summary_issue_num": summary_issue_num,

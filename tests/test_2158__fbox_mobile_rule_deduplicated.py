@@ -86,16 +86,17 @@ def test_ac1_fbox_hide_rule_appears_exactly_once():
 def test_ac2_history_card_media_block_has_no_fbox_rule():
     """AC2: The @media (max-width: 600px) block containing .hist-card-mini must not have .fbox-table rules."""
     blocks = _extract_media_600_blocks(PROJECT_HTML)
-    for block in blocks:
-        if ".hist-card-mini" in block:
-            assert not _FBOX_HIDE_PAT.search(block), (
-                "The @media (max-width: 600px) block containing .hist-card-mini must NOT "
-                "contain a .fbox-table column-hide rule. Remove the duplicate at line ~2239 "
-                "and keep only the canonical failures-table block (issue #2158)."
-            )
-            return
-    # If .hist-card-mini is not in any 600px block, the test still passes
-    # (it means the block was removed or restructured, which is also fine).
+    hist_card_blocks = [b for b in blocks if ".hist-card-mini" in b]
+    assert hist_card_blocks, (
+        "No @media (max-width: 600px) block containing .hist-card-mini was found in project.html. "
+        "The history-card mobile styles must exist in a 600px @media block (issue #2158 AC2)."
+    )
+    for block in hist_card_blocks:
+        assert not _FBOX_HIDE_PAT.search(block), (
+            "The @media (max-width: 600px) block containing .hist-card-mini must NOT "
+            "contain a .fbox-table column-hide rule. Remove the duplicate at line ~2239 "
+            "and keep only the canonical failures-table block (issue #2158)."
+        )
 
 
 # =============================================================================

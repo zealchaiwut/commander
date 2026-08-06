@@ -26740,13 +26740,6 @@ function _logsFilterEvents(events) {
 }
 
 
-// Whole-token count → compact "5.0k" / "1.2M"; missing token total reads as a
-// dash so a NULL agent_runs.total_tokens degrades gracefully (#858 AC5).
-function _logsFmtTokens(n) {
-  if (n == null || isNaN(n)) return '—';
-  return _histFmtTokens(n);
-}
-
 function _logsEventsHtml(events) {
   const filtered = _logsFilterEvents(events);
   if (filtered.length === 0) {

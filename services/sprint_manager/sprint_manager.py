@@ -1082,6 +1082,9 @@ def _find_feature_branch(issue_num: int) -> Optional[str]:
     ls_branch, ls_ok = _ls_remote_feature_branch(issue_num)
     if ls_ok and ls_branch is not None:
         return ls_branch
+    if ls_ok:
+        # ls-remote succeeded but found no branch — authoritative "absent"; trust it (issue #2001)
+        return None
 
     # Fallback: remote tracking refs (may be stale; graceful degradation on ls-remote failure)
     candidates: list[str] = []

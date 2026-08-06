@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import os
 import sys
-import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -175,7 +174,6 @@ def test_ac2_real_sync_ts_freshness_comparison_correct(fresh_db):
     # Simulate a GitHub mirror record with the same instant but +00:00 suffix
     # (or convert the stored value to the other format for cross-format comparison).
     from estimate_issue import _parse_ts_for_compare
-    from datetime import timezone
 
     parsed_sync = _parse_ts_for_compare(real_sync_ts)
 

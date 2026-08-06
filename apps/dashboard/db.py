@@ -6,6 +6,7 @@ import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Iterator
 
 # ── DB_PATH resolution ────────────────────────────────────────────────────────
 _db_path_raw = os.environ.get("DB_PATH", "").strip()
@@ -242,7 +243,7 @@ def run_wal_checkpoint(db_path: "Path | None" = None) -> tuple:
 
 
 @contextlib.contextmanager
-def get_conn():
+def get_conn() -> Iterator[sqlite3.Connection]:
     # WAL + an explicit busy_timeout (issue #1688): the server and the sprint
     # manager subprocess both write this file concurrently. The rollback
     # journal (sqlite's default) serializes all writers and blocks readers

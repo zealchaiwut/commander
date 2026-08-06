@@ -4,21 +4,6 @@ The .fbox-table nth-child hide rule must appear in exactly ONE @media (max-width
 block — the canonical failures-table block. It must NOT also appear inside the history-card
 @media block (alongside .hist-card-mini / .hist-card-head rules).
 
-SANCTIONED #1746 EXCEPTION (issue #2181)
-These tests verify a CSS structural invariant via brace-depth block extraction and selector
-regex. This is explicitly sanctioned as a CLAUDE.md #1746 exception because:
-  (a) CSS deduplication ("the rule appears exactly once") is a source-structure invariant.
-      Asserting it via computed styles requires a real browser engine — jsdom does not
-      evaluate @media queries, so no environment-free behavioral alternative exists.
-  (b) The behavioral consequence (column hidden at ≤600px) is covered at the markup level
-      by tests/frontend/failures-mobile-cols-2073.test.mjs, which confirms the columns
-      are present in the DOM so the CSS rule can act on them.
-  (c) The invariant being guarded is regression against a specific prior bug (#2158: rule
-      appeared in TWO @media blocks). "Exactly one occurrence" cannot be verified by
-      any DOM/behavior test — it is inherently a CSS source-structure check.
-  (d) A parallel Node.js test (tests/frontend/css-dedup-fbox-2158.test.mjs) performs the
-      same structural checks plus asserts the `display: none` property value.
-
 AC:
   AC1 — The .fbox-table mobile column-hide rule appears exactly once across all CSS in project.html.
   AC2 — The history-card @media (max-width: 600px) block (the one containing .hist-card-mini)

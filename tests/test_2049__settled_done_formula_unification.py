@@ -124,7 +124,12 @@ def test_reconcile_and_materialize_agree(issues):
 # ── AC1: dead startup.py copy is gone ────────────────────────────────────────
 
 def test_startup_does_not_define_settled_done_from_columns():
-    """AC1: The dead duplicate _settled_done_from_columns in startup.py is deleted."""
+    """AC1: The dead duplicate _settled_done_from_columns in startup.py is deleted.
+
+    Source-text exception (#2162 / #1746): this is a deletion guard — the
+    function no longer exists, so there is nothing to import and call. A
+    source-regex check is the only viable tool for confirming removal.
+    """
     src = (_DASHBOARD / "startup.py").read_text(encoding="utf-8")
     assert "def _settled_done_from_columns(" not in src, (
         "Dead copy of _settled_done_from_columns still present in startup.py"
@@ -139,6 +144,12 @@ def test_pill_settled_count_not_labelled_done():
     The donut center already uses 'done' for done+uat (completion metric).
     The pill uses the throughput/settled metric — labelling it 'done' is
     misleading because it includes needs-rework and failed tickets.
+
+    Source-text exception (#2162 / #1746): doneHtml is constructed inside
+    inline JS in project.html, not in an ES module. A DOM/render-based Node
+    test would require a full bundler + server environment. The label is a
+    static template-literal string, not dynamic logic, so a substring check
+    is both necessary and sufficient here.
     """
     src = (_DASHBOARD / "static" / "project.html").read_text(encoding="utf-8")
     # doneHtml carries the pill's settled count; must say "settled" not "done"

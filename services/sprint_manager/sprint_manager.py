@@ -2235,7 +2235,7 @@ def _capture_feature_branch_data(
     remote_target = target_branch if target_branch.startswith("origin/") else f"origin/{target_branch}"
 
     ok_log, log_out, _ = _fn(
-        "git", "log", "--format=%H", remote_branch, f"--not", remote_target,
+        "git", "log", "--format=%H", remote_branch, "--not", remote_target,
         cwd=cwd,
     )
     if ok_log and log_out.strip():

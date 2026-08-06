@@ -21,8 +21,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
-
 _REPO_ROOT = Path(__file__).parent.parent
 _DASHBOARD_DIR = _REPO_ROOT / "apps" / "dashboard"
 _SPRINT_MGR_DIR = _REPO_ROOT / "services" / "sprint_manager"

@@ -24,17 +24,17 @@
  * Run with: node --test tests/frontend/css-dedup-fbox-2158.test.mjs
  */
 
-import test from 'node:test';
-import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { join, dirname } from 'node:path';
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join, dirname } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = join(__dirname, '..', '..');
+const REPO_ROOT = join(__dirname, "..", "..");
 const PROJECT_HTML = readFileSync(
-  join(REPO_ROOT, 'apps', 'dashboard', 'static', 'project.html'),
-  'utf8'
+  join(REPO_ROOT, "apps", "dashboard", "static", "project.html"),
+  "utf8",
 );
 
 // Selector pattern for the two mobile-hidden columns (col 2 = Sprint, col 6 = Time)
@@ -52,22 +52,25 @@ function extractMedia600Blocks(src) {
   const blocks = [];
   let searchFrom = 0;
   while (true) {
-    const mediaIdx = src.indexOf('@media', searchFrom);
+    const mediaIdx = src.indexOf("@media", searchFrom);
     if (mediaIdx === -1) break;
-    const braceOpen = src.indexOf('{', mediaIdx);
+    const braceOpen = src.indexOf("{", mediaIdx);
     if (braceOpen === -1) break;
     const header = src.slice(mediaIdx, braceOpen);
-    if (!header.includes('max-width') || !header.includes('600px')) {
+    if (!header.includes("max-width") || !header.includes("600px")) {
       searchFrom = braceOpen + 1;
       continue;
     }
     let depth = 0;
     let end = braceOpen;
     for (let i = braceOpen; i < src.length; i++) {
-      if (src[i] === '{') depth++;
-      else if (src[i] === '}') {
+      if (src[i] === "{") depth++;
+      else if (src[i] === "}") {
         depth--;
-        if (depth === 0) { end = i; break; }
+        if (depth === 0) {
+          end = i;
+          break;
+        }
       }
     }
     blocks.push(src.slice(braceOpen + 1, end));
@@ -78,29 +81,32 @@ function extractMedia600Blocks(src) {
 
 // ─── AC1: rule appears in exactly one @media (max-width: 600px) block ─────────
 
-test('AC1 #2158: .fbox-table column-hide rule appears in exactly one 600px @media block', () => {
+test("AC1 #2158: .fbox-table column-hide rule appears in exactly one 600px @media block", () => {
   const blocks = extractMedia600Blocks(PROJECT_HTML);
-  assert.ok(blocks.length > 0, 'No @media (max-width: 600px) blocks found in project.html');
+  assert.ok(
+    blocks.length > 0,
+    "No @media (max-width: 600px) blocks found in project.html",
+  );
 
-  const withRule = blocks.filter(b => FBOX_SELECTOR_PAT.test(b));
+  const withRule = blocks.filter((b) => FBOX_SELECTOR_PAT.test(b));
   assert.equal(
     withRule.length,
     1,
     `Expected exactly 1 @media (max-width: 600px) block containing the .fbox-table ` +
-    `column-hide rule, found ${withRule.length}. A duplicate must be removed (issue #2158).`
+      `column-hide rule, found ${withRule.length}. A duplicate must be removed (issue #2158).`,
   );
 });
 
 // ─── AC2: history-card @media block must not contain the fbox rule ─────────────
 
-test('AC2 #2158: @media block containing .hist-card-mini has no .fbox-table column-hide rule', () => {
+test("AC2 #2158: @media block containing .hist-card-mini has no .fbox-table column-hide rule", () => {
   const blocks = extractMedia600Blocks(PROJECT_HTML);
   for (const block of blocks) {
-    if (block.includes('.hist-card-mini')) {
+    if (block.includes(".hist-card-mini")) {
       assert.ok(
         !FBOX_SELECTOR_PAT.test(block),
-        'The @media (max-width: 600px) block containing .hist-card-mini must NOT ' +
-        'contain a .fbox-table column-hide rule. Remove the duplicate (issue #2158).'
+        "The @media (max-width: 600px) block containing .hist-card-mini must NOT " +
+          "contain a .fbox-table column-hide rule. Remove the duplicate (issue #2158).",
       );
       return;
     }
@@ -110,41 +116,41 @@ test('AC2 #2158: @media block containing .hist-card-mini has no .fbox-table colu
 
 // ─── AC3: canonical block applies display:none to the correct columns ──────────
 
-test('AC3 #2158: canonical block hides Sprint (col 2) with display:none', () => {
+test("AC3 #2158: canonical block hides Sprint (col 2) with display:none", () => {
   const blocks = extractMedia600Blocks(PROJECT_HTML);
   const canonical = blocks.find(
-    b => b.includes('fbox-table') && b.includes('nth-child(2)')
+    (b) => b.includes("fbox-table") && b.includes("nth-child(2)"),
   );
   assert.ok(
     canonical,
-    'No @media (max-width: 600px) block with .fbox-table nth-child(2) found.'
+    "No @media (max-width: 600px) block with .fbox-table nth-child(2) found.",
   );
   assert.ok(
     /display\s*:\s*none/.test(canonical),
-    'The canonical .fbox-table column-hide block must apply display:none ' +
-    '(not just declare the selector).'
+    "The canonical .fbox-table column-hide block must apply display:none " +
+      "(not just declare the selector).",
   );
   assert.ok(
     /nth-child\(2\)/.test(canonical),
-    'Sprint column (nth-child(2)) must be targeted in the canonical block.'
+    "Sprint column (nth-child(2)) must be targeted in the canonical block.",
   );
 });
 
-test('AC3 #2158: canonical block hides Time (col 6) with display:none', () => {
+test("AC3 #2158: canonical block hides Time (col 6) with display:none", () => {
   const blocks = extractMedia600Blocks(PROJECT_HTML);
   const canonical = blocks.find(
-    b => b.includes('fbox-table') && b.includes('nth-child(6)')
+    (b) => b.includes("fbox-table") && b.includes("nth-child(6)"),
   );
   assert.ok(
     canonical,
-    'No @media (max-width: 600px) block with .fbox-table nth-child(6) found.'
+    "No @media (max-width: 600px) block with .fbox-table nth-child(6) found.",
   );
   assert.ok(
     /display\s*:\s*none/.test(canonical),
-    'The canonical .fbox-table column-hide block must apply display:none.'
+    "The canonical .fbox-table column-hide block must apply display:none.",
   );
   assert.ok(
     /nth-child\(6\)/.test(canonical),
-    'Time column (nth-child(6)) must be targeted in the canonical block.'
+    "Time column (nth-child(6)) must be targeted in the canonical block.",
   );
 });

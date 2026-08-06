@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -48,6 +49,24 @@ from services.sprint_manager.estimation_config import get_estimation_cfg as _get
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
+def _parse_ts_for_compare(s: str) -> datetime:
+    """Parse an ISO-8601 timestamp string to a UTC datetime for comparison.
+
+    Normalizes Z vs +00:00 vs bare (no offset) formats so that equal-second
+    timestamps with different suffix forms compare equal instead of the Z-suffix
+    sorting lexicographically greater than the bare form (issue #2000).
+    """
+    normalized = s.strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(normalized)
+    except ValueError:
+        # Unrecognised format: return a sentinel that keeps the old string ordering.
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
 
 def find_commander_dir(start: Optional[Path] = None) -> Optional[Path]:
     """Walk up from start (default: CWD) looking for a .commander/ directory."""
@@ -165,7 +184,7 @@ def fetch_issue(issue_num: int, repo: str, runner=None, sync_ts: Optional[str] =
             _is_fresh = True
             if sync_ts:
                 _record_ts = _mirror.get("updatedAt") or _mirror.get("updated_at") or ""
-                _is_fresh = _record_ts <= sync_ts
+                _is_fresh = _parse_ts_for_compare(_record_ts) <= _parse_ts_for_compare(sync_ts)
             if _is_fresh:
                 _labels = _mirror.get("labels") or []
                 return {

@@ -121,18 +121,24 @@ import db; print(db.run_wal_checkpoint())
 "
 
 # List local backups newest-first
+# (local-backup helpers live in apps/dashboard/backup.py since #2014 removed
+#  the duplicate copy from services/sprint_manager/backup.py)
 python3 -c "
-import sys; sys.path.insert(0, 'services/sprint_manager')
-import backup
-for p in backup.list_local_backups(): print(p)
+import sys; sys.path.insert(0, 'apps/dashboard')
+import os, backup
+from pathlib import Path
+db_path = Path(os.environ.get('DB_PATH', 'apps/dashboard/commander.db'))
+backup_dir = db_path.parent / '.commander' / 'db-backups'
+for p in backup.list_local_backups(backup_dir): print(p)
 "
 
 # Run a manual local backup right now
 python3 -c "
-import sys; sys.path.insert(0, 'services/sprint_manager')
+import sys; sys.path.insert(0, 'apps/dashboard')
 import os, backup
 from pathlib import Path
 db_path = Path(os.environ.get('DB_PATH', 'apps/dashboard/commander.db'))
-print(backup.backup_db_local(db_path))
+backup_dir = db_path.parent / '.commander' / 'db-backups'
+print(backup.backup_db_local(db_path, backup_dir))
 "
 ```

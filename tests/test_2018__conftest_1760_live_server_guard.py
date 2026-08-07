@@ -59,6 +59,11 @@ def test_1760_guard_has_inline_comment():
                 "The 1760 entry in _LIVE_SERVER_TEST_MODULES must have an inline comment "
                 f"explaining why it cannot self-skip. Got: {line!r}"
             )
+            comment = line[line.index("#"):]
+            assert any(kw in comment for kw in ("self-skip", "BASE_URL", "ConnectError")), (
+                "The inline comment must contain the rationale for why the module cannot "
+                f"self-skip (expected 'self-skip', 'BASE_URL', or 'ConnectError'). Got: {comment!r}"
+            )
             return
     raise AssertionError(
         "1760 entry not found in _LIVE_SERVER_TEST_MODULES — was it removed?"

@@ -1082,6 +1082,9 @@ def _find_feature_branch(issue_num: int) -> Optional[str]:
     ls_branch, ls_ok = _ls_remote_feature_branch(issue_num)
     if ls_ok and ls_branch is not None:
         return ls_branch
+    if ls_ok:
+        # ls-remote succeeded but found no branch — authoritative "absent"; trust it (issue #2001)
+        return None
 
     # Fallback: remote tracking refs (may be stale; graceful degradation on ls-remote failure)
     candidates: list[str] = []
@@ -2232,7 +2235,7 @@ def _capture_feature_branch_data(
     remote_target = target_branch if target_branch.startswith("origin/") else f"origin/{target_branch}"
 
     ok_log, log_out, _ = _fn(
-        "git", "log", "--format=%H", remote_branch, f"--not", remote_target,
+        "git", "log", "--format=%H", remote_branch, "--not", remote_target,
         cwd=cwd,
     )
     if ok_log and log_out.strip():

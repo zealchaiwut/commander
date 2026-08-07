@@ -158,94 +158,98 @@ Serves a structured view of each project's current status and pending work.
 
 **Response: `200 OK`**
 
+The endpoint shares the same assembly path (`export_hermes_report.build_contract`)
+as the Nightly Hermes exporter below, so the payload shape is identical to that
+contract. As of issue #1979 the `fixed`, `age_days`, and `cost`/`cost_source`
+fields are populated for real (previously hardcoded to empty/`None`), and the
+top-level `completed`/`needs_review`/`dead_letter` summary arrays are included.
+`fixed` is derived by diffing this run's blocked-issue set against the previous
+run's, which the service persists under the `dev_report_state` brief-artifacts
+scope.
+
 ```json
 {
   "for_date": "2026-07-17",
-  "window_start": "2026-07-16T06:00:00",
-  "window_end": "2026-07-17T06:00:00",
-  "cost": null,
+  "generated_at": "2026-07-17T15:32:45Z",
+  "window_start": "2026-07-16T18:45:00Z",
+  "window_end": "2026-07-17T18:45:00Z",
   "projects": [
     {
       "project": "commander",
+      "repo": "zealchaiwut/commander",
       "name": "Commander",
+      "icon": "ti-folder",
+      "color": "gray",
       "status": "idle",
       "in_progress": null,
-      "up_next": null,
       "shipped": [
-        {
-          "label": "sprint-119",
-          "goal": "Finalize dev report UI",
-          "done": 5,
-          "pr_number": 1234
-        }
+        {"issue_number": 305, "title": "Lock sprint card"}
       ],
-      "fixed": [],
+      "fixed": [
+        {"issue_number": 1200, "title": "Fix auth token leak"}
+      ],
       "stale": [
         {
           "kind": "blocked",
-          "issue_number": 1200,
-          "title": "Fix auth token leak",
+          "issue_number": 1201,
+          "title": "Flaky SSE reconnect",
           "age_days": 4.5
         }
       ],
       "waiting": [
-        {
-          "label": "sprint-120",
-          "ticket_count": 2,
-          "estimated_hours": 6.5
-        }
+        {"issue_number": 307, "title": "Review UAT"}
       ],
       "counts": {
         "shipped": 1,
-        "fixed": 0,
+        "in_progress": 0,
+        "blocked": 0,
+        "waiting": 1,
         "stale": 1,
-        "waiting": 1
+        "fixed": 1
       }
     }
-  ]
+  ],
+  "cost": "$1.23",
+  "cost_source": "price_map",
+  "completed": ["Commander: 1 shipped"],
+  "needs_review": ["Commander: 1 awaiting sign-off"],
+  "dead_letter": ["Commander: 1 stale blocked"]
 }
 ```
 
 **Response fields:**
 
 - `for_date` (string): The brief date (YYYY-MM-DD, in Bangkok timezone).
-- `window_start` (string): ISO-8601 start of the 24-hour brief window (Bangkok midnight).
+- `generated_at` (string): ISO-8601 timestamp when the artifact was assembled.
+- `window_start` (string): ISO-8601 start of the 24-hour brief window.
 - `window_end` (string): ISO-8601 end of the 24-hour brief window.
-- `cost` (string | null): Optional cost estimate (not currently populated).
 - `projects` (array): Per-project summaries.
+- `cost` (string): Cost estimate for the window (e.g. `"$1.23"`). Populated since #1979.
+- `cost_source` (string): Where the cost figure came from (e.g. `"price_map"`).
+- `completed` (array of string): Human-readable one-line summaries of shipped work per project.
+- `needs_review` (array of string): One-line summaries of work awaiting sign-off per project.
+- `dead_letter` (array of string): One-line summaries of stale/blocked work per project.
 
 **Projects array fields:**
 
 - `project` (string): Project slug (repo name).
+- `repo` (string): Full `owner/repo`.
 - `name` (string): Human-friendly project name.
+- `icon` / `color` (string): Display hints from project config.
 - `status` (string): One of `"idle"`, `"running"`, `"blocked"`.
 - `in_progress` (object | null): Currently running sprint, if any.
-  - `sprint_label` (string | null): Sprint label (e.g., `"sprint-120"`).
-  - `started_at` (string | null): ISO-8601 start timestamp (null in current implementation).
-- `up_next` (object | null): Next backlog sprint ready to queue, if any.
-  - `label` (string | null): Sprint label.
-  - `ticket_count` (integer): Number of tickets in the sprint.
-  - `ready` (boolean): Whether all preflight checks pass.
-- `shipped` (array): Recently completed sprints with merged PRs.
-  - `label` (string | null): Sprint label.
-  - `goal` (string): Sprint goal from issue.
-  - `done` (integer): Number of completed tickets.
-  - `pr_number` (integer | null): GitHub PR number for the sprint's develop → master merge.
-- `fixed` (array): Issues that were previously blocked but are now resolved (empty in current implementation).
-- `stale` (array): Issues stuck in blocked/rework state beyond configured thresholds.
-  - `kind` (string): One of `"blocked"`, `"rework"`, `"failed"`, etc.
-  - `issue_number` (integer | null): GitHub issue number.
-  - `title` (string): Issue title.
-  - `age_days` (float | null): Days since last update.
-- `waiting` (array): Sprints in `ready_to_merge` state waiting for sign-off.
-  - `label` (string | null): Sprint label.
-  - `ticket_count` (integer): Number of tickets awaiting sign-off.
-  - `estimated_hours` (float): Summed estimated hours for tickets.
-- `counts` (object): Summary counts.
-  - `shipped` (integer): Count of shipped sprints.
-  - `fixed` (integer): Count of fixed issues.
-  - `stale` (integer): Count of stale issues.
-  - `waiting` (integer): Count of waiting sprints.
+  - `sprint_label` (string): Sprint label (e.g., `"sprint-120"`).
+  - `started_at` (string | null): ISO-8601 start timestamp.
+- `shipped` (array): Issues labelled done/uat this window — `{issue_number, title}`.
+- `fixed` (array): Issues that were blocked on the previous run but are no longer blocked now — `{issue_number, title}`. Populated since #1979.
+- `stale` (array): Items stuck beyond configured thresholds.
+  - `kind` (string): One of `"blocked"`, `"waiting_signoff"`, `"backlog"`.
+  - `issue_number` (integer): GitHub issue number (for `"blocked"` kind).
+  - `sprint_label` (string): Sprint label (for `"waiting_signoff"` / `"backlog"` kinds).
+  - `title` (string): Issue title (blocked kind).
+  - `age_days` (float): Days since last update, rounded to 1 dp. Populated since #1979.
+- `waiting` (array): Open issues awaiting sign-off — `{issue_number, title}`.
+- `counts` (object): Summary counts — `shipped`, `in_progress`, `blocked`, `waiting`, `stale`, `fixed`.
 
 **Response: `404 Not Found`**
 

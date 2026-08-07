@@ -8,7 +8,6 @@ Test-quality follow-ups resolving the #1746 source-text tension flagged in the s
 - [#2181](https://github.com/zealchaiwut/commander/issues/2181) [follow-up] #2158 CSS-dedup test verifies structure via source-regex (#1746 tension) — 2026-08-06
 - [#2189](https://github.com/zealchaiwut/commander/issues/2189) [follow-up] #2018 AC2 test asserts '#' in conftest source line (source-text pattern) — 2026-08-06
 - [#2190](https://github.com/zealchaiwut/commander/issues/2190) [follow-up] #2005 AC5 test matches test-function names in pytest stdout (brittle structural check) — 2026-08-06
-
 ## Sprint 1020
 
 Code-quality follow-ups: dead-code removal, a triplication extraction, and one restored type annotation — no runtime behavior change. **Restored `get_conn()` return annotation (#1903):** `db.get_conn()` regained its precise `Iterator[sqlite3.Connection]` return type (added `from typing import Iterator`) after an earlier sweep had loosened it. **Removed orphaned `_logsFmtTokens` (#1990):** the `_logsFmtTokens` helper in `static/project.html` was left unused after the #1870 dead-code sweep and is now deleted; a behavioral Node `--test` (`logs-tab-init-no-refererr-1991.test.mjs`) was added to prove the Logs tab still initializes without a ReferenceError after the removal (#1991). **Removed duplicate local-backup implementation (#2014):** the local rolling-backup block (`backup_db_local`, `list_local_backups`, `start_local_backup_scheduler`, and the hourly scheduler) was a stale duplicate in `services/sprint_manager/backup.py`; the canonical copy in `apps/dashboard/backup.py` is unchanged and remains the live implementation. The DB-recovery runbook's local-backup snippets were repointed from `services/sprint_manager` to `apps/dashboard`. **Extracted triplicated db-import shim (#2173):** the three copy-pasted lazy-`import db` + `handle_runtime_disk_io_error(exc)` blocks in `run_issues_sync_loop` (issues, milestones, and reconcile sync) were collapsed into a single `_handle_disk_io(exc, db_module)` helper.
@@ -18,6 +17,14 @@ Code-quality follow-ups: dead-code removal, a triplication extraction, and one r
 - [#1991](https://github.com/zealchaiwut/commander/issues/1991) [follow-up] Add behavioral load-test for Logs tab dead-code removal (#1870) — 2026-08-06
 - [#2014](https://github.com/zealchaiwut/commander/issues/2014) [follow-up] Remove duplicate local-backup implementation in services/sprint_manager/backup.py — 2026-08-06
 - [#2173](https://github.com/zealchaiwut/commander/issues/2173) [follow-up] Extract triplicated db-import shim in issues sync loop — 2026-08-06
+
+## Sprint 89113
+
+Code-review follow-ups across the dev-report endpoint, estimator freshness, and sprint-manager branch resolution. **`/api/dev-report` now populates fixed/age_days/cost (#1979):** `assemble_and_store` was rewired to run the shared `export_hermes_report.build_contract` assembly instead of the old stub that hardcoded `fixed = []`, `age_days = None`, and `cost = None`. The endpoint now returns real `fixed` entries (diffed against the previous run's blocked-issue set, persisted under a new `dev_report_state` brief-artifacts scope), computed `age_days`, and a populated `cost`/`cost_source`, plus the top-level `completed`/`needs_review`/`dead_letter` summary arrays. **Estimator freshness timestamp normalization (#2000):** `fetch_issue`'s mirror-freshness check now parses both the record timestamp and the sync timestamp through `_parse_ts_for_compare` (normalizing `Z` vs `+00:00` vs bare-offset forms to UTC datetimes) before comparing, so equal-second timestamps in different suffix forms no longer sort a fresh record as stale. **Trust authoritative ls-remote "no branch" (#2001):** `_find_feature_branch` now returns `None` when `git ls-remote` succeeds but finds no feature branch, treating that as an authoritative "absent" instead of falling back to (possibly stale) remote tracking refs.
+
+- [#1979](https://github.com/zealchaiwut/commander/issues/1979) [follow-up] /api/dev-report never populates fixed, age_days, or cost — 2026-08-06
+- [#2000](https://github.com/zealchaiwut/commander/issues/2000) [follow-up] estimator freshness compare: normalize timestamp format (Z vs no-Z) before string compare — 2026-08-06
+- [#2001](https://github.com/zealchaiwut/commander/issues/2001) [follow-up] _find_feature_branch: trust authoritative ls-remote 'no branch' instead of falling back to stale tracking refs — 2026-08-06
 
 ## Sprint 1019
 

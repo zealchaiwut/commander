@@ -12,7 +12,9 @@ from zoneinfo import ZoneInfo
 
 _BKK = ZoneInfo("Asia/Bangkok")
 _SCOPE = "dev_report"
+_STATE_SCOPE = "dev_report_state"
 _PROJECT = ""
+_STATE_DATE = "latest"
 
 # Make the scripts directory importable for build_contract + _UNSET.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -39,6 +41,19 @@ def _now_for_date(date_str: str) -> datetime:
     d = datetime.strptime(date_str, "%Y-%m-%d")
     bkk_noon = d.replace(hour=12, tzinfo=_BKK)
     return bkk_noon.astimezone(timezone.utc)
+
+
+def _load_prev_state(db_module) -> dict:
+    """Load the previous run's blocked-issue state from brief_artifacts."""
+    row = db_module.get_brief_artifact(_STATE_SCOPE, _PROJECT, _STATE_DATE)
+    if row and isinstance(row.get("payload"), dict):
+        return row["payload"]
+    return {}
+
+
+def _save_new_state(db_module, state: dict) -> None:
+    """Persist the current run's blocked-issue state for next run's fixed-detection."""
+    db_module.set_brief_artifact(_STATE_SCOPE, _PROJECT, _STATE_DATE, state)
 
 
 def assemble_dev_report(date: str, db_path: str | None = None) -> dict:
@@ -70,7 +85,21 @@ def get_dev_report_artifact(date: str) -> dict | None:
 
 def assemble_and_store(date: str, db_path: str | None = None) -> dict:
     """Assemble the report for date, persist it, and return the stored row."""
-    contract = assemble_dev_report(date, db_path=db_path)
-    db = _db()
-    generated_at = db.set_brief_artifact(_SCOPE, _PROJECT, date, contract)
+    db_module = _db()
+    resolved_db_path = db_path or str(db_module.DB_PATH)
+    now = _now_for_date(date)
+
+    prev_state = _load_prev_state(db_module)
+
+    contract: dict = build_contract(
+        resolved_db_path,
+        now=now,
+        projects_list=None,
+        price_map=None,
+        prev_state=prev_state,
+    )
+    new_state = contract.pop("_new_state", {})
+    _save_new_state(db_module, new_state)
+
+    generated_at = db_module.set_brief_artifact(_SCOPE, _PROJECT, date, contract)
     return {"payload": contract, "generated_at": generated_at}

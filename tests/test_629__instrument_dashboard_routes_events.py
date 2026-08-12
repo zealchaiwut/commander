@@ -18,7 +18,7 @@ import os
 import sys
 import uuid
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -90,11 +90,22 @@ def _find_emit_calls(src: str, func_name: str) -> list[dict]:
 
 _ALL_EMIT_CALLS = _find_emit_calls(_SERVER_SRC, "_emit_dashboard_event")
 
+# Aggregate emit calls across server.py + all router modules.
+# Event emissions migrated from server.py into routers in issue #1267+;
+# scanning only server.py misses them.
+_ROUTERS_DIR = DASHBOARD_DIR / "routers"
+_ALL_DASHBOARD_EMIT_CALLS: list[dict] = list(_ALL_EMIT_CALLS)
+_DASHBOARD_COMBINED_SRC = _SERVER_SRC
+for _py in sorted(_ROUTERS_DIR.glob("*.py")):
+    _src = _py.read_text()
+    _ALL_DASHBOARD_EMIT_CALLS.extend(_find_emit_calls(_src, "_emit_dashboard_event"))
+    _DASHBOARD_COMBINED_SRC += "\n" + _src
+
 
 def _record_event_types() -> set[str]:
-    """Set of event type strings statically passed to _emit_dashboard_event()."""
+    """Set of event type strings statically passed to _emit_dashboard_event() anywhere in the dashboard."""
     types = set()
-    for call in _ALL_EMIT_CALLS:
+    for call in _ALL_DASHBOARD_EMIT_CALLS:
         t = call["kwargs"].get("type") or (call["args"][1] if len(call["args"]) > 1 else None)
         if t and t != "__dynamic__":
             types.add(t)
@@ -104,52 +115,46 @@ def _record_event_types() -> set[str]:
 # ── AC-static: record_event called for each required event type ───────────────
 
 class TestStaticEventTypesPresent:
-    """Verify db.record_event() calls exist in server source for each required event type."""
+    """Verify _emit_dashboard_event() calls exist in the dashboard codebase for each required event type.
+
+    Note: AC-5 (sprint_run) and AC-6 (sprint_cancelled) removed in issue #2250 —
+    those routes were deleted along with sprint_run.py.
+    """
 
     def test_sprint_created_event_type_present(self):
         assert "sprint_created" in _record_event_types(), (
-            "server.py missing db.record_event call with type='sprint_created'"
-        )
-
-    def test_sprint_run_event_type_present(self):
-        assert "sprint_run" in _record_event_types(), (
-            "server.py missing db.record_event call with type='sprint_run'"
-        )
-
-    def test_sprint_cancelled_event_type_present(self):
-        assert "sprint_cancelled" in _record_event_types(), (
-            "server.py missing db.record_event call with type='sprint_cancelled'"
+            "dashboard missing _emit_dashboard_event call with type='sprint_created'"
         )
 
     def test_ticket_moved_event_type_present(self):
         assert "ticket_moved" in _record_event_types(), (
-            "server.py missing db.record_event call with type='ticket_moved'"
+            "dashboard missing _emit_dashboard_event call with type='ticket_moved'"
         )
 
     def test_bulk_created_event_type_present(self):
         assert "bulk_created" in _record_event_types(), (
-            "server.py missing db.record_event call with type='bulk_created'"
+            "dashboard missing _emit_dashboard_event call with type='bulk_created'"
         )
 
     def test_label_added_event_type_present(self):
         assert "label_added" in _record_event_types(), (
-            "server.py missing db.record_event call with type='label_added'"
+            "dashboard missing _emit_dashboard_event call with type='label_added'"
         )
 
     def test_label_removed_event_type_present(self):
         assert "label_removed" in _record_event_types(), (
-            "server.py missing db.record_event call with type='label_removed'"
+            "dashboard missing _emit_dashboard_event call with type='label_removed'"
         )
 
     def test_source_dashboard_appears_in_calls(self):
-        """_emit_dashboard_event is called in server.py (implies source='dashboard')."""
-        assert _ALL_EMIT_CALLS, (
-            "_emit_dashboard_event() is never called in server.py"
+        """_emit_dashboard_event is called somewhere in the dashboard codebase."""
+        assert _ALL_DASHBOARD_EMIT_CALLS, (
+            "_emit_dashboard_event() is never called in server.py or any router"
         )
-        # Also verify the helper itself passes source='dashboard' to db.record_event
-        assert "source=\"dashboard\"" in _SERVER_SRC or "source='dashboard'" in _SERVER_SRC, (
-            "No source='dashboard' literal found in server.py"
-        )
+        assert (
+            "source=\"dashboard\"" in _DASHBOARD_COMBINED_SRC
+            or "source='dashboard'" in _DASHBOARD_COMBINED_SRC
+        ), "No source='dashboard' literal found in dashboard codebase"
 
     def test_action_id_uses_uuid4(self):
         """Server source contains uuid.uuid4() for action_id generation."""
@@ -158,8 +163,11 @@ class TestStaticEventTypesPresent:
         )
 
     def test_bulk_created_call_near_post_task(self):
-        """bulk_created _emit_dashboard_event call exists near bulk_post_selected."""
-        tree = ast.parse(_SERVER_SRC)
+        """bulk_created _emit_dashboard_event call exists near bulk_post_selected in bulk_tickets.py."""
+        bulk_tickets_py = _ROUTERS_DIR / "bulk_tickets.py"
+        assert bulk_tickets_py.exists(), "routers/bulk_tickets.py not found"
+        bulk_src = bulk_tickets_py.read_text()
+        tree = ast.parse(bulk_src)
         bulk_post_lineno = None
         bulk_post_end = None
         for node in ast.walk(tree):
@@ -169,13 +177,14 @@ class TestStaticEventTypesPresent:
                     bulk_post_end = getattr(node, "end_lineno", node.lineno + 200)
                     break
 
-        assert bulk_post_lineno is not None, "bulk_post_selected function not found in server.py"
+        assert bulk_post_lineno is not None, "bulk_post_selected function not found in bulk_tickets.py"
 
+        bulk_emit_calls = _find_emit_calls(bulk_src, "_emit_dashboard_event")
         bulk_created_lines = [
-            c["lineno"] for c in _ALL_EMIT_CALLS
+            c["lineno"] for c in bulk_emit_calls
             if c["kwargs"].get("type") == "bulk_created"
         ]
-        assert bulk_created_lines, "No _emit_dashboard_event(type='bulk_created') call found"
+        assert bulk_created_lines, "No _emit_dashboard_event(type='bulk_created') call found in bulk_tickets.py"
 
         in_range = any(bulk_post_lineno <= ln <= bulk_post_end + 50 for ln in bulk_created_lines)
         assert in_range, (

@@ -7,11 +7,8 @@ AC4: GET /api/sprints/{label}/state* still responds
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
-
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 APPS_DASHBOARD = REPO_ROOT / "apps" / "dashboard"

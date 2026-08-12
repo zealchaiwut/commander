@@ -711,7 +711,6 @@ An unknown `project=` raises `404`.
 | `GET` | `/runs/{sprint}/{issue}/{agent}/log/tail` | Last N KB of a run's log |
 | `GET` | `/api/logs/runs/{sprint_label}/ticket-stats` | Per-ticket stats for a sprint's runs |
 | `GET` | `/api/logs/runs/{sprint_label}/ica-cost` | ICA (claude-proxy) cost breakdown for a sprint's runs |
-| `GET` | `/run-browser` | Serves the Run Browser HTML page (ntfy deep-link target) |
 | `GET` | `/logs/tail` | Tail arbitrary log output |
 | `GET` | `/api/logs/search` | Cross-run log search using ripgrep with DB-indexed pre-filtering |
 
@@ -757,11 +756,10 @@ An unknown `project=` raises `404`.
 | `GET` | `/api/settings/sync/status` | Settings-sync status vs. the shared source |
 | `POST` | `/api/settings/sync/diff` | Preview a settings-sync diff |
 | `POST` | `/api/settings/sync/commit` | Commit a settings-sync change |
-| `GET` | `/api/scheduler/config` | Overnight scheduler config |
-| `PUT` | `/api/scheduler/config` | Update overnight scheduler config |
-| `GET` | `/api/scheduler/sprints` | Sprints queued in the overnight scheduler |
-| `PUT` | `/api/scheduler/sprints` | Update the overnight scheduler's sprint queue |
-| `POST` | `/api/scheduler/tick` | Trigger a scheduler tick (`202`) |
+
+> The overnight sprint scheduler was removed in Sprint 1022.2 (#2238) — those
+> endpoints (`/api/scheduler/config`, `/api/scheduler/sprints`,
+> `/api/scheduler/tick`) and the `/run-browser` HTML page (#2243) no longer exist.
 
 ---
 

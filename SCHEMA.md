@@ -259,7 +259,7 @@ wall-clock span and lost per-agent resolution. Created identically on SQLite
 Indexes: `(issue_number, agent)`, `(sprint_label)`.
 
 The `provider` column drives the **`caching: reduced`** indicator on the live
-board (`project.html`) and run browser (`run_browser.html`): when an agent run's
+board (`project.html`): when an agent run's
 provider is `ICA`, the proxy strips prompt-caching headers (full context is
 re-sent each turn), so a yellow badge flags the higher token cost. It surfaces in
 the live snapshot as `coder_provider` and in `/api/runs` as `provider`.
@@ -457,13 +457,12 @@ Per-environment deploy/restart for the `prd` and `uat` environments. Each enviro
 
 > The Deploy tab is scoped to the active project only (issue #768). Deploy cards also surface and inline-edit the run folder + port (issue #769), show a live capped log tail after deploy/restart/start (issue #770), and expose Start/Stop controls with a run-state badge alongside Deploy/Restart (issue #771). Headless `gh` auth for the launchd dashboard is wired via `GH_TOKEN` in the launchd plist + agent `.env` (issue #772).
 
-### Run Browser (issue #783)
+### Run data APIs (issue #783)
 
-Forensic log viewer for all past sprint runs. All data served from local SQLite + disk log files — zero GitHub API calls.
+Forensic per-run log data for all past sprint runs. All data served from local SQLite + disk log files — zero GitHub API calls. (The standalone `/run-browser` HTML viewer page was removed in Sprint 1022.2, #2243; the data endpoints below remain.)
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/run-browser` | Serve the Run Browser HTML page; accepts `?sprint=<label>` deep-link query param |
 | `GET` | `/runs` | List all past sprints with tickets and per-agent run metadata from `agent_runs` table |
 | `GET` | `/runs/{sprint}/{issue}/{agent}/log` | Paginated log content. Query params: `page` (1-based), `limit` (lines per page, default 200) |
 | `GET` | `/runs/{sprint}/{issue}/{agent}/log/tail` | Last N KB of a log file. Query param: `kb` (default 10) |

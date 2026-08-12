@@ -93,8 +93,8 @@ def test_all_scripts_indexed():
         if name not in text:
             missing.append(name)
     assert not missing, (
-        f"These scripts are present in scripts/ but absent from scripts/AGENTS.md "
-        f"(add them to the appropriate group):\n  " + "\n  ".join(missing)
+        "These scripts are present in scripts/ but absent from scripts/AGENTS.md "
+        "(add them to the appropriate group):\n  " + "\n  ".join(missing)
     )
 
 

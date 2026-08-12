@@ -238,7 +238,6 @@ from routers import (  # noqa: E402
     backup_router,
     bulk_tickets_router,
     calibration_router,
-    deploy_router,
     doctor_router,
     environments_router,
     estimates_router,
@@ -297,7 +296,6 @@ app.include_router(activity_router)
 app.include_router(analytics_router)
 app.include_router(backup_router)
 app.include_router(calibration_router)
-app.include_router(deploy_router)
 app.include_router(doctor_router)
 app.include_router(environments_router)
 app.include_router(estimates_router)

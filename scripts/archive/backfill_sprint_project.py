@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 
 # Ensure apps/dashboard is importable.
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _DASHBOARD_DIR = _REPO_ROOT / "apps" / "dashboard"
 for _p in (str(_REPO_ROOT), str(_DASHBOARD_DIR)):
     if _p not in sys.path:

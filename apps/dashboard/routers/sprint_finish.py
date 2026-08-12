@@ -1070,44 +1070,7 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
     }
 
 
-@router.get(
-    "/api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status",
-    deprecated=True,
-    description="Deprecated: use GET /api/sprints/{sprint_label}/conflict-status?project= instead (issue #2065).",
-)
-def get_sprint_conflict_status(owner: str, repo_name: str, label: str):
-    """Return the merge-conflict-blocked state for a sprint (issue #1898).
-
-    Autonomous callers (Hermes loop) poll this to discover which sprints are
-    parked on a human-needed merge conflict so they can skip and continue with
-    other sprints instead of hanging.
-
-    Response:
-      200 {label, blocked: false}                         — no conflict block
-      200 {label, blocked: true, code, files, at}        — blocked on conflict
-    """
-    srv = _server()
-    if not srv._SPRINT_LABEL_RE.match(label):
-        raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
-
-    repo = f"{owner}/{repo_name}"
-    project_root = srv._project_root_path(repo)
-
-    blocked_info = srv._sprint_get_conflict_blocked(project_root, label)
-    if blocked_info:
-        return {
-            "label": label,
-            "blocked": True,
-            "code": "merge_conflict_needs_human",
-            "files": blocked_info.get("files", []),
-            "at": blocked_info.get("at"),
-        }
-    return {"label": label, "blocked": False}
-
-
 # ── Canonical flat routes (issue #2065) ──────────────────────────────────────
-# These are the primary addresses. The nested /api/projects/…/sprints/… paths
-# above are kept as deprecated aliases so existing callers continue to work.
 # project= must be in 'owner/repo' format (e.g. zealchaiwut/commander).
 
 @router.get("/api/sprints/{sprint_label}/finish-preview")
@@ -1143,10 +1106,3 @@ def complete_sprint_step_flat(sprint_label: str, project: str, body: CompleteSte
     """Canonical: POST /api/sprints/{sprint_label}/complete-step?project=owner/repo"""
     owner, repo_name = split_project(project)
     return complete_sprint_step(owner, repo_name, sprint_label, body)
-
-
-@router.get("/api/sprints/{sprint_label}/conflict-status")
-def get_sprint_conflict_status_flat(sprint_label: str, project: str):
-    """Canonical: GET /api/sprints/{sprint_label}/conflict-status?project=owner/repo"""
-    owner, repo_name = split_project(project)
-    return get_sprint_conflict_status(owner, repo_name, sprint_label)

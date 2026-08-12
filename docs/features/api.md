@@ -442,7 +442,6 @@ Read-only, so no bearer token is required even when `COMMANDER_API_TOKEN` is set
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/sprints/run` | Start the sprint manager for a sprint label |
-| `POST` | `/api/sprint-run` | Legacy single-body variant that spawns `sprint_manager.py` directly (`{label, goal, budget}`); prefer `/api/sprints/run` above for new integrations |
 | `DELETE` | `/api/sprints/run/{sprint_label}` | Kill a running sprint |
 | `GET` | `/api/sprints/running-all` | All currently-running sprints across projects |
 | `GET` | `/api/sprints/{sprint_label}/branch-status` | Branch status for a sprint's tickets |
@@ -589,7 +588,6 @@ canonical, bare slug accepted).
 | `GET` | `/api/sprints/{sprint_label}/bulk-complete-preview?project=` | Dry-run preview of bulk-complete. Returns `400` when the sprint has no child sprints (bulk-complete requires a parent sprint with at least one child) instead of a misleading `200` empty preview (issue #2160). Each `members[].merged` flag distinguishes a properly-merged-then-pruned branch from one deleted without merging: a branch absent from GitHub is reported `merged` only when a merged PR into its parent branch exists (issue #2086) |
 | `POST` | `/api/sprints/{sprint_label}/bulk-complete?project=` | Bulk-complete all eligible tickets in a sprint |
 | `POST` | `/api/sprints/{sprint_label}/complete-step?project=` | Complete a single step of the finish flow. When the immediate parent branch was merged and pruned, the step now walks up the sprint lineage to retarget the next surviving ancestor branch (or `develop`) instead of silently no-op'ing and stranding the child's commits. The lineage walk-up is guarded against a self-referential or excessively deep ancestry chain: if it revisits a label or exceeds 50 hops it aborts with `409` (`Sprint lineage is self-referential or too deep …`) rather than looping forever (issue #2172). Every parent-label lookup in the walk is project-scoped, so a child sprint's merge parent is resolved from the target project's own sprint config even when multiple projects share the dashboard (issue #2170). Refuses a base-sprint complete-step with `409` while any child sprint still has a live branch — running (`Child sprint … is still running`) or with unmerged commits (`… has unmerged commits …`) — and skips closing tickets that belong to such unmerged children (issue #1934) |
-| `GET` | `/api/sprints/{sprint_label}/conflict-status?project=` | Merge-conflict status for a sprint's branches |
 | `GET` | `/api/sprints/{label}/reconcile-preview` | Dry-run: GitHub-vs-DB diff + post-sprint checks for one sprint. No writes; requires `?project=`. Unknown `project=` → `404` (issue #2069). Response now also carries `outcome_mismatch` (bool) and `outcome_derived_state` (the terminal state re-derived from stored `issues_json` ticket outcomes): a sprint stored `ready_to_merge` whose ticket outcomes show a failure/dead-letter is flagged for downgrade to `needs_rework` even when no GitHub needs-rework label exists (issue #2167) |
 | `POST` | `/api/sprints/{label}/reconcile` | Apply reconcile for one sprint: correct DB lifecycle + local state from GitHub truth. Never writes to GitHub. Unknown `project=` → `404` (issue #2069). In addition to the GitHub-label signal, an additive ticket-outcome check downgrades a stale `ready_to_merge` → `needs_rework` when stored `issues_json` outcomes contain a failure the GitHub-label check misses; it never upgrades `needs_rework` → `ready_to_merge` (issue #2167) |
 
@@ -597,8 +595,7 @@ canonical, bare slug accepted).
 The old `/api/projects/{owner}/{repo_name}/sprints/{label}/…` addresses still
 work and are flagged `deprecated: true` in the OpenAPI schema. Prefer the flat
 routes above. Deprecated paths: `finish-preview`, `finish`, `finish-bg`,
-`finish-stream`, `bulk-complete-preview`, `bulk-complete`, `complete-step`,
-`conflict-status`.
+`finish-stream`, `bulk-complete-preview`, `bulk-complete`, `complete-step`.
 
 All flat finish/complete routes resolve `project=` through the central
 `project_resolver.split_project` helper, so a bare slug (e.g. `commander`) is
@@ -625,11 +622,8 @@ An unknown `project=` raises `404`.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/sprints/{sprint_label}/preflight` | Full preflight health check before dispatch |
+| `GET` | `/api/sprints/{sprint_label}/preflight` | Full preflight health check before dispatch. Cycle, file-overlap conflict, and dependency-order data are returned inline in this aggregate response (issue #2234) |
 | `POST` | `/api/sprints/{sprint_label}/preflight-fix` | Auto-fix a preflight issue |
-| `GET` | `/api/sprints/{sprint_label}/cycle-check` | Detect dependency cycles in the sprint DAG |
-| `GET` | `/api/sprints/{sprint_label}/conflicts` | Detect file-overlap conflicts between tickets |
-| `GET` | `/api/sprints/{sprint_label}/dep-order` | Resolved dependency execution order |
 | `GET` | `/api/sprints/{sprint_label}/preview-dag` | Preview the ticket dependency DAG |
 | `GET` | `/api/sprints/{sprint_label}/dag-order-preview` | Preview DAG-resolved execution order |
 
@@ -754,7 +748,6 @@ An unknown `project=` raises `404`.
 | `POST` | `/api/projects/{slug}/environments/{env}/restart` | Restart an environment's server |
 | `POST` | `/api/projects/{slug}/environments/{env}/stop` | Stop an environment's server |
 | `POST` | `/api/projects/{slug}/environments/{env}/start` | Start an environment's server |
-| `POST` | `/api/deploy/promote` | Promote `develop` to `master` via PR |
 | `GET` | `/api/deploy/overview` | Cross-project deploy overview |
 | `GET` | `/api/fs/list` | Browse the local filesystem (for path pickers) |
 | `GET` | `/api/projects/notes` | Read project notes |

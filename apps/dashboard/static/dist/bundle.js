@@ -1,84 +1,4 @@
 (() => {
-  // apps/dashboard/static/src/activity-grouping.js
-  var _SPRINT_TYPE_PREFIX = "sprint_";
-  function _evlGetSprintLabel(ev) {
-    if (ev.sprint_label)
-      return ev.sprint_label;
-    const d = ev.detail || {};
-    if (d.sprint_label)
-      return d.sprint_label;
-    if (d.sprint_id)
-      return d.sprint_id;
-    if ((ev.type || "").startsWith(_SPRINT_TYPE_PREFIX) && ev.target)
-      return ev.target;
-    return null;
-  }
-  function _isRunError(ev) {
-    const type = ev.type || "";
-    if (type === "ticket_failed")
-      return true;
-    if (type === "agent_finished") {
-      const st = (ev.detail || {}).status || "";
-      return st === "error" || st === "timed_out";
-    }
-    return false;
-  }
-  function evlGroupEventsByRun(events) {
-    if (!events || events.length === 0)
-      return [];
-    const order = [];
-    const map = {};
-    for (const ev of events) {
-      const sl = _evlGetSprintLabel(ev);
-      if (sl) {
-        const key = "sprint:" + sl;
-        if (!map[key]) {
-          map[key] = {
-            key,
-            sprint_label: sl,
-            isOther: false,
-            dayKey: null,
-            events: [],
-            hasErrors: false,
-            errorCount: 0,
-            outcome: null
-          };
-          order.push(key);
-        }
-        const g = map[key];
-        g.events.push(ev);
-        if (_isRunError(ev)) {
-          g.hasErrors = true;
-          g.errorCount += 1;
-        }
-        if (ev.type === "sprint_finished") {
-          const d = ev.detail || {};
-          const failed = d.failed || 0;
-          g.outcome = failed > 0 ? "failed" : "completed";
-        }
-      } else {
-        const ts = ev.timestamp || "";
-        const dayKey = ts.substring(0, 10) || "unknown";
-        const key = "other:" + dayKey;
-        if (!map[key]) {
-          map[key] = {
-            key,
-            sprint_label: "",
-            isOther: true,
-            dayKey,
-            events: [],
-            hasErrors: false,
-            errorCount: 0,
-            outcome: null
-          };
-          order.push(key);
-        }
-        map[key].events.push(ev);
-      }
-    }
-    return order.map((k) => map[k]);
-  }
-
   // apps/dashboard/static/src/logpanel.js
   var AGENT_NAMES = [
     "coder",
@@ -8886,68 +8806,6 @@ Proceed anyway?`)) {
   globalThis.sprintHealthStripInit = sprintHealthStripInit2;
   globalThis._smgmtComputeLeadingEmpty = _smgmtComputeLeadingEmpty;
 
-  // apps/dashboard/static/src/logs-error-badge.js
-  function logsErrorBadgeKey(slug) {
-    return "commander_logs_last_visit_" + slug;
-  }
-  function logsReadLastVisit(slug) {
-    try {
-      return typeof localStorage !== "undefined" && localStorage.getItem(logsErrorBadgeKey(slug)) || null;
-    } catch (_) {
-      return null;
-    }
-  }
-  function logsWriteLastVisit(slug) {
-    try {
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem(logsErrorBadgeKey(slug), (/* @__PURE__ */ new Date()).toISOString());
-      }
-    } catch (_) {
-    }
-  }
-  function evlIsErrorEvent(ev) {
-    const type = ev.type || "";
-    if (type === "ticket_failed")
-      return true;
-    if (type === "agent_finished") {
-      const st = (ev.detail || {}).status || "";
-      return st === "error" || st === "timed_out";
-    }
-    return false;
-  }
-  function logsCountNewErrors(events) {
-    return events.filter(evlIsErrorEvent).length;
-  }
-  function buildEvlFetchUrl(slug, sinceTs) {
-    const base = "/api/projects/" + encodeURIComponent(slug) + "/events";
-    if (sinceTs) {
-      return base + "?since=" + encodeURIComponent(sinceTs) + "&limit=200";
-    }
-    return base + "?limit=200";
-  }
-
-  // apps/dashboard/static/src/logs-view-controls.js
-  function shouldAutoLoadRaw(viewMode, rawLines, runCount) {
-    return viewMode === "raw" && rawLines === null && runCount > 0;
-  }
-  function pickAutoSprintLabel(runs, filterSprint) {
-    if (filterSprint)
-      return filterSprint;
-    return runs[0] && runs[0].sprint_label || null;
-  }
-  function logsToolbarVisibility(mode) {
-    const isActivity = mode === "activity";
-    const isRaw = mode === "raw";
-    return {
-      agentSelect: isActivity,
-      sourceSelect: isActivity,
-      severitySeg: isActivity,
-      rawLevelSelect: isRaw,
-      sprintSelect: true,
-      searchInput: true
-    };
-  }
-
   // apps/dashboard/static/src/failures/failures.js
   async function fetchFailures(project, category) {
     let url = "/api/failures?project=" + encodeURIComponent(project);
@@ -9309,24 +9167,6 @@ Proceed anyway?`)) {
   globalThis.GH_AUTH_POLL_INTERVAL_MS = GH_AUTH_POLL_INTERVAL_MS;
   globalThis.startGhAuthPoll = startGhAuthPoll;
   globalThis.stopGhAuthPoll = stopGhAuthPoll;
-  root.evlGroupEventsByRun = evlGroupEventsByRun;
-  globalThis.evlGroupEventsByRun = evlGroupEventsByRun;
-  root.logsReadLastVisit = logsReadLastVisit;
-  root.logsWriteLastVisit = logsWriteLastVisit;
-  root.evlIsErrorEvent = evlIsErrorEvent;
-  root.logsCountNewErrors = logsCountNewErrors;
-  root.buildEvlFetchUrl = buildEvlFetchUrl;
-  globalThis.logsReadLastVisit = logsReadLastVisit;
-  globalThis.logsWriteLastVisit = logsWriteLastVisit;
-  globalThis.evlIsErrorEvent = evlIsErrorEvent;
-  globalThis.logsCountNewErrors = logsCountNewErrors;
-  globalThis.buildEvlFetchUrl = buildEvlFetchUrl;
-  root.shouldAutoLoadRaw = shouldAutoLoadRaw;
-  root.pickAutoSprintLabel = pickAutoSprintLabel;
-  root.logsToolbarVisibility = logsToolbarVisibility;
-  globalThis.shouldAutoLoadRaw = shouldAutoLoadRaw;
-  globalThis.pickAutoSprintLabel = pickAutoSprintLabel;
-  globalThis.logsToolbarVisibility = logsToolbarVisibility;
   root.fetchFailures = fetchFailures;
   root.failuresInit = failuresInit2;
   root.failuresCategoryChange = failuresCategoryChange;

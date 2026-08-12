@@ -1,15 +1,12 @@
-"""Preflight and DAG-related sprint endpoints (extracted from server.py, issue #1254).
+"""Preflight sprint endpoints (extracted from server.py, issue #1254).
 
-Handles the five routes that check sprint health before dispatch:
+Handles the two routes that check sprint health before dispatch:
   GET  /api/sprints/{sprint_label}/preflight
   POST /api/sprints/{sprint_label}/preflight-fix
-  GET  /api/sprints/{sprint_label}/cycle-check
-  GET  /api/sprints/{sprint_label}/conflicts
-  GET  /api/sprints/{sprint_label}/dep-order
 
-Service logic is thin here — business logic was co-located with the original
-handlers and is preserved as-is. DAG cycle detection via dag_builder is
-imported directly (no server.py indirection needed).
+The standalone cycle-check, conflicts, and dep-order endpoints were removed in
+issue #2234 (zero frontend callers); their data is still returned inline by the
+aggregate GET preflight response.
 
 Helpers that are also used by other routes in server.py (e.g. _sprint_dag_tickets,
 _check_estimate_stale, _resolve_issue_estimate) are accessed via a deferred
@@ -42,14 +39,6 @@ from services.sprint_manager.estimate_issue import (
     fetch_issue as _ei_fetch_issue,
     run_estimator as _ei_run_estimator,
 )
-
-try:
-    from dag_builder import CycleError as _CycleError, build_dag as _build_dag
-    _DAG_BUILDER_AVAILABLE = True
-except ImportError:
-    _CycleError = None  # type: ignore[assignment,misc]
-    _build_dag = None  # type: ignore[assignment]
-    _DAG_BUILDER_AVAILABLE = False
 
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
 if str(_DASHBOARD_ROOT) not in sys.path:
@@ -203,222 +192,6 @@ async def preflight_fix(sprint_label: str, project: str):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
-
-
-@router.get("/api/sprints/{sprint_label}/cycle-check")
-def get_sprint_cycle_check(sprint_label: str, project: str):
-    """Run DAG cycle detection for a sprint before dispatch.
-
-    Returns {"has_cycle": false} when acyclic.
-    Returns {"has_cycle": true, "error": "cycle_detected", "cycles": [...]}
-    when cycle(s) found. Returns {"has_cycle": false, "warning":
-    "dag_builder_unavailable"} if dag_builder not loaded.
-    """
-    srv = _server()
-    if not srv._SPRINT_LABEL_RE.match(sprint_label):
-        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-
-    if not srv._DAG_BUILDER_AVAILABLE:
-        return {"has_cycle": False, "warning": "dag_builder_unavailable"}
-
-    try:
-        issues = srv.github_client.list_open_issues_with_body(
-            repo_name=project,
-            limit=200,
-        )
-    except subprocess.CalledProcessError as e:
-        raise srv._gh_error(e)
-
-    sprint_issues = [
-        iss for iss in issues
-        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
-    ]
-
-    project_root = srv._project_root_path(project)
-    tickets = srv._sprint_dag_tickets(project_root, sprint_issues)
-    result = srv._build_dag(tickets)
-
-    if isinstance(result, srv._CycleError):
-        payload = result.to_payload()
-        return {"has_cycle": True, **payload}
-
-    return {"has_cycle": False}
-
-
-@router.get("/api/sprints/{sprint_label}/conflicts")
-def get_sprint_conflicts(sprint_label: str, project: str):
-    """Return all pairs of pending tickets in a sprint that share files.
-
-    Pending = issues with no in-progress/sit/uat/done label (backlog).
-    File paths sourced from .commander/estimates/issue-<N>.json
-    files_likely_affected.
-
-    Returns {"conflicts": [...], "pending_count": N} on success.
-    Returns 404 when no issues with sprint_label exist.
-    """
-    srv = _server()
-    if not srv._SPRINT_LABEL_RE.match(sprint_label):
-        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-
-    try:
-        all_issues = srv.github_client.list_open_issues_with_body(
-            repo_name=project,
-            limit=200,
-        )
-    except subprocess.CalledProcessError as e:
-        raise srv._gh_error(e)
-
-    sprint_issues = [
-        iss for iss in all_issues
-        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
-    ]
-
-    if not sprint_issues:
-        raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found")
-
-    pending_issues = [
-        iss for iss in sprint_issues
-        if srv.github_client.classify_issue(iss) == "backlog"
-    ]
-
-    project_root = srv._project_root_path(project)
-    estimates_dir = srv._commander_dir(project_root) / "estimates"
-
-    ticket_files: list[dict] = []
-    for iss in pending_issues:
-        num = iss["number"]
-        files: list[str] = []
-        est_path = estimates_dir / f"issue-{num}.json"
-        if est_path.exists():
-            try:
-                est = json.loads(est_path.read_text(encoding="utf-8"))
-                files = est.get("files_likely_affected") or []
-            except (json.JSONDecodeError, OSError):
-                pass
-        ticket_files.append({
-            "id": num,
-            "title": iss["title"],
-            "files": set(files),
-        })
-
-    conflicts = []
-    for i in range(len(ticket_files)):
-        for j in range(i + 1, len(ticket_files)):
-            a, b = ticket_files[i], ticket_files[j]
-            shared = sorted(a["files"] & b["files"])
-            if shared:
-                conflicts.append({
-                    "ticket1_id": a["id"],
-                    "ticket1_title": a["title"],
-                    "ticket2_id": b["id"],
-                    "ticket2_title": b["title"],
-                    "shared_files": shared,
-                })
-
-    return {"conflicts": conflicts, "pending_count": len(pending_issues)}
-
-
-@router.get("/api/sprints/{sprint_label}/dep-order")
-def get_sprint_dep_order(sprint_label: str, project: str):
-    """Return dependency order hints from file-overlap DAG for pending.
-
-    For each ticket with at least one DAG edge, returns upstream (run after)
-    and downstream (run before) lists. If DAG contains cycles, returns
-    has_cycle=True with in_cycle_tickets for frontend warning.
-
-    Returns {"has_cycle": bool, "dep_hints": {...}, "pending_count": N}.
-    Returns 404 when no issues with sprint_label exist.
-    """
-    srv = _server()
-    if not srv._SPRINT_LABEL_RE.match(sprint_label):
-        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
-
-    try:
-        all_issues = srv.github_client.list_open_issues_with_body(
-            repo_name=project,
-            limit=200,
-        )
-    except subprocess.CalledProcessError as e:
-        raise srv._gh_error(e)
-
-    sprint_issues = [
-        iss for iss in all_issues
-        if any(lbl["name"] == sprint_label for lbl in iss.get("labels", []))
-    ]
-
-    if not sprint_issues:
-        raise HTTPException(404, detail=f"Sprint {sprint_label!r} not found")
-
-    pending_issues = [
-        iss for iss in sprint_issues
-        if srv.github_client.classify_issue(iss) == "backlog"
-    ]
-
-    project_root = srv._project_root_path(project)
-    estimates_dir = srv._commander_dir(project_root) / "estimates"
-
-    ticket_files: list[dict] = []
-    for iss in pending_issues:
-        num = iss["number"]
-        files: list[str] = []
-        est_path = estimates_dir / f"issue-{num}.json"
-        if est_path.exists():
-            try:
-                est = json.loads(est_path.read_text(encoding="utf-8"))
-                files = est.get("files_likely_affected") or []
-            except (json.JSONDecodeError, OSError):
-                pass
-        ticket_files.append({
-            "id": num,
-            "title": iss["title"],
-            "files": files,
-        })
-
-    if srv._build_dag is None:
-        return {
-            "has_cycle": False, "cycles": [], "in_cycle_tickets": [],
-            "dep_hints": {}, "pending_count": len(pending_issues),
-            "warning": "dag_builder_unavailable",
-        }
-
-    dag_tickets = [
-        {"id": str(tf["id"]), "files_touched": tf["files"]} for tf in ticket_files
-    ]
-    title_map = {str(tf["id"]): tf["title"] for tf in ticket_files}
-
-    result = srv._build_dag(dag_tickets)
-
-    if isinstance(result, srv._CycleError):
-        in_cycle_ids = [int(tid) for cycle in result.cycles for tid in cycle]
-        return {
-            "has_cycle": True,
-            "cycles": result.cycles,
-            "in_cycle_tickets": sorted(set(in_cycle_ids)),
-            "dep_hints": {},
-            "pending_count": len(pending_issues),
-        }
-
-    upstream: dict[str, list[dict]] = {str(tf["id"]): [] for tf in ticket_files}
-    downstream: dict[str, list[dict]] = {str(tf["id"]): [] for tf in ticket_files}
-    for src, dst in result.edges:
-        downstream[src].append({"id": int(dst), "title": title_map.get(dst, "")})
-        upstream[dst].append({"id": int(src), "title": title_map.get(src, "")})
-
-    dep_hints: dict[int, dict] = {}
-    for tf in ticket_files:
-        tid = str(tf["id"])
-        u = upstream[tid]
-        d = downstream[tid]
-        if u or d:
-            dep_hints[tf["id"]] = {"upstream": u, "downstream": d}
-
-    return {
-        "has_cycle": False,
-        "cycles": [],
-        "in_cycle_tickets": [],
-        "dep_hints": dep_hints,
-        "pending_count": len(pending_issues),
-    }
 
 
 @router.get("/api/sprints/{sprint_label}/preflight")

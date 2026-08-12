@@ -48,7 +48,6 @@ from .estimates import router as estimates_router
 from .calibration import router as calibration_router
 from .metrics import router as metrics_router
 from .finish_card import router as finish_card_router
-from .deploy import router as deploy_router
 from .mis_sizing import router as mis_sizing_router
 from .xl_suggestions import router as xl_suggestions_router
 from .sprint_collisions import router as sprint_collisions_router
@@ -108,7 +107,6 @@ __all__ = [
     "calibration_router",
     "metrics_router",
     "finish_card_router",
-    "deploy_router",
     "mis_sizing_router",
     "xl_suggestions_router",
     "sprint_collisions_router",

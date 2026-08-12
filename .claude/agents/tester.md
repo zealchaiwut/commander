@@ -18,7 +18,14 @@ Input will be one of:
 - `verify issue <N>` — single issue, run the workflow once.
 - `verify issues <N1> <N2> <N3> ...` — multiple issues, run in **parallel sub-agents** (see "Parallel Mode" below).
 
-Extract the issue number(s) and follow the appropriate workflow.
+Extract the issue number(s), then immediately export the agent identity env vars so all hook calls for this session carry the correct attribution (use the first/primary issue number N for multi-issue runs):
+
+```bash
+export CLAUDE_AGENT_ROLE=tester
+export CLAUDE_AGENT_ISSUE=<N>
+```
+
+Then follow the appropriate workflow.
 
 ## Step 0 — Resolve UAT environment (do this FIRST, every invocation)
 
@@ -576,7 +583,7 @@ cd "$MAIN_REPO" && python3 scripts/finish_feature.py --issue <N>
 ```
 
 **MANDATORY — human-in-the-loop gate:**
-- `finish_feature.py` applies the **UAT** label and keeps the issue **OPEN**. That is the correct end state.
+- `finish_feature.py` applies the **UAT** label and keeps the issue **OPEN**. That is the correct end state. (When finish_feature is called by the sprint_manager dispatch loop it sets `COMMANDER_SPRINT_RUNNING`; finish_feature skips the label change in that case and sprint_manager applies it instead. In a manual `/tester` session `COMMANDER_SPRINT_RUNNING` is unset and finish_feature applies UAT directly.)
 - Do **NOT** apply `UAT-approved` label. Do **NOT** close the issue. Do **NOT** run `update_ticket.py --status uat-approved`.
 - `UAT-approved` is set **only** by a human via the dashboard Approve button or `scripts/approve_ticket.py`.
 - Your job ends when `finish_feature.py` completes successfully. The issue will remain open in UAT state awaiting human review.

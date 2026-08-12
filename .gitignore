@@ -30,11 +30,11 @@ codedb.snapshot
 # Runtime
 *.pid
 *.log
-*.db
-*.db-wal
-*.db-shm
-*.db-journal
+*.log.*
+*.db*
 *.bak
+*.bak-*
+*.corrupt-*
 :memory:
 logs/
 sprints/

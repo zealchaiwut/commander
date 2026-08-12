@@ -1,12 +1,4 @@
-"""Tests for issue #2236 — archive eight completed one-off migration scripts.
-
-AC1  All eight scripts moved to scripts/archive/; none remain in scripts/
-AC2  scripts/AGENTS.md no longer indexes the archived scripts
-     (test_2057 coverage gate stays green — verified by that test suite;
-     here we check AGENTS.md doesn't still list the removed scripts)
-AC3  No remaining production-code caller (outside tests/ and scripts/archive/)
-     references any moved script by name
-"""
+"""Tests for issue #2236 — archive eight completed one-off migration scripts."""
 from __future__ import annotations
 
 import re
@@ -29,7 +21,7 @@ MOVED_SCRIPTS = [
 ]
 
 
-def test_ac1_scripts_present_in_archive():
+def test_2236__all_eight_scripts_moved_to_archive():
     """AC1 — every moved script must exist in scripts/archive/."""
     missing = [s for s in MOVED_SCRIPTS if not (ARCHIVE_DIR / s).exists()]
     assert not missing, (
@@ -38,7 +30,7 @@ def test_ac1_scripts_present_in_archive():
     )
 
 
-def test_ac1_scripts_absent_from_scripts_root():
+def test_2236__no_scripts_remain_in_root():
     """AC1 — none of the moved scripts may remain in scripts/ (only archive/)."""
     still_present = [s for s in MOVED_SCRIPTS if (SCRIPTS_DIR / s).exists()]
     assert not still_present, (
@@ -47,16 +39,14 @@ def test_ac1_scripts_absent_from_scripts_root():
     )
 
 
-def test_ac2_agents_md_does_not_index_moved_scripts():
+def test_2236__agents_md_updated():
     """AC2 — scripts/AGENTS.md must not list any of the eight archived scripts as active entries."""
     text = AGENTS_MD.read_text()
-    # The scripts should not appear as bullet entries in the main index.
-    # Comments/archive notes are acceptable, but active bullet lines are not.
     bullet_lines = [ln for ln in text.splitlines() if ln.strip().startswith("- `")]
-    indexed = []
-    for script in MOVED_SCRIPTS:
-        if any(script in ln for ln in bullet_lines):
-            indexed.append(script)
+    indexed = [
+        script for script in MOVED_SCRIPTS
+        if any(script in ln for ln in bullet_lines)
+    ]
     assert not indexed, (
         "These archived scripts are still listed as active entries"
         " in scripts/AGENTS.md:\n  "
@@ -90,9 +80,8 @@ def _non_comment_lines(source: str) -> list[str]:
     ]
 
 
-def test_ac3_no_import_of_moved_scripts():
+def test_2236__no_remaining_callers():
     """AC3 — no production code imports any moved script by module name."""
-    # Module names derived from script stems (e.g. repair_sprint_collisions)
     moved_stems = {Path(s).stem for s in MOVED_SCRIPTS}
     offenders: list[str] = []
     for path in _non_archive_python_files():

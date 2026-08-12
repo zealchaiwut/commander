@@ -252,6 +252,19 @@ class TestSingleEffectAction:
         rows = _bundle_events(self._events())
         assert rows[0]["count"] == 1
 
+    def test_single_effect_marker_in_html(self):
+        """HTML must have a CSS class or attribute that marks single-effect bundles.
+        The evl-single class disables expand affordance and cursor pointer."""
+        assert "evl-single" in _HTML, (
+            "project.html missing 'evl-single' class for single-effect bundles"
+        )
+
+    def test_single_bundle_no_chevron_logic_in_html(self):
+        """JS must differentiate single-effect (isSingle) from multi-effect bundles."""
+        assert "isSingle" in _HTML, (
+            "project.html missing 'isSingle' check in JS bundling render logic"
+        )
+
 
 # ── AC-4: Bundling key is action_id ───────────────────────────────────────────
 
@@ -418,6 +431,167 @@ class TestGithubSourceFilterFlattens:
 
 
 # ── AC-8: HTML structure for collapsed bundle row ─────────────────────────────
+
+class TestBundleRowHtmlStructure:
+    """AC-8: HTML contains required CSS classes for bundle display."""
+
+    def test_evl_bundle_row_class_exists(self):
+        assert "evl-bundle-row" in _HTML, "Missing .evl-bundle-row CSS class"
+
+    def test_evl_effect_chip_class_exists(self):
+        assert "evl-effect-chip" in _HTML, "Missing .evl-effect-chip CSS class"
+
+    def test_evl_count_badge_class_exists(self):
+        assert "evl-count-badge" in _HTML, "Missing .evl-count-badge CSS class"
+
+    def test_evl_headline_class_exists(self):
+        assert "evl-headline" in _HTML, "Missing .evl-headline CSS class"
+
+    def test_evl_effect_chips_container_class_exists(self):
+        assert "evl-effect-chips" in _HTML, "Missing .evl-effect-chips CSS class"
+
+    def test_evl_added_chip_class_exists(self):
+        assert "evl-effect-chip--added" in _HTML, "Missing .evl-effect-chip--added CSS class"
+
+    def test_evl_removed_chip_class_exists(self):
+        assert "evl-effect-chip--removed" in _HTML, "Missing .evl-effect-chip--removed CSS class"
+
+    def test_evl_sub_rows_class_exists(self):
+        assert "evl-sub-rows" in _HTML, "Missing .evl-sub-rows CSS class"
+
+    def test_evl_sub_row_class_exists(self):
+        assert "evl-sub-row" in _HTML, "Missing .evl-sub-row CSS class"
+
+    def test_evl_ts_class_exists(self):
+        assert "evl-ts" in _HTML, "Missing .evl-ts CSS class (seconds-level timestamp)"
+
+    def test_evl_actor_class_exists(self):
+        assert "evl-actor" in _HTML, "Missing .evl-actor CSS class"
+
+    def test_evl_standalone_row_class_exists(self):
+        assert "evl-standalone-row" in _HTML, "Missing .evl-standalone-row CSS class"
+
+
+# ── AC-9: Expand/collapse HTML affordances ────────────────────────────────────
+
+class TestExpandCollapseAffordances:
+    """AC-9: HTML has chevron, expanded state, and evlToggleBundle JS function."""
+
+    def test_evl_chevron_class_exists(self):
+        assert "evl-chevron" in _HTML, "Missing .evl-chevron CSS class"
+
+    def test_evl_bundle_row_expanded_class_exists(self):
+        assert "evl-bundle-row.expanded" in _HTML or ".expanded .evl-" in _HTML, (
+            "Missing .evl-bundle-row.expanded or .expanded .evl-* CSS selector for expand state"
+        )
+
+    def test_evl_toggle_bundle_function_exists(self):
+        assert "evlToggleBundle" in _HTML, "Missing evlToggleBundle JS function"
+
+    def test_evl_sub_rows_hidden_by_default(self):
+        assert "evl-sub-rows" in _HTML, "Missing .evl-sub-rows container"
+        # The sub-rows container must be hidden by default (display:none or .hidden class)
+        assert "display: none" in _HTML or "display:none" in _HTML, (
+            "Missing display:none for .evl-sub-rows (sub-rows should be hidden by default)"
+        )
+
+    def test_evl_toggle_function_uses_expanded_class(self):
+        assert "expanded" in _HTML, "Missing 'expanded' class usage in JS toggle logic"
+
+
+# ── HTML: Activity view button and source filter ──────────────────────────────
+
+class TestActivityViewUi:
+    """HTML has Activity view button, source filter chips, and body container."""
+
+    def test_activity_view_button_exists(self):
+        assert 'id="logs-view-activity"' in _HTML, (
+            "Missing logs-view-activity button in Logs toolbar"
+        )
+
+    def test_activity_view_button_calls_logs_set_view(self):
+        assert "logsSetView('activity')" in _HTML, (
+            "Activity view button must call logsSetView('activity')"
+        )
+
+    def test_logs_activity_body_container_exists(self):
+        assert 'id="logs-activity"' in _HTML, (
+            "Missing logs-activity body container"
+        )
+
+    def test_evl_source_filter_all_chip_exists(self):
+        assert (
+            'id="evl-filter-all"' in _HTML
+            or 'id="evl-source-all"' in _HTML
+            or 'id="logs-filter-source"' in _HTML
+        ), (
+            "Missing source filter control (evl-filter-all, evl-source-all, or logs-filter-source)"
+        )
+
+    def test_evl_source_filter_github_chip_exists(self):
+        assert (
+            'id="evl-filter-github"' in _HTML
+            or 'id="evl-source-github"' in _HTML
+            or 'id="logs-filter-source"' in _HTML
+        ), (
+            "Missing source filter GitHub control (evl-filter-github, evl-source-github, or logs-filter-source)"
+        )
+
+    def test_evl_set_source_function_exists(self):
+        assert "evlSetSource" in _HTML, "Missing evlSetSource JS function"
+
+    def test_logs_set_view_handles_activity_mode(self):
+        assert "'activity'" in _HTML, (
+            "logsSetView does not handle 'activity' mode"
+        )
+
+    def test_evl_list_container_exists(self):
+        assert 'id="evl-list"' in _HTML, "Missing evl-list container"
+
+
+# ── HTML: JS bundling functions ───────────────────────────────────────────────
+
+class TestJsBundlingFunctions:
+    """HTML contains the required JS functions for bundling."""
+
+    def test_evl_bundle_events_function_exists(self):
+        assert "_evlBundleEvents" in _HTML, "Missing _evlBundleEvents JS function"
+
+    def test_evl_effect_chip_function_exists(self):
+        assert "_evlEffectChip" in _HTML, "Missing _evlEffectChip JS function"
+
+    def test_evl_headline_label_function_exists(self):
+        assert "_evlHeadlineLabel" in _HTML, "Missing _evlHeadlineLabel JS function"
+
+    def test_evl_render_function_exists(self):
+        assert "evlRender" in _HTML, "Missing evlRender JS function"
+
+    def test_evl_fetch_function_exists(self):
+        assert "evlFetch" in _HTML, "Missing evlFetch JS function"
+
+    def test_evl_state_object_exists(self):
+        assert "_evlState" in _HTML, "Missing _evlState JS state object"
+
+    def test_evl_fetches_from_events_endpoint(self):
+        assert "/events" in _HTML and "evlFetch" in _HTML, (
+            "evlFetch must call the /api/projects/{slug}/events endpoint"
+        )
+
+    def test_evl_bundle_events_checks_github_source_filter(self):
+        assert "sourceFilter" in _HTML or "source_filter" in _HTML, (
+            "JS bundling must check source filter for GitHub flatten behavior"
+        )
+
+    def test_evl_bundle_events_checks_lifecycle_sources(self):
+        assert "sprint_manager" in _HTML or "_EVL_LIFECYCLE_SOURCES" in _HTML, (
+            "JS bundling must exclude sprint_manager (lifecycle) events from bundling"
+        )
+
+    def test_evl_bundle_events_checks_cause_sources(self):
+        assert "_EVL_CAUSE_SOURCES" in _HTML or "dashboard" in _HTML, (
+            "JS bundling must identify 'dashboard' events as cause events"
+        )
+
 
 # ── Effect chip label correctness ─────────────────────────────────────────────
 

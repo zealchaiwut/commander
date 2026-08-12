@@ -152,7 +152,7 @@ class TestLogpanelModule:
 
     def test_entry_imports_logpanel(self):
         entry = _read(SRC_DIR / "index.js")
-        assert re.search(r'import .*from\s+[\'"]\./logpanel(\.js)?[\'"]', entry, re.DOTALL), \
+        assert re.search(r'import .*from\s+[\'"]\./logpanel(\.js)?[\'"]', entry), \
             "entry point must import ./logpanel.js"
 
     def test_build_entry_is_index(self, package_json):

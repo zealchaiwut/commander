@@ -21,7 +21,7 @@ from typing import Optional
 from services.logging import log as structured_log
 from services.sprint_manager.state import GateResult
 
-_post_agent_event = lambda *args, **kwargs: None  # events.py deleted #2241
+def _post_agent_event(*args, **kwargs): pass  # events.py deleted #2241
 
 # Same calculation as in sprint_manager.py: this file lives at
 # services/sprint_manager/gates.py, so repo root is three levels up.

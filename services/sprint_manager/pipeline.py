@@ -362,10 +362,10 @@ from services.sprint_manager.model_routing import (  # noqa: E402
 )
 
 # alerts.py and events.py deleted #2241 — stubs for Sprint 3 removal
-dispatch_alerts = lambda *args, **kwargs: None
-_emit_sprint_lifecycle_event = lambda *args, **kwargs: None
-_emit_ticket_failed = lambda *args, **kwargs: None
-_post_sprint_status = lambda *args, **kwargs: None
+def dispatch_alerts(*args, **kwargs): pass
+def _emit_sprint_lifecycle_event(*args, **kwargs): pass
+def _emit_ticket_failed(*args, **kwargs): pass
+def _post_sprint_status(*args, **kwargs): pass
 
 try:
     from services.sprint_manager.state_machine import (  # noqa: PLC0415
@@ -396,11 +396,17 @@ _run_pipeline_level = run_level
 
 # failures.py deleted #2241; inline enum values for Sprint 3 deletion
 class FailureCategory:  # noqa: N801
-    HANG = "HANG"; CRASH = "CRASH"; GATE_FAIL = "GATE_FAIL"
-    TESTER_REJECTED = "TESTER_REJECTED"; RETRY_EXHAUSTED = "RETRY_EXHAUSTED"
-    CODER_NO_WORK = "CODER_NO_WORK"; MERGE_CONFLICT = "MERGE_CONFLICT"
-    LINT_FAIL = "LINT_FAIL"; PYTEST_FAIL = "PYTEST_FAIL"
-    REBASE_CONFLICT = "REBASE_CONFLICT"; ENV_ERROR = "ENV_ERROR"
+    HANG = "HANG"
+    CRASH = "CRASH"
+    GATE_FAIL = "GATE_FAIL"
+    TESTER_REJECTED = "TESTER_REJECTED"
+    RETRY_EXHAUSTED = "RETRY_EXHAUSTED"
+    CODER_NO_WORK = "CODER_NO_WORK"
+    MERGE_CONFLICT = "MERGE_CONFLICT"
+    LINT_FAIL = "LINT_FAIL"
+    PYTEST_FAIL = "PYTEST_FAIL"
+    REBASE_CONFLICT = "REBASE_CONFLICT"
+    ENV_ERROR = "ENV_ERROR"
 
 _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
     FailureCategory.CODER_NO_WORK,

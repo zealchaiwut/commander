@@ -44,13 +44,20 @@ from services.sprint_manager.timekeeping import _utcnow  # noqa: E402
 
 # failures.py and label_transitions.py deleted #2241 — stubs for Sprint 3 removal
 class FailureCategory:  # noqa: N801
-    HANG = "HANG"; CRASH = "CRASH"; GATE_FAIL = "GATE_FAIL"
-    TESTER_REJECTED = "TESTER_REJECTED"; RETRY_EXHAUSTED = "RETRY_EXHAUSTED"
-    CODER_NO_WORK = "CODER_NO_WORK"; MERGE_CONFLICT = "MERGE_CONFLICT"
-    LINT_FAIL = "LINT_FAIL"; PYTEST_FAIL = "PYTEST_FAIL"
-    REBASE_CONFLICT = "REBASE_CONFLICT"; ENV_ERROR = "ENV_ERROR"
+    HANG = "HANG"
+    CRASH = "CRASH"
+    GATE_FAIL = "GATE_FAIL"
+    TESTER_REJECTED = "TESTER_REJECTED"
+    RETRY_EXHAUSTED = "RETRY_EXHAUSTED"
+    CODER_NO_WORK = "CODER_NO_WORK"
+    MERGE_CONFLICT = "MERGE_CONFLICT"
+    LINT_FAIL = "LINT_FAIL"
+    PYTEST_FAIL = "PYTEST_FAIL"
+    REBASE_CONFLICT = "REBASE_CONFLICT"
+    ENV_ERROR = "ENV_ERROR"
 
-_add_blocked_label = lambda *args, **kwargs: None
+
+def _add_blocked_label(*args, **kwargs): pass
 from services.sprint_manager import agent_browser_runner  # noqa: E402
 
 # Same formula as sprint_manager.REPO_ROOT — this file lives at the same level.

@@ -7,7 +7,6 @@ AC4: On a conflicting branch the wizard surfaces the conflict clearly and stops.
 """
 from __future__ import annotations
 
-import importlib.util
 import sys
 from pathlib import Path
 

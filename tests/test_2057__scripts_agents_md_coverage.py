@@ -54,11 +54,17 @@ MUTATION_MARKERS = {
     "release.py": "[GH]",
     "deduplicate_labels.py": "[GH]",
     "seed_test_issues.py": "[GH]",
+    # Neon-mutating scripts
+    "export_to_neon.py": "[Neon]",
+    "migrate_sprints_to_neon.py": "[Neon]",
     # DB-mutating scripts (local SQLite)
     "resync_issues_mirror.py": "[DB]",
     "backfill_agent_runs_project.py": "[DB]",
+    "backfill_sprint_project.py": "[DB]",
+    "repair_sprint_collisions.py": "[DB]",
     "repair_sprint_inbox_from_github.py": "[DB]",
     "repair_sprint_lineage.py": "[DB]",
+    "migrate_to_separate_dbs.py": "[DB]",
 }
 
 

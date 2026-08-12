@@ -47,8 +47,6 @@ Run from the repo root (the directory that contains dashboard/).
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import re
 import subprocess
 import sys
@@ -166,7 +164,6 @@ def _build_subdir_moves(repo_root: Path) -> list[tuple[Path, Path]]:
     dash_claude = apps_dash / ".claude"
     if dash_claude.exists():
         for item in sorted(dash_claude.iterdir()):
-            dst_item = repo_root / ".claude" / item.name
             if item.is_dir():
                 for sub in sorted(item.rglob("*")):
                     if sub.is_file():
@@ -418,7 +415,7 @@ def migrate(repo_root: Path, dry_run: bool) -> bool:
 
     top_move = (dashboard, repo_root / "apps" / "dashboard")
     if dry_run:
-        _info(f"[dry-run] git mv dashboard → apps/dashboard")
+        _info("[dry-run] git mv dashboard → apps/dashboard")
     else:
         if not _git_mv(top_move[0], top_move[1], repo_root, dry_run=False):
             _error("Failed to move dashboard/ → apps/dashboard/ — aborting")

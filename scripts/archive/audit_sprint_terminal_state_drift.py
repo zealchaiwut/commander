@@ -15,8 +15,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import sys
 from pathlib import Path
 
@@ -25,7 +23,7 @@ _DASHBOARD_ROOT = _REPO_ROOT / "apps" / "dashboard"
 sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_DASHBOARD_ROOT))
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 load_dotenv(_DASHBOARD_ROOT / ".env", override=False)
 
 import db  # noqa: E402

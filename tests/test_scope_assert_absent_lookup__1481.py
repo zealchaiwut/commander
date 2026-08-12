@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.archive import repair_sprint_collisions as rsc
+from scripts import repair_sprint_collisions as rsc
 
 
 @pytest.fixture
@@ -118,7 +118,7 @@ def test_no_other_assert_absent_uses_unscoped(temp_db):
     #   2. Nowhere else in apply() for ASSERT_ABSENT
 
     # Read the source to verify this
-    source_path = Path(__file__).parent.parent / "scripts" / "archive" / "repair_sprint_collisions.py"
+    source_path = Path(__file__).parent.parent / "scripts" / "repair_sprint_collisions.py"
     source = source_path.read_text()
 
     # Count calls to _get_sprint_row_unscoped

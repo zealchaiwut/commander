@@ -31,7 +31,7 @@ REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 
-for _p in (str(REPO_ROOT), str(DASHBOARD_DIR), str(SCRIPTS_DIR), str(SCRIPTS_DIR / "archive")):
+for _p in (str(REPO_ROOT), str(DASHBOARD_DIR), str(SCRIPTS_DIR)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 

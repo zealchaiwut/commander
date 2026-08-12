@@ -33,7 +33,8 @@ def test_ac1_scripts_present_in_archive():
     """AC1 — every moved script must exist in scripts/archive/."""
     missing = [s for s in MOVED_SCRIPTS if not (ARCHIVE_DIR / s).exists()]
     assert not missing, (
-        f"These scripts are missing from scripts/archive/:\n  " + "\n  ".join(missing)
+        "These scripts are missing from scripts/archive/:\n  "
+        + "\n  ".join(missing)
     )
 
 
@@ -41,7 +42,7 @@ def test_ac1_scripts_absent_from_scripts_root():
     """AC1 — none of the moved scripts may remain in scripts/ (only archive/)."""
     still_present = [s for s in MOVED_SCRIPTS if (SCRIPTS_DIR / s).exists()]
     assert not still_present, (
-        f"These scripts still exist in scripts/ (should be in archive/ only):\n  "
+        "These scripts still exist in scripts/ (should be in archive/ only):\n  "
         + "\n  ".join(still_present)
     )
 
@@ -57,7 +58,8 @@ def test_ac2_agents_md_does_not_index_moved_scripts():
         if any(script in ln for ln in bullet_lines):
             indexed.append(script)
     assert not indexed, (
-        f"These archived scripts are still listed as active entries in scripts/AGENTS.md:\n  "
+        "These archived scripts are still listed as active entries"
+        " in scripts/AGENTS.md:\n  "
         + "\n  ".join(indexed)
     )
 

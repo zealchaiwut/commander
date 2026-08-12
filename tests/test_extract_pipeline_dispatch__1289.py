@@ -15,21 +15,25 @@ def test_pipeline_module_exists():
 
 
 def test_all_five_functions_present_in_pipeline():
-    """AC: pipeline.py contains all five functions with correct definitions"""
+    """AC: pipeline.py contains the four dispatch functions; list_backlog_issues in backlog.py."""
     pipeline_path = PROJECT_ROOT / "services" / "sprint_manager" / "pipeline.py"
     content = pipeline_path.read_text()
 
-    required_functions = [
+    # These four remain defined in pipeline.py
+    required_in_pipeline = [
         "_run_pipeline_dispatch",
         "_compute_dispatch_levels",
         "_build_sprint_dag_layers",
         "_warn_file_conflicts",
-        "list_backlog_issues",
     ]
-
-    for func_name in required_functions:
-        # Check for function definition
+    for func_name in required_in_pipeline:
         assert f"def {func_name}" in content, f"Function {func_name} not found in pipeline.py"
+
+    # list_backlog_issues moved to backlog.py (issue #2245); still re-exported from pipeline.
+    backlog_content = (PROJECT_ROOT / "services/sprint_manager/backlog.py").read_text()
+    assert "def list_backlog_issues" in backlog_content, (
+        "list_backlog_issues must be defined in backlog.py (issue #2245)"
+    )
 
 
 def test_functions_removed_from_sprint_manager():

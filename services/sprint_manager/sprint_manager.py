@@ -78,8 +78,8 @@ from services.sprint_manager.pipeline import (  # noqa: E402
     _compute_dispatch_levels,
     _build_sprint_dag_layers,
     _warn_file_conflicts,
-    list_backlog_issues,
 )
+from services.sprint_manager.backlog import list_backlog_issues  # noqa: E402
 
 from services.sprint_manager.config import (  # noqa: E402
     SprintConfig,

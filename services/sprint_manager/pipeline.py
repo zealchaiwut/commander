@@ -658,14 +658,8 @@ def _warn_file_conflicts(issues: "list[IssueState]") -> None:
             structured_log.warn("estimate_file_conflict", f"tickets {issues_str} share files: {f}", file_path=f, issue_nums=nums)
 
 
-def list_backlog_issues(label: str, repo_name: Optional[str] = None) -> list[dict]:
-    """Return open, dispatchable issues for ``label``, sorted by number."""
-    result = []
-    for issue in _list_labeled_open_issues(label, repo_name=repo_name):
-        labels_set = {lbl["name"] for lbl in issue.get("labels", [])}
-        if _is_dispatchable(labels_set):
-            result.append(issue)
-    return result
+# list_backlog_issues extracted to backlog.py (issue #2245); re-exported here for backward compat.
+from services.sprint_manager.backlog import list_backlog_issues  # noqa: E402, F401
 
 
 def _run_pipeline_dispatch(

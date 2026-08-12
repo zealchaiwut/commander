@@ -3,13 +3,11 @@ import json
 import os
 import subprocess
 import sys
-import uuid
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException
 from .hermes_models import BoardResponse
 
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
@@ -21,7 +19,6 @@ for _p in (str(_DASHBOARD_ROOT), str(_SERVICES_ROOT)):
 
 import db  # noqa: E402
 import github_client  # noqa: E402
-from services.logging import log as _slog  # noqa: E402
 
 from project_resolver import resolve_project_path as _project_root_path  # noqa: E402
 
@@ -58,38 +55,7 @@ _SPRINT_LABEL_RE = SPRINT_LABEL_RE
 _SUMMARY_TITLE_RE = re.compile(r"^Sprint \d+(\.\d+)*\s+Executive Summary$")
 _SUMMARY_TITLE_NUM_RE = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")
 
-SPRINT_MANAGER_PATH = _REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"
-SPRINT_LOG_PATH = _DASHBOARD_ROOT / "sprints" / "sprint_run.log"
-_ALERT_MODES = os.environ.get("COMMANDER_ALERT_MODES", "dashboard-banner,ntfy")
-
 _SPRINT_LABEL_RE_ALL = SPRINT_LABEL_RE
-
-
-# ── Dashboard event helpers ───────────────────────────────────────────────────
-
-def _dashboard_actor() -> str:
-    return os.environ.get("COMMANDER_USER", "dashboard")
-
-
-def _emit_dashboard_event(
-    project: str,
-    type: str,
-    target: str,
-    detail: dict,
-    action_id: str,
-) -> None:
-    try:
-        db.record_event(
-            project=project,
-            source="dashboard",
-            actor=_dashboard_actor(),
-            type=type,
-            target=target,
-            detail=detail,
-            action_id=action_id,
-        )
-    except Exception:
-        pass
 
 
 # ── Sprint label helpers ──────────────────────────────────────────────────────
@@ -324,59 +290,7 @@ def _check_estimate_stale(issue_num: int, current_body: str, estimates_dir) -> b
     return current_hash != stored_hash
 
 
-# ── Models ────────────────────────────────────────────────────────────────────
-
-class SprintRunBody(BaseModel):
-    label: str
-    goal: str
-    budget: Optional[int] = None
-
-
-class SprintMgmtRunBody(BaseModel):
-    project: str
-    sprint_label: str
-    migrate_from: list[int] = []
-    use_cline_followups: bool = False
-
-
 # ── Routes ────────────────────────────────────────────────────────────────────
-
-@router.post("/api/sprint-run")
-def run_sprint(request: Request, body: SprintRunBody):
-    """Spawn sprint_manager.py as a detached background process."""
-    _slog.event("route.entry", project="dashboard", request_id=request.state.request_id, route="/api/sprint-run", method="POST", sprint_label=body.label)
-    if not _SPRINT_LABEL_RE.match(body.label):
-        _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/sprint-run", level="error", sprint_label=body.label, error="invalid sprint label")
-        raise HTTPException(400, detail=f"Invalid sprint label: {body.label!r}")
-    if not SPRINT_MANAGER_PATH.exists():
-        _slog.event("route.error", project="dashboard", request_id=request.state.request_id, route="/api/sprint-run", level="error", sprint_label=body.label, error="sprint_manager.py not found")
-        raise HTTPException(502, detail=f"sprint_manager.py not found at {SPRINT_MANAGER_PATH}")
-
-    SPRINT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    log_fh = open(SPRINT_LOG_PATH, "a")
-
-    cmd = [sys.executable, str(SPRINT_MANAGER_PATH), body.label]
-    if body.budget is not None:
-        cmd += [f"--budget={body.budget}"]
-    cmd += ["--alert-mode", _ALERT_MODES]
-
-    subprocess.Popen(
-        cmd,
-        env={**os.environ, "SPRINT_GOAL": body.goal},
-        stdout=log_fh,
-        stderr=log_fh,
-        start_new_session=True,
-    )
-    _slog.event("sprint.dispatch", project="dashboard", request_id=request.state.request_id, sprint_label=body.label, dispatch_type="simple")
-    _emit_dashboard_event(
-        project="dashboard",
-        type="sprint_run",
-        target=body.label,
-        detail={"sprint_id": body.label},
-        action_id=str(uuid.uuid4()),
-    )
-    return {"ok": True, "label": body.label}
-
 
 @router.get("/api/sprint-management/issues")
 def get_sprint_management_issues(repo: str):

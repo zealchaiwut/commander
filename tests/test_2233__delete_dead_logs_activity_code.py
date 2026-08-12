@@ -1,4 +1,4 @@
-"""Tests for issue #2233: Delete dead Logs/Activity code still executing on every page load.
+"""Tests for issue #2233: Delete dead Logs/Activity code still executing on page load.
 
 AC-1: evlFetch, evlRender, evlRenderTimeline and the Events-Activity-Log +
       error-badge blocks (~project.html:26410-27900) removed from project.html
@@ -37,7 +37,7 @@ class TestDeadJsFunctionsRemoved:
 
     def test_evl_fetch_function_not_defined(self):
         assert "function evlFetch(" not in _HTML, (
-            "evlFetch() function must be removed from project.html (dead since #2025 removed logs tab)"
+            "evlFetch() function must be removed (dead since #2025 removed logs tab)"
         )
 
     def test_evl_render_function_not_defined(self):
@@ -52,7 +52,7 @@ class TestDeadJsFunctionsRemoved:
 
     def test_logs_tab_js_section_header_removed(self):
         assert "// ── Logs Tab (issue #420)" not in _HTML, (
-            "The '// ── Logs Tab (issue #420)' JS section must be removed from project.html"
+            "The '// ── Logs Tab' section must be removed"
         )
 
     def test_evl_activity_log_section_header_removed(self):
@@ -73,8 +73,8 @@ class TestDeadModulesDeleted:
 
     def test_activity_grouping_js_deleted(self):
         assert not (SRC_DIR / "activity-grouping.js").exists(), (
-            "src/activity-grouping.js must be deleted (dead: evlGroupEventsByRun is only "
-            "called from the removed evl section)"
+            "src/activity-grouping.js must be deleted; "
+            "only used by removed evl section"
         )
 
     def test_logs_error_badge_js_deleted(self):
@@ -115,9 +115,12 @@ class TestDeadModulesDeleted:
 
     def test_dead_evl_symbols_not_exported_from_index(self):
         """index.js must not expose the dead evl helpers on window/globalThis."""
-        for sym in ("evlGroupEventsByRun", "logsReadLastVisit", "logsWriteLastVisit",
-                    "buildEvlFetchUrl", "logsCountNewErrors", "evlIsErrorEvent",
-                    "shouldAutoLoadRaw", "pickAutoSprintLabel", "logsToolbarVisibility"):
+        dead_symbols = (
+            "evlGroupEventsByRun", "logsReadLastVisit", "logsWriteLastVisit",
+            "buildEvlFetchUrl", "logsCountNewErrors", "evlIsErrorEvent",
+            "shouldAutoLoadRaw", "pickAutoSprintLabel", "logsToolbarVisibility"
+        )
+        for sym in dead_symbols:
             assert sym not in _INDEX, (
                 f"index.js must not export dead symbol '{sym}' (module deleted)"
             )
@@ -143,9 +146,9 @@ class TestPageLoadNoDeadCalls:
         )
 
     def test_evl_is_error_event_sse_guard_removed(self):
-        """The SSE handler must no longer call evlIsErrorEvent to increment the badge."""
+        """The SSE handler must no longer call evlIsErrorEvent."""
         assert "evlIsErrorEvent" not in _HTML, (
-            "The evlIsErrorEvent badge-increment guard in the SSE handler must be removed"
+            "evlIsErrorEvent badge-increment guard must be removed"
         )
 
     def test_logs_update_nav_badge_not_called(self):

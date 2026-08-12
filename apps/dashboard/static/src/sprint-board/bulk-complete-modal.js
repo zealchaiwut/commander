@@ -6,7 +6,7 @@
 
 /* global _setBodyInert, _clearBodyInert, _smgmtRepo, sprintLabelDisplay,
    escHtml, _smgmtShowToast, loadSprintMgmt,
-   _smgmtBoardLock, _smgmtBoardUnlock, _smgmtBoardProgress, _smgmtBoardLog, _smgmtBoardFinish,
+   _smgmtBoardLock, _smgmtBoardProgress, _smgmtBoardLog, _smgmtBoardFinish,
    _bcLabel:writable, _bcPreview:writable, renderProgressActivity */
 
 function _bcShowPreviewLoading(current) {
@@ -229,7 +229,6 @@ export async function _bcConfirm() {
 
   let doneSteps = 0;
   const totalSteps = order.length + 1; // members + board refresh
-  let failedIdx = 0; // index of the step that threw
 
   _smgmtBoardLock(`Completing ${sprintLabelDisplay(label)}…`, {
     progress: true,
@@ -246,7 +245,6 @@ export async function _bcConfirm() {
 
   try {
     for (let i = 0; i < order.length; i++) {
-      failedIdx = i;
       const sLabel = order[i];
       _smgmtBoardLog(`Completing ${sprintLabelDisplay(sLabel)}…`, 'step');
       const res = await fetch(

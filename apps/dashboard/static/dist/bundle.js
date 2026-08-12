@@ -4300,7 +4300,6 @@ ${listing}`
     }
     let doneSteps = 0;
     const totalSteps = order.length + 1;
-    let failedIdx = 0;
     _smgmtBoardLock(`Completing ${sprintLabelDisplay(label)}\u2026`, {
       progress: true,
       total: totalSteps,
@@ -4317,7 +4316,6 @@ ${listing}`
     };
     try {
       for (let i = 0; i < order.length; i++) {
-        failedIdx = i;
         const sLabel = order[i];
         _smgmtBoardLog(`Completing ${sprintLabelDisplay(sLabel)}\u2026`, "step");
         const res = await fetch(

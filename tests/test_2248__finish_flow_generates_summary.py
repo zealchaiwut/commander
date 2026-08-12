@@ -194,7 +194,6 @@ def test_ac2_read_summary_url_prefers_db_row(tmp_path):
 def test_ac3_generate_finish_summary_writes_state_file(tmp_path):
     """AC3: _generate_finish_summary writes summary_issue_url to the state file."""
     from routers.sprint_finish import _generate_finish_summary
-    from services.sprint_manager.state import SprintState, IssueState
 
     sprint_label = "sprint-55"
     repo = "zealchaiwut/commander"

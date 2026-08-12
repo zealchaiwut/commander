@@ -18,7 +18,14 @@ Input will be one of:
 - `verify issue <N>` — single issue, run the workflow once.
 - `verify issues <N1> <N2> <N3> ...` — multiple issues, run in **parallel sub-agents** (see "Parallel Mode" below).
 
-Extract the issue number(s) and follow the appropriate workflow.
+Extract the issue number(s), then immediately export the agent identity env vars so all hook calls for this session carry the correct attribution (use the first/primary issue number N for multi-issue runs):
+
+```bash
+export CLAUDE_AGENT_ROLE=tester
+export CLAUDE_AGENT_ISSUE=<N>
+```
+
+Then follow the appropriate workflow.
 
 ## Step 0 — Resolve UAT environment (do this FIRST, every invocation)
 

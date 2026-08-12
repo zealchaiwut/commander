@@ -9,11 +9,9 @@ sprint-manager helper scripts.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Optional
 
 from services.sprint_manager.paths import _plan_json_path
-from services.logging import log as structured_log
 
 
 def _plan_json_llm_provider(

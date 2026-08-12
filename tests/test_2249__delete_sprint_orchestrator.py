@@ -12,10 +12,9 @@ AC coverage:
 from __future__ import annotations
 
 import ast
-import importlib
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -160,7 +159,7 @@ def test_model_routing_importable():
         if "model_routing" in key:
             del sys.modules[key]
     try:
-        import services.sprint_manager.model_routing as mr
+        import services.sprint_manager.model_routing as mr  # noqa: F401
     except ImportError as exc:
         pytest.fail(f"model_routing.py fails to import: {exc}")
 

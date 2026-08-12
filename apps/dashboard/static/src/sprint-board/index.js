@@ -7,7 +7,7 @@
  * state on `window`.
  *
  * Concerns: board render · drag/drop · run-controls · finish modal
- * · bulk-complete modal · plan-next · scheduled-run.
+ * · bulk-complete modal · plan-next.
  */
 
 import './state.js';
@@ -18,9 +18,6 @@ import {
 import {
   smgmtPlanNextSprint, _smgmtLoadPendingSignoff,
 } from './plan-next.js';
-import {
-  _smgmtSchedToggleHtml, smgmtToggleRunOnSchedule, _smgmtHydrateSchedToggles,
-} from './scheduled-run.js';
 import {
   _histNeedsActionCount, _histLoadLedger, _histPrefetchLedger, _histScanStale, _histCleanupStale,
   _histToggleCard, _histToggleGroup, _histToggleFold, _histFocusLabel, _histStateChip,
@@ -196,11 +193,6 @@ globalThis.smgmtAddToDraft = smgmtAddToDraft;
 // SSE board_invalidated handler (issue #1785)
 globalThis._boardSseOnInvalidated = _boardSseOnInvalidated;
 globalThis._boardSseOnVisible = _boardSseOnVisible;
-
-// Run-on-schedule toggle (issue #863)
-globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml;
-globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
-globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles;
 
 // Plan next sprint + pending-sign-off decoration (issue #861)
 globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;

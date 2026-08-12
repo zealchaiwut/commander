@@ -1700,64 +1700,6 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // apps/dashboard/static/src/sprint-board/scheduled-run.js
-  var _schedMap = {};
-  function _smgmtSchedToggleHtml2(label) {
-    const on = !!_schedMap[label];
-    const id = `sched-toggle-${label}`;
-    return `<label class="smgmt-sched-toggle" title="Auto-run this sprint at the project's scheduled time">
-    <input type="checkbox" id="${escHtml(id)}" ${on ? "checked" : ""}
-      onchange="smgmtToggleRunOnSchedule('${escHtml(label)}', this)"
-      aria-label="Run sprint ${escHtml(label)} on schedule">
-    <span>Run on schedule</span>
-  </label>`;
-  }
-  async function smgmtToggleRunOnSchedule(label, el) {
-    const repo = typeof _smgmtRepo === "function" ? _smgmtRepo() : null;
-    if (!repo)
-      return;
-    const enabled = !!(el && el.checked);
-    _schedMap[label] = enabled;
-    try {
-      const res = await fetch("/api/scheduler/sprints", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo, sprint_label: label, enabled })
-      });
-      if (!res.ok)
-        throw new Error(`HTTP ${res.status}`);
-    } catch (e) {
-      _schedMap[label] = !enabled;
-      if (el)
-        el.checked = !enabled;
-      if (typeof _smgmtShowToast === "function") {
-        _smgmtShowToast("Could not update schedule: " + (e.message || e));
-      }
-    }
-  }
-  async function _smgmtHydrateSchedToggles2(repo) {
-    if (!repo)
-      return;
-    try {
-      const res = await fetch(`/api/scheduler/sprints?project=${encodeURIComponent(repo)}`);
-      if (!res.ok)
-        return;
-      const data = await res.json();
-      const map = data.run_on_schedule || {};
-      for (const k of Object.keys(_schedMap))
-        delete _schedMap[k];
-      Object.keys(map).forEach((k) => {
-        _schedMap[k] = !!map[k];
-      });
-      Object.keys(map).forEach((label) => {
-        const cb = document.getElementById(`sched-toggle-${label}`);
-        if (cb)
-          cb.checked = !!map[label];
-      });
-    } catch (_) {
-    }
-  }
-
   // apps/dashboard/static/src/sprint-board/history.js
   var _HIST_ACTION_STATES = /* @__PURE__ */ new Set([
     "ready_to_merge",
@@ -5009,9 +4951,6 @@ Resolve manually and re-run Bulk complete.`,
       }
       const data = _smgmtAggToRenderData(agg);
       _smgmtRender(data);
-      if (typeof _smgmtHydrateSchedToggles === "function") {
-        _smgmtHydrateSchedToggles(repo);
-      }
       _smgmtLivePollRestart();
       const lingerLbl = typeof _smgmtPrimaryRunningLabel === "function" ? _smgmtPrimaryRunningLabel() : null;
       if (lingerLbl && typeof _smgmtRunningViewUpdate === "function") {
@@ -5902,10 +5841,9 @@ Resolve manually and re-run Bulk complete.`,
     } else {
       const runDisabled = !canRun ? "disabled" : "";
       const runTitle = !canRun ? 'title="No dispatchable tickets \u2014 remaining items are already SIT/UAT or in progress"' : "";
-      const schedToggle = typeof _smgmtSchedToggleHtml === "function" ? _smgmtSchedToggleHtml(label) : "";
       actionBtn = `<button class="smgmt-run-btn" ${runDisabled} ${runTitle}
                   onclick="smgmtRunSprint('${label}')">
-                  <i class="ti ti-player-play"></i> Run Sprint</button>${schedToggle}`;
+                  <i class="ti ti-player-play"></i> Run Sprint</button>`;
     }
     const isOutcomeCompleted = isReadyToMerge || isHasRework || outcomeState === "completed";
     const finishHidden = isOutcomeCompleted || isPostRun && !outcome ? "" : "hidden";
@@ -8513,9 +8451,6 @@ Proceed anyway?`)) {
   globalThis.smgmtAddToDraft = smgmtAddToDraft;
   globalThis._boardSseOnInvalidated = _boardSseOnInvalidated;
   globalThis._boardSseOnVisible = _boardSseOnVisible;
-  globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml2;
-  globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
-  globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles2;
   globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;
   globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;
   globalThis._histNeedsActionCount = _histNeedsActionCount;

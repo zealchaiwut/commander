@@ -92,6 +92,6 @@ def test_sprint_repo_still_has_no_runtime_caller_outside_migrate_script():
         source = path.read_text(encoding="utf-8")
         if "sprint_repo" in _imported_module_names(source):
             hits.append(str(path.relative_to(REPO_ROOT)))
-    assert hits == ["scripts/migrate_sprints_to_neon.py"], (
+    assert hits == ["scripts/archive/migrate_sprints_to_neon.py"], (
         f"unexpected importers of sprint_repo: {hits}"
     )

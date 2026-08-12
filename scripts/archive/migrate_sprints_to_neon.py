@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 SCRIPTS_DIR = Path(__file__).parent
-REPO_ROOT = SCRIPTS_DIR.parent
+REPO_ROOT = SCRIPTS_DIR.parent.parent
 
 
 def _load_dotenv() -> None:

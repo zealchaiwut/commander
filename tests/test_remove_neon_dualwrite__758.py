@@ -109,7 +109,7 @@ def test_remove_neon_dualwrite__export_script_exists_and_runnable():
     # AC: scripts/export_to_neon.py exists, is runnable, exits cleanly with a set
     # DATABASE_URL. The export uses portable SQL so a SQLite DATABASE_URL is a
     # valid target for the runnable check; exit code must be 0.
-    script = SCRIPTS / "export_to_neon.py"
+    script = SCRIPTS / "archive" / "export_to_neon.py"
     assert script.exists(), "scripts/export_to_neon.py missing"
     import tempfile
     with tempfile.TemporaryDirectory() as td:
@@ -124,7 +124,7 @@ def test_remove_neon_dualwrite__export_script_exists_and_runnable():
 
 def test_remove_neon_dualwrite__export_script_dry_run():
     # AC (edge): export script supports a no-write dry-run path and exits 0.
-    script = SCRIPTS / "export_to_neon.py"
+    script = SCRIPTS / "archive" / "export_to_neon.py"
     r = _run(
         [sys.executable, str(script), "--dry-run"],
         env={"DATABASE_URL": "sqlite:///:memory:", "PYTHONPATH": str(REPO_ROOT)},
@@ -136,7 +136,7 @@ def test_remove_neon_dualwrite__export_script_dry_run():
 def test_remove_neon_dualwrite__export_script_missing_url_exits_nonzero():
     # AC (error path): without DATABASE_URL the export refuses cleanly (exit 1),
     # not a traceback.
-    script = SCRIPTS / "export_to_neon.py"
+    script = SCRIPTS / "archive" / "export_to_neon.py"
     env = {k: v for k, v in os.environ.items() if k != "DATABASE_URL"}
     env["PYTHONPATH"] = str(REPO_ROOT)
     r = subprocess.run(

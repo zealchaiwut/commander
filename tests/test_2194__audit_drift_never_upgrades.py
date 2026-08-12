@@ -20,6 +20,7 @@ _SCRIPTS_ROOT = _REPO_ROOT / "scripts"
 sys.path.insert(0, str(_REPO_ROOT))
 sys.path.insert(0, str(_DASHBOARD_ROOT))
 sys.path.insert(0, str(_SCRIPTS_ROOT))
+sys.path.insert(0, str(_SCRIPTS_ROOT / "archive"))
 
 os.environ.setdefault("DB_PATH", "/tmp/commander-pytest-2194.db")
 

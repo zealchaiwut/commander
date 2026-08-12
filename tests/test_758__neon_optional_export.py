@@ -152,8 +152,8 @@ def test_ac3_source_has_no_per_call_create_engine():
 # ── AC4: export script exists, runnable, exits 0 with DATABASE_URL set ────────
 
 def test_ac4_export_script_exists():
-    assert (REPO_ROOT / "scripts" / "export_to_neon.py").is_file(), (
-        "scripts/export_to_neon.py must exist (AC4)"
+    assert (REPO_ROOT / "scripts" / "archive" / "export_to_neon.py").is_file(), (
+        "scripts/archive/export_to_neon.py must exist (AC4)"
     )
 
 
@@ -192,7 +192,7 @@ def test_ac4_export_script_runs_and_exits_zero(tmp_path):
     env["DB_PATH"] = str(db_file)
 
     proc = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts" / "export_to_neon.py")],
+        [sys.executable, str(REPO_ROOT / "scripts" / "archive" / "export_to_neon.py")],
         cwd=str(REPO_ROOT),
         env=env,
         capture_output=True,

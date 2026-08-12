@@ -23,7 +23,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _SM_DIR = _REPO_ROOT / "services" / "sprint_manager"
 for _p in (_REPO_ROOT, _SM_DIR):
     if str(_p) not in sys.path:

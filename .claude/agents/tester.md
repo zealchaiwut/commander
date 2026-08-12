@@ -576,7 +576,7 @@ cd "$MAIN_REPO" && python3 scripts/finish_feature.py --issue <N>
 ```
 
 **MANDATORY — human-in-the-loop gate:**
-- `finish_feature.py` applies the **UAT** label and keeps the issue **OPEN**. That is the correct end state.
+- `finish_feature.py` applies the **UAT** label (via `state_machine.transition()`) and keeps the issue **OPEN**. That is the correct end state. When called manually, the transition is automatic; when called by sprint_manager (dispatch mode), sprint_manager handles the transition, so finish_feature.py skips it to avoid double-transitioning.
 - Do **NOT** apply `UAT-approved` label. Do **NOT** close the issue. Do **NOT** run `update_ticket.py --status uat-approved`.
 - `UAT-approved` is set **only** by a human via the dashboard Approve button or `scripts/approve_ticket.py`.
 - Your job ends when `finish_feature.py` completes successfully. The issue will remain open in UAT state awaiting human review.

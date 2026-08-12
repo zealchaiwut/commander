@@ -7,12 +7,14 @@ Call this after tests pass. It:
   3. Merges it into the target branch with --no-ff
   4. Pushes the target branch
   5. Deletes the feature branch locally and on origin
+  6. Transitions the issue to UAT (manual run only; dispatch path skipped)
 
 On success, writes to stdout:
     FINISH_FEATURE_OUTCOME merged sha=<sha> branch=<branch>
 
 On merge conflict: aborts cleanly, posts a comment, exits non-zero.
-Label transitions are managed exclusively by sprint_manager via state_machine.transition().
+Label transitions: manual run → this script calls state_machine.transition(UAT).
+Dispatch run (COMMANDER_SPRINT_RUNNING set) → sprint_manager handles transition.
 
 Usage:
     python3 ~/commander/scripts/finish_feature.py --issue 42
@@ -34,6 +36,7 @@ load_dotenv(_DASHBOARD_DIR / ".env")
 import github_client  # noqa: E402  (deferred: sys.path set above)
 from services.run_id import mint_run_id  # noqa: E402
 from services.logging import log as structured_log  # noqa: E402
+from services.sprint_manager import state_machine  # noqa: E402
 
 
 def _run(*cmd) -> str:
@@ -233,8 +236,24 @@ def main():
 
     sys.stdout.write(str(f"✅  Merged {branch} into {target}") + "\n")
     sys.stdout.write(str("    Feature branch deleted locally and on origin") + "\n")
-    # Signal to sprint_manager that merge succeeded; label transitions are
-    # handled exclusively by sprint_manager via state_machine.transition().
+
+    # Transition to UAT (manual run only; dispatch path has COMMANDER_SPRINT_RUNNING
+    # set, so skip to let sprint_manager handle it — issue #2230)
+    if not os.environ.get("COMMANDER_SPRINT_RUNNING"):
+        try:
+            state_machine.transition(
+                args.issue,
+                state_machine.TicketState.UAT,
+                actor="finish_feature",
+                repo=args.repo,
+            )
+            sys.stdout.write(str(f"  Transitioned issue #{args.issue} to UAT") + "\n")
+        except Exception as exc:
+            sys.stderr.write(str(f"Warning: could not transition issue #{args.issue} to UAT: {exc}") + "\n")
+    else:
+        sys.stdout.write(str(f"  Label transition deferred to sprint_manager (COMMANDER_SPRINT_RUNNING set)") + "\n")
+
+    # Signal to sprint_manager that merge succeeded
     sys.stdout.write(str(f"FINISH_FEATURE_OUTCOME merged sha={merge_sha} branch={branch}") + "\n")
 
 

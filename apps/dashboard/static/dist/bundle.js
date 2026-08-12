@@ -2951,14 +2951,7 @@ Replace the existing draft (${data.existing_label})?`
       title="Reconcile this sprint's DB state against GitHub truth">
       <i class="ti ti-git-compare"></i> Reconcile</button>`;
     if (_histSprintFailed(s) || state === "needs_rework" || state === "failed" || state === "cancelled") {
-      const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-      const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
-      const childDisplay = sprintLabelDisplay(
-        _histNextChildLabel(rawLabel)
-      ).replace("Sprint ", "");
-      return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${rerunDisabled} ${rerunTitle}
-      onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
-      <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
+      return reconcileBtn;
     }
     if (state === "ready_to_merge") {
       return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--bulk"
@@ -2969,7 +2962,7 @@ Replace the existing draft (${data.existing_label})?`
     if (state === "draft" && s.parent) {
       const runDisabled = _smgmtAnySprintRunning ? "disabled" : "";
       const runTitle = _smgmtAnySprintRunning ? 'title="Cannot run: another sprint is currently running."' : "";
-      return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${runDisabled} ${runTitle}
+      return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--bulk" ${runDisabled} ${runTitle}
       onclick="event.stopPropagation();smgmtRunSprint('${lbl}')">
       <i class="ti ti-player-play"></i> Run</button>`;
     }
@@ -3462,11 +3455,6 @@ Replace the existing draft (${data.existing_label})?`
     }
     el.innerHTML = _histLegendHtml() + _histToolbarHtml() + bodyHtml;
   }
-  function _histRerunSprint(label) {
-    if (typeof globalThis.smgmtRerunSprint === "function") {
-      return globalThis.smgmtRerunSprint(label);
-    }
-  }
   function _histPrefetchLedger(repo) {
     if (!repo)
       return;
@@ -3590,9 +3578,6 @@ Replace the existing draft (${data.existing_label})?`
     const repo = _cachedFullRepo[_slug];
     if (repo)
       _histLoadLedger2(repo, { force: true });
-  }
-  function _histNextChildLabel(parentLabel) {
-    return _nextSprintSublabel(parentLabel);
   }
   function _histBulkSignOffTargets(sprints) {
     const groups = _histGroupSprints(sprints || []).filter(
@@ -3718,234 +3703,6 @@ ${listing}`
     } else {
       alert(finishMsg);
       _histForceRefresh();
-    }
-  }
-
-  // apps/dashboard/static/src/sprint-board/rerun-modal.js
-  function _rrShowPreviewLoading(current) {
-    const loading = document.getElementById("rr-loading");
-    if (!loading)
-      return;
-    loading.innerHTML = renderProgressActivity(
-      {
-        status: "running",
-        mode: "indeterminate",
-        current: current || "Loading preview\u2026"
-      },
-      {
-        id: "rr-preview-pa",
-        hideLog: true
-      }
-    );
-    loading.classList.remove("hidden");
-  }
-  function _rrShowCreateProgress(done, total, current, status, error) {
-    const loading = document.getElementById("rr-loading");
-    if (!loading)
-      return;
-    loading.innerHTML = renderProgressActivity(
-      {
-        status: status || "running",
-        mode: "bar",
-        done: done || 0,
-        total: total || 3,
-        current: current || "",
-        error: error || "",
-        result: status === "done" ? "Sub-sprint created" : ""
-      },
-      {
-        id: "rr-create-pa",
-        hideLog: true
-      }
-    );
-    loading.classList.remove("hidden");
-  }
-  function _rrOpen() {
-    _setBodyInert(["rr-backdrop", "rr-modal"]);
-    document.getElementById("rr-backdrop").classList.remove("hidden");
-    document.getElementById("rr-modal").classList.remove("hidden");
-  }
-  function _rrClose() {
-    document.getElementById("rr-backdrop").classList.add("hidden");
-    document.getElementById("rr-modal").classList.add("hidden");
-    _clearBodyInert();
-    _rrLabel = null;
-    _rrVersionedLabel = null;
-  }
-  function _rrCatClass(cat) {
-    if (cat === "UAT")
-      return "rr-cat-uat";
-    if (cat === "SIT")
-      return "rr-cat-sit";
-    if (cat === "needs-rework")
-      return "rr-cat-rework";
-    return "rr-cat-queued";
-  }
-  function _rrUpdateState() {
-    const checkboxes = document.querySelectorAll(
-      "#rr-ticket-list input[type=checkbox]"
-    );
-    const checked = Array.from(checkboxes).filter((c) => c.checked);
-    const uatChecked = Array.from(checkboxes).filter(
-      (c) => c.checked && c.dataset.cat === "UAT"
-    ).length;
-    const confirmBtn = document.getElementById("rr-confirm-btn");
-    if (confirmBtn)
-      confirmBtn.disabled = checked.length === 0;
-    const warnEl = document.getElementById("rr-uat-warning");
-    if (warnEl) {
-      if (uatChecked > 0) {
-        warnEl.textContent = `${uatChecked} ticket${uatChecked !== 1 ? "s" : ""} in UAT will be re-tested from scratch.`;
-      } else {
-        warnEl.textContent = "";
-      }
-    }
-  }
-  function _rrSelectAll(checked) {
-    document.querySelectorAll("#rr-ticket-list input[type=checkbox]").forEach((cb) => {
-      cb.checked = checked;
-    });
-    _rrUpdateState();
-  }
-  async function smgmtRerunSprint(label) {
-    const repo = _smgmtRepo();
-    if (!repo) {
-      _smgmtShowToast(
-        "No project loaded \u2014 please refresh and try again.",
-        "warning"
-      );
-      return;
-    }
-    _rrLabel = label;
-    _rrVersionedLabel = null;
-    _rrOpen();
-    try {
-      document.getElementById("rr-modal-title").textContent = `Re-run ${sprintLabelDisplay(label)}?`;
-      _rrShowPreviewLoading("Loading preview\u2026");
-      document.getElementById("rr-content").classList.add("hidden");
-      document.getElementById("rr-error").classList.add("hidden");
-      document.getElementById("rr-error").textContent = "";
-      const confirmBtn = document.getElementById("rr-confirm-btn");
-      if (confirmBtn) {
-        confirmBtn.disabled = true;
-        confirmBtn.textContent = "Create sprint and run";
-      }
-      const res = await fetch(
-        `/api/sprints/${encodeURIComponent(label)}/rerun-preview?project=${encodeURIComponent(repo)}`
-      );
-      if (!res.ok)
-        throw new Error(await res.text());
-      const preview = await res.json();
-      _rrVersionedLabel = preview.suggested_versioned_label;
-      document.getElementById("rr-modal-title").textContent = `Re-run ${sprintLabelDisplay(label)} as ${sprintLabelDisplay(_rrVersionedLabel)}?`;
-      if (confirmBtn)
-        confirmBtn.textContent = `Create & run ${sprintLabelDisplay(_rrVersionedLabel)}`;
-      const listEl = document.getElementById("rr-ticket-list");
-      if ((preview.tickets || []).length === 0) {
-        listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No tickets in this sprint.</div>';
-      } else {
-        listEl.innerHTML = (preview.tickets || []).map((t) => {
-          const checked = t.checked ? "checked" : "";
-          const catClass = _rrCatClass(t.category);
-          return `<label class="rr-ticket-row">
-          <input type="checkbox" ${checked} data-issue="${t.number}" data-cat="${escHtml(t.category)}" onchange="_rrUpdateState()">
-          <span class="rr-ticket-num">#${t.number}</span>
-          <span class="rr-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
-          <span class="rr-ticket-cat ${catClass}">${escHtml(t.category)}</span>
-        </label>`;
-        }).join("");
-      }
-      document.getElementById("rr-loading").classList.add("hidden");
-      document.getElementById("rr-content").classList.remove("hidden");
-      _rrUpdateState();
-    } catch (e) {
-      document.getElementById("rr-loading").classList.add("hidden");
-      const errEl = document.getElementById("rr-error");
-      errEl.textContent = "Failed to load preview: " + e.message;
-      errEl.classList.remove("hidden");
-      _smgmtShowToast("Re-run preview failed: " + e.message, "error");
-    }
-  }
-  async function _rrConfirm() {
-    const repo = _smgmtRepo();
-    if (!_rrLabel || !repo)
-      return;
-    const parentLabel = _rrLabel;
-    const checkboxes = Array.from(
-      document.querySelectorAll("#rr-ticket-list input[type=checkbox]")
-    );
-    const ticketNumbers = checkboxes.filter((c) => c.checked).map((c) => parseInt(c.dataset.issue, 10));
-    if (ticketNumbers.length === 0)
-      return;
-    const confirmBtn = document.getElementById("rr-confirm-btn");
-    if (confirmBtn) {
-      confirmBtn.disabled = true;
-      confirmBtn.textContent = "Creating\u2026";
-    }
-    _rrShowCreateProgress(0, 3, "Creating sprint\u2026", "running", "");
-    document.getElementById("rr-content").classList.add("hidden");
-    try {
-      const res = await fetch(
-        `/api/sprints/${encodeURIComponent(parentLabel)}/rerun?project=${encodeURIComponent(repo)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ticket_numbers: ticketNumbers,
-            auto_run: false
-          })
-        }
-      );
-      if (!res.ok) {
-        let detail = await res.text();
-        try {
-          const parsed = JSON.parse(detail);
-          detail = parsed.detail || detail;
-        } catch (_) {
-        }
-        throw new Error(
-          typeof detail === "string" ? detail : JSON.stringify(detail)
-        );
-      }
-      const data = await res.json();
-      const subLabel = data.sub_label;
-      _rrShowCreateProgress(1, 3, "Applying local updates\u2026", "running", "");
-      if (typeof _smgmtApplyRerunOptimistic === "function") {
-        _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers);
-      }
-      loadSprintMgmt(true).catch(() => {
-      });
-      if (typeof globalThis._histLoadLedger === "function") {
-        globalThis._histLoadLedger(repo).catch(() => {
-        });
-      }
-      _rrShowCreateProgress(2, 3, "Queueing sprint run\u2026", "running", "");
-      const subDisplay = subLabel ? sprintLabelDisplay(subLabel) : "Sub-sprint";
-      if (data.errors && data.errors.length > 0) {
-        _smgmtShowToast(
-          `${subDisplay} created with label errors \u2014 check GitHub.`
-        );
-      } else {
-        _smgmtShowToast(`${subDisplay} ready \u2014 confirm run`);
-      }
-      if (subLabel && typeof smgmtRunSprint === "function") {
-        _rrShowCreateProgress(3, 3, "Done", "done", "");
-        smgmtRunSprint(subLabel);
-      }
-      _rrClose();
-    } catch (e) {
-      const errMsg = e.message || "Failed to create re-run sprint";
-      _rrShowCreateProgress(0, 3, "", "error", errMsg);
-      const errEl = document.getElementById("rr-error");
-      errEl.textContent = "Failed to re-run sprint: " + errMsg;
-      errEl.classList.remove("hidden");
-      document.getElementById("rr-loading").classList.add("hidden");
-      document.getElementById("rr-content").classList.remove("hidden");
-      _smgmtShowToast("Re-run failed: " + errMsg, "error");
-      if (confirmBtn) {
-        confirmBtn.disabled = false;
-        confirmBtn.textContent = _rrVersionedLabel ? `Create & run ${sprintLabelDisplay(_rrVersionedLabel)}` : "Create sprint and run";
-      }
     }
   }
 
@@ -5633,7 +5390,7 @@ Resolve manually and re-run Bulk complete.`,
     const planState = (_smgmtData && _smgmtData.sprint_plan_states || {})[label];
     return planState === "draft" || planState === "planning";
   }
-  function _smgmtApplyRerunOptimistic2(parentLabel, subLabel, ticketNumbers) {
+  function _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers) {
     if (!_smgmtData || !parentLabel || !subLabel)
       return;
     const nums = new Set(ticketNumbers || []);
@@ -6119,29 +5876,22 @@ Resolve manually and re-run Bulk complete.`,
     const showRunningChrome = isRunningView && !isAwaitingMerge;
     const isPostRun = !isRunningView && !planBlocksPostRun && hasLedgerRun;
     const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
-    const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-    const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
-    const childLabel = _smgmtNextChildLabel(label);
-    const childDisplay = sprintLabelDisplay(childLabel).replace("Sprint ", "");
-    const rerunBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun" ${rerunDisabled} ${rerunTitle}
-                    onclick="smgmtRerunSprint('${escHtml(label)}')">
-                    <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
     const rerunInto = (_smgmtData?.sprint_rerun_into || {})[label];
     const rerunChildDisplay = rerunInto ? sprintLabelDisplay(rerunInto).replace("Sprint ", "") : "";
     let actionBtn;
     if (isRunning) {
       actionBtn = `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
                   <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
-    } else if (isLinger && isHasRework) {
-      actionBtn = rerunBtn;
     } else if (isLinger) {
       actionBtn = `<span class="smgmt-linger-note">Finished \u2014 snapshot kept 1h</span>`;
     } else if (isHasRework && rerunInto && tickets.length === 0) {
-      actionBtn = `<button class="smgmt-run-btn" ${rerunDisabled} ${rerunTitle}
+      const _rrDisabled = _smgmtAnySprintRunning ? "disabled" : "";
+      const _rrTitle = _smgmtAnySprintRunning ? 'title="Cannot run: another sprint is currently running."' : "";
+      actionBtn = `<button class="smgmt-run-btn" ${_rrDisabled} ${_rrTitle}
                   onclick="smgmtRunSprint('${escHtml(rerunInto)}')">
                   <i class="ti ti-player-play"></i> Run \u2192 ${escHtml(rerunChildDisplay)}</button>`;
     } else if (isHasRework || isPostRun) {
-      actionBtn = rerunBtn;
+      actionBtn = "";
     } else if (_smgmtSignoffState(label) === "pending") {
       actionBtn = _smgmtSignoffActionsHtml(label);
     } else if (_smgmtAnySprintRunning) {
@@ -7033,12 +6783,7 @@ Resolve manually and re-run Bulk complete.`,
       const listHtml = (outcome.issues || []).length > 0 ? _smgmtAncestorTicketsHtml(label, outcome, rerunInto) : '<div class="slp-no-tickets">No per-ticket records found.</div>';
       ticketsHtml = statsHtml + listHtml;
     }
-    const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-    const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
     const actionsHtml = mergeState === "needs_merge" ? `<div class="slp-ancestor-actions">
-          <button class="smgmt-run-btn smgmt-run-btn--rerun" ${rerunDisabled} ${rerunTitle}
-                  onclick="event.stopPropagation();smgmtRerunSprint('${safeLabel}')">
-            <i class="ti ti-refresh"></i> Re-run</button>
           <button class="smgmt-finish-btn sc-merge-link"
                   onclick="event.stopPropagation();smgmtFinishSprint('${safeLabel}')">
             <i class="ti ti-flag-check"></i> Merge Sprint</button>
@@ -7286,7 +7031,7 @@ Resolve manually and re-run Bulk complete.`,
   function smgmtRunBlockedToast() {
     _smgmtShowToast("Another sprint is running \u2014 wait for it to finish or cancel it");
   }
-  function smgmtRunSprint2(label) {
+  function smgmtRunSprint(label) {
     const mode = _smgmtDorMode();
     if (mode === "warn") {
       const tickets = typeof _smgmtBySprint !== "undefined" && _smgmtBySprint && _smgmtBySprint[label] || [];
@@ -8668,13 +8413,6 @@ Proceed anyway?`)) {
   }
 
   // apps/dashboard/static/src/sprint-board/index.js
-  globalThis._rrOpen = _rrOpen;
-  globalThis._rrClose = _rrClose;
-  globalThis._rrCatClass = _rrCatClass;
-  globalThis._rrUpdateState = _rrUpdateState;
-  globalThis._rrSelectAll = _rrSelectAll;
-  globalThis.smgmtRerunSprint = smgmtRerunSprint;
-  globalThis._rrConfirm = _rrConfirm;
   globalThis._fsOpen = _fsOpen;
   globalThis._fsClose = _fsClose;
   globalThis._fsCatClass = _fsCatClass;
@@ -8694,7 +8432,7 @@ Proceed anyway?`)) {
   globalThis._recApply = _recApply;
   globalThis._recClose = _recClose;
   globalThis.smgmtRunBlockedToast = smgmtRunBlockedToast;
-  globalThis.smgmtRunSprint = smgmtRunSprint2;
+  globalThis.smgmtRunSprint = smgmtRunSprint;
   globalThis.smgmtCancelSprint = smgmtCancelSprint;
   globalThis.smgmtApproveSprint = smgmtApproveSprint;
   globalThis.smgmtRejectSprint = smgmtRejectSprint;
@@ -8765,7 +8503,7 @@ Proceed anyway?`)) {
   globalThis._smgmtTicketRowHtml = _smgmtTicketRowHtml;
   globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;
   globalThis._smgmtBacklogTicketHtml = _smgmtBacklogTicketHtml;
-  globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic2;
+  globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic;
   globalThis._smgmtAncestorMergeState = _smgmtAncestorMergeState;
   globalThis._smgmtAncestorCarrySummary = _smgmtAncestorCarrySummary;
   globalThis._smgmtAncestorTicketsHtml = _smgmtAncestorTicketsHtml;
@@ -8791,7 +8529,6 @@ Proceed anyway?`)) {
   globalThis._histFocusLabel = _histFocusLabel;
   globalThis._histStateChip = _histStateChip;
   globalThis._histRenderLedger = _histRenderLedger;
-  globalThis._histRerunSprint = _histRerunSprint;
   globalThis._histToggleAgentTime = _histToggleAgentTime;
   globalThis._histToggleMetrics = _histToggleMetrics;
   globalThis._histResetLedgerCache = _histResetLedgerCache;

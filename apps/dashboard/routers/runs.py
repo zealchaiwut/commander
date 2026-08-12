@@ -5,9 +5,6 @@ Three API endpoints for the forensic Run Browser:
   GET /runs/{sprint}/{issue}/{agent}/log          — paginated log content
   GET /runs/{sprint}/{issue}/{agent}/log/tail     — last N KB of log
 
-Plus the HTML page:
-  GET /run-browser                   — serves run_browser.html (ntfy deep-link target)
-
 All data comes from the local SQLite DB and log files on disk.
 Zero GitHub API calls on this surface (AC10 of issue #783).
 """
@@ -18,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
@@ -39,21 +35,6 @@ from .runs_service import (  # noqa: E402
 )
 
 router = APIRouter(tags=["runs"])
-
-
-# ── HTML page ─────────────────────────────────────────────────────────────────
-
-@router.get("/run-browser")
-def get_run_browser() -> FileResponse:
-    """Serve the Run Browser HTML page.
-
-    This is the ntfy alert click-through target URL.  Deep-links accept a
-    ?sprint=<label> query param handled entirely in the frontend JS.
-    """
-    html_path = _STATIC_DIR / "run_browser.html"
-    if not html_path.exists():
-        raise HTTPException(status_code=404, detail="run_browser.html not found")
-    return FileResponse(str(html_path), media_type="text/html")
 
 
 # ── Sprint/ticket list ────────────────────────────────────────────────────────

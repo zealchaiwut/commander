@@ -495,18 +495,7 @@ export function _histVerbsHtml(s) {
   const lbl = escHtml(s.label || "");
   const rawLabel = s.label || "";
   let html = "";
-  if (state === "needs_rework" || state === "failed" || state === "cancelled") {
-    const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-    const rerunTitle = _smgmtAnySprintRunning
-      ? 'title="Cannot re-run: another sprint is currently running."'
-      : "";
-    const childDisplay = sprintLabelDisplay(
-      _histNextChildLabel(rawLabel),
-    ).replace("Sprint ", "");
-    html += `<button class="hist-verb hist-verb--rerun" ${rerunDisabled} ${rerunTitle}
-               onclick="_histRerunSprint('${lbl}')">
-               <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
-  } else if (state === "completed" || state === "ready_to_merge") {
+  if (state === "completed" || state === "ready_to_merge") {
     html += `<button class="hist-verb hist-verb--finish" onclick="smgmtFinishSprint('${lbl}')">
                <i class="ti ti-circle-check"></i> Complete</button>`;
     html += `<button class="hist-verb hist-verb--delete" onclick="smgmtDeleteSprint('${lbl}')">
@@ -611,22 +600,7 @@ export function _histHeadActionsHtml(s) {
       onclick="event.stopPropagation();smgmtReconcileSprint('${lbl}')"
       title="Reconcile this sprint's DB state against GitHub truth">
       <i class="ti ti-git-compare"></i> Reconcile</button>`;
-    if (
-      state === "needs_rework" ||
-      state === "failed" ||
-      state === "cancelled"
-    ) {
-      const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-      const rerunTitle = _smgmtAnySprintRunning
-        ? 'title="Cannot re-run: another sprint is currently running."'
-        : "";
-      const childDisplay = sprintLabelDisplay(
-        _histNextChildLabel(rawLabel),
-      ).replace("Sprint ", "");
-      html += `<button type="button" class="hist-head-btn hist-head-btn--rerun" ${rerunDisabled} ${rerunTitle}
-        onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
-        <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
-    } else if (state === "completed" || state === "ready_to_merge") {
+    if (state === "completed" || state === "ready_to_merge") {
       html += `<button type="button" class="hist-head-btn hist-head-btn--bulk"
         onclick="event.stopPropagation();smgmtFinishSprint('${lbl}')">
         <i class="ti ti-circle-check"></i> Complete</button>`;
@@ -1831,16 +1805,7 @@ function _histRecoveryBtnHtml(s) {
     state === "failed" ||
     state === "cancelled"
   ) {
-    const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-    const rerunTitle = _smgmtAnySprintRunning
-      ? 'title="Cannot re-run: another sprint is currently running."'
-      : "";
-    const childDisplay = sprintLabelDisplay(
-      _histNextChildLabel(rawLabel),
-    ).replace("Sprint ", "");
-    return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${rerunDisabled} ${rerunTitle}
-      onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
-      <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
+    return reconcileBtn;
   }
   if (state === "ready_to_merge") {
     return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--bulk"
@@ -1849,13 +1814,12 @@ function _histRecoveryBtnHtml(s) {
       <i class="ti ti-circle-check"></i> Complete</button>`;
   }
   if (state === "draft" && s.parent) {
-    // Orphaned child sprint — rerun created it but dispatch failed or was deferred.
-    // Offer a direct Run (preflight) rather than Re-run which would create a grandchild.
+    // Orphaned child sprint — dispatch failed or was deferred; offer direct Run.
     const runDisabled = _smgmtAnySprintRunning ? "disabled" : "";
     const runTitle = _smgmtAnySprintRunning
       ? 'title="Cannot run: another sprint is currently running."'
       : "";
-    return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${runDisabled} ${runTitle}
+    return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--bulk" ${runDisabled} ${runTitle}
       onclick="event.stopPropagation();smgmtRunSprint('${lbl}')">
       <i class="ti ti-player-play"></i> Run</button>`;
   }
@@ -2498,14 +2462,6 @@ export function _histRenderLedger(sprints) {
       recent.map(_histGroupHtml).join("") + folds.map(_histFoldHtml).join("");
   }
   el.innerHTML = _histLegendHtml() + _histToolbarHtml() + bodyHtml;
-}
-
-// Re-run from History uses the shared re-run modal (ticket pick) then pre-run
-// kickoff — same flow as the sprint board Re-run button.
-export function _histRerunSprint(label) {
-  if (typeof globalThis.smgmtRerunSprint === "function") {
-    return globalThis.smgmtRerunSprint(label);
-  }
 }
 
 export function _histPrefetchLedger(repo) {

@@ -6,7 +6,7 @@
  * concern modules also runs their side effects; ./state.js seeds modal/drag
  * state on `window`.
  *
- * Concerns: board render · drag/drop · run-controls · finish modal · rerun modal
+ * Concerns: board render · drag/drop · run-controls · finish modal
  * · bulk-complete modal · plan-next · scheduled-run.
  */
 
@@ -24,15 +24,11 @@ import {
 import {
   _histNeedsActionCount, _histLoadLedger, _histPrefetchLedger, _histScanStale, _histCleanupStale,
   _histToggleCard, _histToggleGroup, _histToggleFold, _histFocusLabel, _histStateChip,
-  _histRenderLedger, _histRerunSprint, _histToggleAgentTime, _histToggleMetrics, _histClearStaleLabels,
+  _histRenderLedger, _histToggleAgentTime, _histToggleMetrics, _histClearStaleLabels,
   _histResetLedgerCache, _histToggleShowClosed, _histForceRefresh, _histSetTtlMin,
   _histBulkSignOff, _histIsLoading,
 } from './history.js';
 
-import {
-  _rrOpen, _rrClose, _rrCatClass, _rrUpdateState, _rrSelectAll,
-  smgmtRerunSprint, _rrConfirm,
-} from './rerun-modal.js';
 import {
   _fsOpen, _fsClose, _fsCatClass, _fsSelectAll,
   smgmtFinishSprint, _fsConfirm, _fsRetry, finishSprintAndWait,
@@ -82,15 +78,6 @@ import {
   // Clean-up-empty pure helper (issue #2089)
   _smgmtComputeLeadingEmpty,
 } from './board-render.js';
-
-// Re-run modal (issue #512)
-globalThis._rrOpen = _rrOpen;
-globalThis._rrClose = _rrClose;
-globalThis._rrCatClass = _rrCatClass;
-globalThis._rrUpdateState = _rrUpdateState;
-globalThis._rrSelectAll = _rrSelectAll;
-globalThis.smgmtRerunSprint = smgmtRerunSprint;
-globalThis._rrConfirm = _rrConfirm;
 
 // Finish modal (issue #367)
 globalThis._fsOpen = _fsOpen;
@@ -231,7 +218,6 @@ globalThis._histToggleFold = _histToggleFold;
 globalThis._histFocusLabel = _histFocusLabel;
 globalThis._histStateChip = _histStateChip;
 globalThis._histRenderLedger = _histRenderLedger;
-globalThis._histRerunSprint = _histRerunSprint;
 globalThis._histToggleAgentTime = _histToggleAgentTime;
 globalThis._histToggleMetrics = _histToggleMetrics;
 globalThis._histResetLedgerCache = _histResetLedgerCache;

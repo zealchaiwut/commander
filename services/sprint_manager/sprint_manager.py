@@ -121,19 +121,31 @@ from services.sprint_manager.model_routing import (  # noqa: E402
     get_role_profile,
 )
 
-from services.sprint_manager.failures import (  # noqa: E402,F401
-    FailureCategory,
-    record_failure,
-    _build_failure_suffix,  # re-exported for backward compat
-    _generate_gate_failure_analysis,  # re-exported for backward compat
-    _publish_gate_failure_analyses,
-    _gate_failures_log_path,  # re-exported for backward compat
-    _read_gate_failure_records,  # re-exported for backward compat
-    _clear_gate_failure_records,
-    _extract_analysis_json,  # re-exported for backward compat
-    _post_gate_failure_analysis_comment,  # re-exported for backward compat
-    _append_gate_failure_to_sprint_log,  # re-exported for backward compat
-)
+# failures.py deleted #2241 — stubs retained until Sprint 3 deletion
+class FailureCategory:  # noqa: N801
+    HANG = "HANG"
+    CRASH = "CRASH"
+    GATE_FAIL = "GATE_FAIL"
+    TESTER_REJECTED = "TESTER_REJECTED"
+    RETRY_EXHAUSTED = "RETRY_EXHAUSTED"
+    CODER_NO_WORK = "CODER_NO_WORK"
+    MERGE_CONFLICT = "MERGE_CONFLICT"
+    LINT_FAIL = "LINT_FAIL"
+    PYTEST_FAIL = "PYTEST_FAIL"
+    REBASE_CONFLICT = "REBASE_CONFLICT"
+    ENV_ERROR = "ENV_ERROR"
+
+
+def record_failure(*a, **kw): pass
+def _build_failure_suffix(*a, **kw): return ""
+def _generate_gate_failure_analysis(*a, **kw): pass
+def _publish_gate_failure_analyses(*a, **kw): pass
+def _gate_failures_log_path(*a, **kw): pass
+def _read_gate_failure_records(*a, **kw): return []
+def _clear_gate_failure_records(*a, **kw): pass
+def _extract_analysis_json(*a, **kw): pass
+def _post_gate_failure_analysis_comment(*a, **kw): pass
+def _append_gate_failure_to_sprint_log(*a, **kw): pass
 
 try:
     from services.sprint_manager.state_machine import (  # noqa: PLC0415
@@ -195,20 +207,13 @@ from services.sprint_manager.state import (  # noqa: E402
     SprintSummary,
     _apply_token_ceiling,
 )
-from services.sprint_manager.ica_preflight import (  # noqa: E402
-    check_ica_readiness,
-    IcaPreflightError,
-)
+# ica_preflight.py deleted #2241
+def check_ica_readiness(*a, **kw): pass
+class IcaPreflightError(Exception): pass  # noqa: E701
 
-try:
-    # issue #860
-    from services.sprint_manager.brief_generator import (
-        write_sprint_brief as _write_sprint_brief,
-    )
-    _BRIEF_GENERATOR_AVAILABLE = True
-except ImportError:  # pragma: no cover
-    _write_sprint_brief = None  # type: ignore[assignment]
-    _BRIEF_GENERATOR_AVAILABLE = False
+# brief_generator.py deleted #2241
+_write_sprint_brief = None
+_BRIEF_GENERATOR_AVAILABLE = False
 
 try:
     # issue #1862
@@ -234,15 +239,12 @@ except ImportError:
     _db_record_event = None  # type: ignore[assignment]
     _RECORD_EVENT_AVAILABLE = False
 
-# Event-emission helpers extracted to events.py (issue #1275); re-exported here
-# so all existing call sites within this module remain unmodified.
-from services.sprint_manager.events import (  # noqa: E402
-    _emit_sprint_lifecycle_event,
-    _emit_ticket_failed,
-    _failure_event_detail,  # noqa: F401  (re-exported for callers/tests)
-    _post_agent_event,
-    _post_sprint_status,
-)
+# events.py deleted #2241
+def _emit_sprint_lifecycle_event(*a, **kw): pass
+def _emit_ticket_failed(*a, **kw): pass
+def _failure_event_detail(*a, **kw): return {}
+def _post_agent_event(*a, **kw): pass
+def _post_sprint_status(*a, **kw): pass
 
 # Timekeeping helpers extracted to timekeeping.py (issue #1277); re-exported here
 # so all existing call sites within this module remain unmodified.
@@ -298,16 +300,13 @@ from services.sprint_manager.gates import (  # noqa: E402, F401
     _revert_to_sit,
 )
 
-# Label transition helpers extracted to label_transitions.py (issue #1282);
-# re-exported here so all existing call sites within this module remain unmodified.
-from services.sprint_manager.label_transitions import (  # noqa: E402, F401
-    _get_issue_labels,
-    _sweep_stale_status,
-    _current_status_labels,
-    _emit_label_transition_event,
-    _transition_safe,
-    _add_blocked_label,
-)
+# label_transitions.py deleted #2241
+def _get_issue_labels(*a, **kw): return []
+def _sweep_stale_status(*a, **kw): pass
+def _current_status_labels(*a, **kw): return set()
+def _emit_label_transition_event(*a, **kw): pass
+def _transition_safe(*a, **kw): return False
+def _add_blocked_label(*a, **kw): pass
 
 # Worktree/env helpers extracted to worktree.py (issue #1283); re-exported here
 # so all existing call sites within this module remain unmodified.
@@ -370,9 +369,8 @@ from services.sprint_manager.post_sprint import (  # noqa: E402, F401
     _ESTIMATE_ISSUE_SCRIPT_SM,
 )
 
-from services.sprint_manager.api_client import (  # noqa: E402
-    is_retryable_rate_limit as _is_retryable_rate_limit,
-)
+# api_client.py deleted #2241
+def _is_retryable_rate_limit(*a, **kw): return False
 
 # Import failure-parsing helpers from post_test_report (no circular deps)
 try:
@@ -962,20 +960,23 @@ def _extract_rebase_conflict_files(output: str) -> list[str]:
     return list(seen)
 
 
-# ── alert channels (extracted to alerts.py, issue #1271) ─────────────────────
+# alerts.py and dead_letter_escalation.py deleted #2241
+class AlertMode:  # noqa: N801
+    NTFY = "ntfy"
+    SILENT = "silent"
 
-from services.sprint_manager.alerts import (  # noqa: E402
-    AlertMode,
-    dispatch_alerts,
-    HangDetector,  # noqa: F401 — re-exported; tests patch sm.HangDetector
-)
 
-# ── dead-letter escalation (issue #2033) ──────────────────────────────────────
+def dispatch_alerts(*a, **kw): pass
 
-from services.sprint_manager.dead_letter_escalation import (  # noqa: E402
-    check_dead_letter_escalation,
-    get_escalation_threshold,
-)
+
+class HangDetector:  # noqa: N801
+    def __init__(self, *a, **kw): pass
+    def __enter__(self): return self
+    def __exit__(self, *a): pass
+
+
+def check_dead_letter_escalation(*a, **kw): pass
+def get_escalation_threshold(*a, **kw): return 3
 
 # ── subprocess helpers ────────────────────────────────────────────────────────
 

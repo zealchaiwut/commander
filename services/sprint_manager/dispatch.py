@@ -40,9 +40,24 @@ from services.sprint_manager.model_routing import (  # noqa: E402
     get_role_profile,
     ica_lean_cli_args,
 )
-from services.sprint_manager.failures import FailureCategory  # noqa: E402
-from services.sprint_manager.label_transitions import _add_blocked_label  # noqa: E402
 from services.sprint_manager.timekeeping import _utcnow  # noqa: E402
+
+# failures.py and label_transitions.py deleted #2241 — stubs for Sprint 3 removal
+class FailureCategory:  # noqa: N801
+    HANG = "HANG"
+    CRASH = "CRASH"
+    GATE_FAIL = "GATE_FAIL"
+    TESTER_REJECTED = "TESTER_REJECTED"
+    RETRY_EXHAUSTED = "RETRY_EXHAUSTED"
+    CODER_NO_WORK = "CODER_NO_WORK"
+    MERGE_CONFLICT = "MERGE_CONFLICT"
+    LINT_FAIL = "LINT_FAIL"
+    PYTEST_FAIL = "PYTEST_FAIL"
+    REBASE_CONFLICT = "REBASE_CONFLICT"
+    ENV_ERROR = "ENV_ERROR"
+
+
+def _add_blocked_label(*args, **kwargs): pass
 from services.sprint_manager import agent_browser_runner  # noqa: E402
 
 # Same formula as sprint_manager.REPO_ROOT — this file lives at the same level.
@@ -119,8 +134,7 @@ def _post_agent_event(*args, **kwargs):
     _f = _lookup_in_sm("_post_agent_event", _post_agent_event)
     if _f is not None:
         return _f(*args, **kwargs)
-    from services.sprint_manager.events import _post_agent_event as _real
-    return _real(*args, **kwargs)
+    return None  # events.py deleted #2241
 
 
 def dispatch_alerts(*args, **kwargs):
@@ -128,8 +142,7 @@ def dispatch_alerts(*args, **kwargs):
     _f = _lookup_in_sm("dispatch_alerts", dispatch_alerts)
     if _f is not None:
         return _f(*args, **kwargs)
-    from services.sprint_manager.alerts import dispatch_alerts as _real
-    return _real(*args, **kwargs)
+    return None  # alerts.py deleted #2241
 
 
 class HangDetector:
@@ -144,8 +157,7 @@ class HangDetector:
         _real_cls = _lookup_in_sm("HangDetector", HangDetector)
         if _real_cls is not None:
             return _real_cls(*args, **kwargs)
-        from services.sprint_manager.alerts import HangDetector as _RealHangDetector
-        return _RealHangDetector(*args, **kwargs)
+        return object.__new__(cls)  # alerts.py deleted #2241
 
 
 def _get_issue_labels(*args, **kwargs):
@@ -153,8 +165,7 @@ def _get_issue_labels(*args, **kwargs):
     _f = _lookup_in_sm("_get_issue_labels", _get_issue_labels)
     if _f is not None:
         return _f(*args, **kwargs)
-    from services.sprint_manager.label_transitions import _get_issue_labels as _real  # noqa: PLC0415
-    return _real(*args, **kwargs)
+    return []  # label_transitions.py deleted #2241
 
 
 def _classify_risk_tier(*args, **kwargs):

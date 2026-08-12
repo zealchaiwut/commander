@@ -15,8 +15,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from services.sprint_manager.events import _post_sprint_status
 from services.sprint_manager.paths import _pid_file_path
+
+def _post_sprint_status(*args, **kwargs): pass  # events.py deleted #2241
 
 if TYPE_CHECKING:
     from services.sprint_manager.config import SprintConfig

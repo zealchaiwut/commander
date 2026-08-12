@@ -190,8 +190,7 @@ class HangDetector:
         _real_cls = _lookup_in_sm("HangDetector", HangDetector)
         if _real_cls is not None:
             return _real_cls(*args, **kwargs)
-        from services.sprint_manager.alerts import HangDetector as _Real  # noqa: PLC0415
-        return _Real(*args, **kwargs)
+        return object.__new__(cls)  # alerts.py deleted #2241
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────

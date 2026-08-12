@@ -443,8 +443,8 @@ def run_sprint_managed(request: Request, body: SprintMgmtRunBody):
     srv._assert_sprint_signed_off(project_root, body.sprint_label)
 
     # Block empty runs before spawn
-    from services.sprint_manager import sprint_manager as _sm_run
-    backlog = _sm_run.list_backlog_issues(body.sprint_label, body.project)
+    from services.sprint_manager.backlog import list_backlog_issues as _list_backlog_issues
+    backlog = _list_backlog_issues(body.sprint_label, body.project)
     if not backlog:
         # GitHub's label-search index lags briefly right after a re-run relabels
         # tickets onto the child sprint, so list_backlog_issues can return empty

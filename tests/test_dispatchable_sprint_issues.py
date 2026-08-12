@@ -25,6 +25,8 @@ def test_list_backlog_issues_filters_dispatchable(monkeypatch):
         {"number": 2, "title": "uat", "labels": [{"name": "UAT"}, {"name": "sprint-68.3"}]},
         {"number": 3, "title": "rework", "labels": [{"name": "needs-rework"}, {"name": "sprint-68.3"}]},
     ]
-    monkeypatch.setattr(sm, "_list_labeled_open_issues", lambda *a, **k: fake)
+    # list_backlog_issues moved to backlog.py (issue #2245); patch there.
+    import services.sprint_manager.backlog as bm
+    monkeypatch.setattr(bm, "_list_labeled_open_issues", lambda *a, **k: fake)
     out = sm.list_backlog_issues("sprint-68.3")
     assert [i["number"] for i in out] == [1, 3]

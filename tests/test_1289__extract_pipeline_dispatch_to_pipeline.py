@@ -31,13 +31,14 @@ sys.path.insert(0, str(REPO_ROOT / "apps" / "dashboard"))
 PIPELINE_PATH = REPO_ROOT / "services" / "sprint_manager" / "pipeline.py"
 SPRINT_MANAGER_PATH = REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"
 
-FIVE_FUNCTIONS = [
+# list_backlog_issues moved to backlog.py (issue #2245); four remain in pipeline.py.
+FOUR_FUNCTIONS = [
     "_run_pipeline_dispatch",
     "_compute_dispatch_levels",
     "_build_sprint_dag_layers",
     "_warn_file_conflicts",
-    "list_backlog_issues",
 ]
+FIVE_FUNCTIONS = FOUR_FUNCTIONS + ["list_backlog_issues"]
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +50,7 @@ class TestAC1PipelineModuleContainsFiveFunctions:
         assert PIPELINE_PATH.exists(), f"{PIPELINE_PATH} does not exist"
 
     def test_all_five_functions_defined_in_pipeline(self):
-        """All five functions must be *defined* (not just imported) in pipeline.py."""
+        """Four dispatch functions defined in pipeline.py; list_backlog_issues in backlog.py."""
         source = PIPELINE_PATH.read_text(encoding="utf-8")
         tree = ast.parse(source)
         defined = {
@@ -57,10 +58,17 @@ class TestAC1PipelineModuleContainsFiveFunctions:
             for node in ast.walk(tree)
             if isinstance(node, ast.FunctionDef)
         }
-        for fn in FIVE_FUNCTIONS:
+        for fn in FOUR_FUNCTIONS:
             assert fn in defined, (
                 f"{fn} must be defined in pipeline.py, not just re-exported"
             )
+        # list_backlog_issues extracted to backlog.py (issue #2245)
+        backlog_src = (REPO_ROOT / "services/sprint_manager/backlog.py").read_text()
+        backlog_tree = ast.parse(backlog_src)
+        backlog_defs = {n.name for n in ast.walk(backlog_tree) if isinstance(n, ast.FunctionDef)}
+        assert "list_backlog_issues" in backlog_defs, (
+            "list_backlog_issues must be defined in backlog.py (issue #2245)"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -84,21 +92,31 @@ class TestAC2SprintManagerNoLongerDefinesFive:
                 "it should only import it from pipeline.py"
             )
 
-    def test_sprint_manager_imports_five_functions_from_pipeline(self):
-        """sprint_manager.py must import each of the five symbols from pipeline.py."""
+    def test_sprint_manager_imports_four_functions_from_pipeline(self):
+        """sprint_manager.py must import the four dispatch symbols from pipeline.py.
+
+        list_backlog_issues moved to backlog.py (issue #2245) so it is imported from there.
+        """
         source = SPRINT_MANAGER_PATH.read_text(encoding="utf-8")
         tree = ast.parse(source)
         imported_from_pipeline: set[str] = set()
+        imported_from_backlog: set[str] = set()
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
                 module = node.module or ""
                 if "pipeline" in module:
                     for alias in node.names:
                         imported_from_pipeline.add(alias.asname or alias.name)
-        for fn in FIVE_FUNCTIONS:
+                if "backlog" in module:
+                    for alias in node.names:
+                        imported_from_backlog.add(alias.asname or alias.name)
+        for fn in FOUR_FUNCTIONS:
             assert fn in imported_from_pipeline, (
                 f"sprint_manager.py must import {fn} from pipeline.py"
             )
+        assert "list_backlog_issues" in imported_from_backlog, (
+            "sprint_manager.py must import list_backlog_issues from backlog.py (issue #2245)"
+        )
 
 
 # ---------------------------------------------------------------------------

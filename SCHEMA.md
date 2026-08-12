@@ -793,18 +793,7 @@ At sprint finish `sprint_manager.py` calls `generate_code_state_snapshot` (`serv
 
 ### Sprint merge-conflict status — auto-resolve + human-needed signal (issue #1898)
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/sprints/{sprint_label}/conflict-status?project=` | Reports whether a sprint's step-merge is parked on a human-needed merge conflict. Always HTTP 200 (400 on a malformed `label`). Autonomous callers (the Hermes loop) poll it to skip a blocked sprint instead of hanging. Canonical flat route (issue #2065). |
-| `GET` | `/api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status` | **Deprecated** nested alias of the flat route above (issue #2065); still works, flagged `deprecated: true` in the OpenAPI schema. |
-
-Response:
-
-```
-200 {"label": "sprint-N", "blocked": false}
-200 {"label": "sprint-N", "blocked": true, "code": "merge_conflict_needs_human",
-     "files": [...], "at": "<iso>"}
-```
+> **Endpoints removed in Sprint 1021 (#2234).** The `GET /api/sprints/{sprint_label}/conflict-status?project=` route and its deprecated nested alias `GET /api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status` had zero callers and were deleted. The underlying auto-resolve / human-needed conflict state is still written during the merge flow (below); it is simply no longer exposed over HTTP.
 
 **Auto-resolve path.** When a sprint branch is synced into `develop` before merge (`_prepare_sprint_branch_for_develop_merge` in `startup.py`), conflicts are triaged by file: `docs/**.md` files resolve via the existing doc-merge path, and **append-only** conflicts in `SCHEMA.md` / any `models.py` (`_is_union_merge_safe_path`) resolve via `git merge-file --union`. A conflict region is only treated as append-only when its diff3 base section is empty (`_has_overlapping_conflict_in_diff3`); any overlapping edit to existing lines is **not** auto-resolved. Anything else is a needs-human conflict.
 

@@ -4119,14 +4119,17 @@ ${listing}`
     const loading = document.getElementById("bc-loading");
     if (!loading)
       return;
-    loading.innerHTML = renderProgressActivity({
-      status: "running",
-      mode: "indeterminate",
-      current: current || "Loading preview\u2026"
-    }, {
-      id: "bc-preview-pa",
-      hideLog: true
-    });
+    loading.innerHTML = renderProgressActivity(
+      {
+        status: "running",
+        mode: "indeterminate",
+        current: current || "Loading preview\u2026"
+      },
+      {
+        id: "bc-preview-pa",
+        hideLog: true
+      }
+    );
     loading.classList.remove("hidden");
   }
   function _bcOpen() {
@@ -4199,7 +4202,9 @@ ${listing}`
       if (groups.length === 0) {
         listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No open tickets in this sprint lineage.</div>';
       } else {
-        listEl.innerHTML = groups.map((g) => `<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 2px">${escHtml(sprintLabelDisplay(g.label))} \xB7 ${g.tickets.length}</div>` + g.tickets.map(_ticketRow).join("")).join("");
+        listEl.innerHTML = groups.map(
+          (g) => `<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 2px">${escHtml(sprintLabelDisplay(g.label))} \xB7 ${g.tickets.length}</div>` + g.tickets.map(_ticketRow).join("")
+        ).join("");
       }
       const members = preview.members || [];
       const actionsEl = document.getElementById("bc-actions");
@@ -4274,7 +4279,9 @@ ${listing}`
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
+        throw new Error(
+          err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`
+        );
       }
     }
     return { label, steps: order.length };
@@ -4328,7 +4335,9 @@ ${listing}`
         );
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
+          throw new Error(
+            err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`
+          );
         }
         const sd = await res.json();
         doneSteps += 1;

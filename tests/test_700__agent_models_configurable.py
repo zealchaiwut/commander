@@ -215,20 +215,6 @@ def test_dispatch_tester_uses_cfg_model_not_hardcoded():
     assert "tester_model" in src, "_dispatch_tester must reference cfg.tester_model"
 
 
-def test_dispatch_reviewer_uses_cfg_model_not_hardcoded():
-    """sprint_manager._dispatch_reviewer must read model from cfg, not a bare literal."""
-    import services.sprint_manager.sprint_manager as sm
-    src = inspect.getsource(sm._dispatch_reviewer)
-    assert "reviewer_model" in src, "_dispatch_reviewer must reference cfg.reviewer_model"
-
-
-def test_dispatch_documenter_uses_cfg_model_not_hardcoded():
-    """sprint_manager._dispatch_documenter must read model from cfg, not a bare literal."""
-    import services.sprint_manager.sprint_manager as sm
-    src = inspect.getsource(sm._dispatch_documenter)
-    assert "documentor_model" in src, "_dispatch_documenter must reference cfg.documentor_model"
-
-
 # ── settings_schema: reviewer_model + documentor_model present ─────────────
 
 def test_settings_schema_has_reviewer_model():

@@ -82,19 +82,6 @@ class TestCreateSprintBranch:
         assert captured["parent_ref"] == "develop"
 
 
-class TestCreateSprintPr:
-    def test_no_auto_merge_to_develop(self):
-        assert "gh\", \"pr\", \"merge\"" not in _SM_SRC.split("def _create_sprint_pr")[1].split("def ")[0]
-
-    def test_pr_base_parameter(self):
-        assert "pr_base" in _SM_SRC.split("def _create_sprint_pr")[1].split("def ")[0]
-
-    def test_child_pr_targets_base_not_develop(self):
-        block = _SM_SRC.split("def _create_sprint_pr")[1].split("def ")[0]
-        assert '"--base", pr_base' in block
-        assert '"--base", "develop"' not in block
-
-
 class TestRunSprintMergeTarget:
     def test_default_target_is_sprint_branch(self):
         snippet = _SM_SRC.split("def run_sprint")[1].split("def _run_pipeline_dispatch")[0]

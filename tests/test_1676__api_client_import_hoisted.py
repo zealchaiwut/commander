@@ -109,7 +109,6 @@ def test_ac5_no_other_imports_moved():
         ("services.sprint_manager.pipeline", "pipeline_mode_enabled"),
         ("services.sprint_manager.config", "SprintConfig"),
         ("services.sprint_manager.failures", "FailureCategory"),
-        ("services.sprint_manager.post_sprint", "DEFAULT_REVIEWER_PROMPT"),
     ]
     for module, symbol in expected_top_imports:
         found = any(

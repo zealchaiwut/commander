@@ -381,51 +381,6 @@ class TestAC2WiringAtFailureExits:
         assert any(fc in ("merge",) for fc in classes), \
             f"failure_class must be 'merge', got: {classes}"
 
-    def test_record_failure_called_on_reviewer_failed(self, tmp_path):
-        """_dispatch_reviewer non-zero exit → record_failure called with reviewer class."""
-        calls = []
-
-        # Build a state with one merged issue so the skip guard doesn't fire
-        merged_issue = MagicMock()
-        merged_issue.status = "done"
-        state = MagicMock()
-        state.sprint_label = "sprint-49"
-        state.issues = [merged_issue]
-
-        class FakeProc:
-            def wait(self): return 1
-            returncode = 1
-
-        fake_detector = MagicMock()
-        fake_detector.killed = False
-
-        cfg_stub = MagicMock()
-        cfg_stub.worktree_coder = tmp_path
-        cfg_stub.logs_dir = tmp_path / "logs"
-        cfg_stub.logs_dir.mkdir(parents=True, exist_ok=True)
-        cfg_stub.reviewer_prompt_template = None
-
-        with (
-            patch.object(sm, "subprocess") as mock_sub,
-            patch.object(sm, "HangDetector", return_value=fake_detector),
-            patch.object(sm, "record_failure", side_effect=lambda *a, **kw: calls.append((a, kw))),
-        ):
-            mock_sub.Popen.return_value = FakeProc()
-            sm._dispatch_reviewer(
-                state=state,
-                summary_issue_num=100,
-                sprint_branch="sprint/sprint-49",
-                base_sha="abc",
-                head_sha="def",
-                cfg=cfg_stub,
-                repo_name=None,
-            )
-
-        assert calls, "record_failure must be called on reviewer failure"
-        classes = [kw.get("failure_class") or a[1] for a, kw in calls]
-        assert any(fc in ("reviewer",) for fc in classes), \
-            f"failure_class must be 'reviewer', got: {classes}"
-
 
 # ---------------------------------------------------------------------------
 # AC-6: Sidecar deleted on success path

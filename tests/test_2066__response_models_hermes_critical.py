@@ -523,7 +523,7 @@ def test_sprint_run_endpoint_validates_against_response(isolated_db, tmp_path):
     from server import app
     from fastapi.testclient import TestClient
     from routers.hermes_models import SprintRunResponse
-    from routers import sprint_run_service, sprint_webhook_service
+    from routers import sprint_run_service
 
     import server as srv_module
     import re
@@ -618,14 +618,6 @@ def test_sprint_run_endpoint_validates_against_response(isolated_db, tmp_path):
         stack.enter_context(
             patch.object(sprint_run_service, "spawn_sprint_process",
                          return_value=mock_proc)
-        )
-        stack.enter_context(
-            patch.object(sprint_webhook_service, "start_callback_monitor",
-                         return_value=None)
-        )
-        stack.enter_context(
-            patch.object(sprint_webhook_service, "start_report_monitor",
-                         return_value=None)
         )
         client = TestClient(app, raise_server_exceptions=True)
         response = client.post(

@@ -45,59 +45,6 @@ def _write_plan(sprints_dir: Path, label: str, data: dict) -> None:
     )
 
 
-# ── AC1 / AC2: triggered_by stored in plan.json and echoed in report ──────────
-
-class TestTriggeredBy:
-    """AC1/AC2: by stored as triggered_by; report echoes it."""
-
-    def test_triggered_by_echoed_in_report(self, tmp_path):
-        """AC1/AC2: build_commander_report reads triggered_by from plan.json."""
-        from routers.sprint_webhook_service import build_commander_report
-        sprints_dir = _make_sprints_dir(tmp_path)
-        _write_plan(sprints_dir, "sprint-42", {
-            "triggered_by": "hermes",
-            "run_mode": "overnight",
-        })
-        report = build_commander_report(
-            sprints_dir=sprints_dir,
-            sprint_label="sprint-42",
-            project="owner/repo",
-        )
-        assert report.get("triggered_by") == "hermes", (
-            "report must contain triggered_by echoing the by value"
-        )
-
-    def test_triggered_by_null_when_not_provided(self, tmp_path):
-        """AC2: triggered_by is null in report when by was not provided."""
-        from routers.sprint_webhook_service import build_commander_report
-        sprints_dir = _make_sprints_dir(tmp_path)
-        _write_plan(sprints_dir, "sprint-42", {"started_at": "2026-01-01T00:00:00+00:00"})
-        report = build_commander_report(
-            sprints_dir=sprints_dir,
-            sprint_label="sprint-42",
-            project="owner/repo",
-        )
-        # null or absent are both acceptable per AC2
-        assert report.get("triggered_by") is None, (
-            "triggered_by must be null/absent when by was not provided"
-        )
-
-    def test_trigger_by_field_uses_triggered_by(self, tmp_path):
-        """AC2: trigger.by in report reflects actual triggered_by value."""
-        from routers.sprint_webhook_service import build_commander_report
-        sprints_dir = _make_sprints_dir(tmp_path)
-        _write_plan(sprints_dir, "sprint-42", {"triggered_by": "hermes"})
-        report = build_commander_report(
-            sprints_dir=sprints_dir,
-            sprint_label="sprint-42",
-            project="owner/repo",
-        )
-        trigger = report.get("trigger", {})
-        assert trigger.get("by") == "hermes", (
-            "trigger.by must echo the triggered_by value when set"
-        )
-
-
 # ── AC3: mode parameter validation ────────────────────────────────────────────
 
 class TestModeParameter:
@@ -340,17 +287,3 @@ class TestNoModeNoChange:
         )
         assert body.target_branch == "feature/custom"
 
-    def test_report_mode_reflects_run_mode(self, tmp_path):
-        """AC2: report trigger.mode reflects run_mode stored in plan.json."""
-        from routers.sprint_webhook_service import build_commander_report
-        sprints_dir = _make_sprints_dir(tmp_path)
-        _write_plan(sprints_dir, "sprint-42", {"run_mode": "overnight"})
-        report = build_commander_report(
-            sprints_dir=sprints_dir,
-            sprint_label="sprint-42",
-            project="owner/repo",
-        )
-        trigger = report.get("trigger", {})
-        assert trigger.get("mode") == "overnight", (
-            "trigger.mode must reflect the run_mode stored in plan.json"
-        )

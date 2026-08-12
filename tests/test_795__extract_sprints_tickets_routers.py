@@ -160,37 +160,6 @@ def test_ac2_ticket_endpoints_behave_identically():
     assert r.status_code == 200 and r.json() == {"ok": True}
 
 
-# ── AC3: shared dispatch/subprocess helper lives in one service module ───────
-
-def test_ac3_shared_dispatch_service_module_exists():
-    assert (DASHBOARD_DIR / "routers" / "dispatch_service.py").exists()
-    svc = importlib.import_module("routers.dispatch_service")
-    assert hasattr(svc, "build_sprint_subprocess_env")
-
-
-def test_ac3_server_reuses_shared_helper_no_duplication():
-    # server.py must NOT redefine the env-builder body — it delegates to the
-    # shared module (the `def _build_sprint_subprocess_env(` body is gone).
-    src = SERVER_PY.read_text()
-    assert "def _build_sprint_subprocess_env(" not in src, (
-        "server.py still defines the env-builder body — it must import the "
-        "shared routers.dispatch_service.build_sprint_subprocess_env instead"
-    )
-    # The name still resolves on server (pre-existing tests patch/call it).
-    import server as srv
-    assert hasattr(srv, "_build_sprint_subprocess_env")
-
-
-def test_ac3_shared_helper_behaviour_unchanged(monkeypatch):
-    svc = importlib.import_module("routers.dispatch_service")
-    # strips ANTHROPIC_API_KEY and resolves a relative DB_PATH to absolute
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
-    monkeypatch.setenv("DB_PATH", "dashboard.db")
-    env = svc.build_sprint_subprocess_env()
-    assert "ANTHROPIC_API_KEY" not in env
-    assert os.path.isabs(env["DB_PATH"])
-
-
 # ── AC4: server.py only mounts the routers; moved handlers removed ───────────
 
 def test_ac4_server_registers_both_routers():

@@ -1,4 +1,4 @@
-# Code State — sprint-1022.2
+# Code State — sprint-1022.3
 
 _Deterministic snapshot generated at sprint finish. Do not hand-edit — regenerated each sprint._
 
@@ -15,37 +15,37 @@ _Deterministic snapshot generated at sprint finish. Do not hand-edit — regener
 - **`docs/`** — Project documentation
 - **`alembic/`** — Database migration scripts
 
-## Recent Deltas (sprint-1022.2)
+## Recent Deltas (sprint-1022.3)
 
-Files changed: **61**
+Files changed: **86**
 
-- `tests/` — 22 file(s)
+- `tests/` — 37 file(s)
+- `apps/` — 24 file(s)
 - `services/` — 18 file(s)
-- `apps/` — 15 file(s)
 - `(root)/` — 3 file(s)
+- `docs/` — 2 file(s)
 - `scripts/` — 2 file(s)
-- `docs/` — 1 file(s)
 
 ## Hot Files (last 90 days)
 
 | File | Commits |
 |------|---------|
 | `apps/dashboard/static/project.html` | 540 |
-| `apps/dashboard/server.py` | 401 |
+| `apps/dashboard/server.py` | 402 |
 | `services/sprint_manager/sprint_manager.py` | 295 |
-| `apps/dashboard/static/dist/bundle.js.map` | 213 |
-| `apps/dashboard/static/dist/bundle.js` | 203 |
-| `CHANGELOG.md` | 128 |
+| `apps/dashboard/static/dist/bundle.js.map` | 216 |
+| `apps/dashboard/static/dist/bundle.js` | 206 |
+| `CHANGELOG.md` | 129 |
 | `apps/dashboard/static/app.js` | 106 |
 | `apps/dashboard/static/src/sprint-board/board-render.js` | 94 |
 | `apps/dashboard/db.py` | 75 |
 | `apps/dashboard/static/index.html` | 75 |
-| `apps/dashboard/routers/__init__.py` | 54 |
+| `apps/dashboard/routers/__init__.py` | 55 |
 | `README.md` | 52 |
+| `apps/dashboard/startup.py` | 50 |
 | `apps/dashboard/static/src/sprint-board/history.js` | 49 |
-| `apps/dashboard/startup.py` | 49 |
-| `SCHEMA.md` | 47 |
-| `docs/architecture/code-state.md` | 45 |
+| `SCHEMA.md` | 48 |
+| `docs/architecture/code-state.md` | 46 |
 | `apps/dashboard/static/src/sprint-board/index.js` | 42 |
 | `apps/dashboard/github_client.py` | 42 |
 | `apps/dashboard/routers/sprint_history_service.py` | 39 |
@@ -53,6 +53,6 @@ Files changed: **61**
 
 ## Generated
 
-Sprint: `sprint-1022.2`  
-Timestamp: `2026-08-12T18:29:54Z`  
+Sprint: `sprint-1022.3`  
+Timestamp: `2026-08-12T19:15:52Z`  
 _Generated deterministically — no LLM required._

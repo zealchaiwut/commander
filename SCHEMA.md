@@ -747,6 +747,12 @@ Non-blocking estimator runs backed by FastAPI `BackgroundTasks`. Jobs are persis
 
 ### Sprint-finished webhook — optional callback_url on sprint run (issue #1865)
 
+> **Removed in Sprint 1022.3 (#2242).** The sprint-finished webhook was deleted
+> along with `routers/sprint_webhook_service.py`. The `callback_url` field on
+> `SprintMgmtRunBody` is still accepted and validated as an `http`/`https` URL,
+> but it fires nothing; the bearer-token auth (`check_callback_url_auth`) and
+> SSRF screening are gone. The behavior below is retained for historical reference.
+
 The managed sprint-run body (`SprintMgmtRunBody`, `routers/sprint_run_service.py`) accepts an optional `callback_url` (validated as a non-empty `http`/`https` URL; 422 otherwise). When present, a daemon monitor thread (`start_callback_monitor` → `_monitor_worker` in `routers/sprint_webhook_service.py`) waits for the sprint subprocess to exit and best-effort `POST`s an outcome document to the URL. Killing a running sprint (`kill_sprint`) also fires the webhook with `outcome:"killed"`. The `callback_url` is persisted into `plan.json` so a kill after restart can still fire it.
 
 Payload shape: as of issue #1945 the webhook and the on-disk report share a single builder (`build_commander_report`), so both emit the richer shape documented under **File-based sprint outcome report** below (`build_webhook_payload` now delegates to it). The pre-#1945 flat shape (`project`, `sprint_label`, `outcome`, `duration_sec`, `tickets`, `summary_url`) is no longer emitted.
@@ -754,6 +760,13 @@ Payload shape: as of issue #1945 the webhook and the on-disk report share a sing
 **Auth interplay (AC5):** when `COMMANDER_API_TOKEN` is set, a request that supplies `callback_url` must itself carry the bearer token, else the run is rejected with `403` (`check_callback_url_auth`). Webhook delivery is best-effort — failures are logged, never raised.
 
 ### File-based sprint outcome report — commander_report.latest.json (issue #1945)
+
+> **Automatic writer removed in Sprint 1022.3 (#2242).** The monitor-thread
+> writer (`start_report_monitor` / `write_commander_report` / `build_commander_report`,
+> in the deleted `routers/sprint_webhook_service.py`) no longer runs at sprint
+> terminal state. The `commander_report.latest.json` artifact is now produced on
+> demand by `scripts/export_hermes_report.py` (and `GET /api/dev-report`) rather
+> than written automatically. The mechanism below is retained for historical reference.
 
 At every sprint terminal state (normal finish, `kill_sprint`, or error) a daemon monitor thread (`start_report_monitor` → `_report_monitor_worker` in `routers/sprint_webhook_service.py`) waits for the sprint subprocess to exit and writes a JSON snapshot **atomically** (write-to-temp + `rename`) to `COMMANDER_REPORT_PATH` (env var, default `/var/run/commander/commander_report.latest.json`; documented in `.env.example`). This is unconditional — it runs regardless of whether `callback_url` is configured — so external pollers (Hermes) always have a consistent artifact even when webhook delivery fails. If the target's parent directory does not exist, `write_commander_report` logs a clear error and returns without crashing the run (a previous file is left untouched).
 

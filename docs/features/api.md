@@ -477,12 +477,10 @@ Read-only, so no bearer token is required even when `COMMANDER_API_TOKEN` is set
 - `migrate_from` — ticket numbers to migrate in from a prior sprint.
 - `llm_provider` — per-run override (`"anthropic"` or `"ica"`); omit to use
   the global setting.
-- `callback_url` — optional webhook fired on sprint terminal state. Must be
-  an `http`/`https` URL (internal/loopback/metadata targets are rejected).
-  **When `COMMANDER_API_TOKEN` is configured, setting a non-empty
-  `callback_url` requires `Authorization: Bearer <token>`** on this call —
-  a caller without the token cannot register a webhook, even though
-  `callback_url`-less runs are unrestricted.
+- `callback_url` — accepted and validated as an `http`/`https` URL, but
+  **no longer acted upon**. The sprint-terminal-state webhook was removed in
+  Sprint 1022.3 (#2242, along with its SSRF screening and bearer-token auth);
+  the field is retained for request-shape compatibility only and fires nothing.
 
 ### `POST /api/sprints/{sprint_label}/rerun` body
 
@@ -800,7 +798,7 @@ configured, local JSON otherwise. Every route is project-scoped.
 
 ---
 
-## Branches & Conflict Resolution
+## Branches
 
 | Method | Path | Description |
 |---|---|---|
@@ -808,8 +806,12 @@ configured, local JSON otherwise. Every route is project-scoped.
 | `DELETE` | `/api/projects/{owner}/{repo}/branches/{branch}` | Delete a single stale branch (protected branches like `develop`/`master` refused) |
 | `GET` | `/scan-stale-branches` | List `feature/<N>-*` remote branches, map each to a sprint, flag merged. `?repo=&target=` |
 | `POST` | `/cleanup-stale-branches` | Dry-run, then (on confirm) delete only merged branches; never unmerged |
-| `POST` | `/api/projects/{owner}/{repo_name}/resolve-branch-conflict` | Start AI-powered branch conflict resolution; returns `{started, job_key}` |
-| `GET` | `/api/projects/{owner}/{repo_name}/resolve-conflict-stream/{job_key_path}` | SSE stream of conflict-resolution progress |
+
+> The AI branch-conflict resolution endpoints
+> (`POST /api/projects/{owner}/{repo_name}/resolve-branch-conflict` and its
+> `resolve-conflict-stream` SSE) were removed in Sprint 1022.3 (#2240) — no
+> longer exist. The Finish wizard now surfaces a merge conflict for manual
+> resolution instead of driving an LLM resolve.
 
 ---
 

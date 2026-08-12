@@ -237,6 +237,30 @@ def main():
     # handled exclusively by sprint_manager via state_machine.transition().
     sys.stdout.write(str(f"FINISH_FEATURE_OUTCOME merged sha={merge_sha} branch={branch}") + "\n")
 
+    # Manual /tester path: apply UAT label here.
+    # When sprint_manager dispatches finish_feature it sets COMMANDER_SPRINT_RUNNING
+    # and handles the UAT transition itself — skip to avoid double-transition.
+    _apply_uat_if_manual(args.issue, args.repo)
+
+
+def _apply_uat_if_manual(issue_num: int, repo) -> None:
+    """Transition ticket to UAT unless the dispatch path owns the transition.
+
+    sprint_manager sets COMMANDER_SPRINT_RUNNING when it calls this script;
+    a non-empty value means the dispatch path will handle the UAT label.
+    When unset (manual /tester run), we apply it here so the ticket is not
+    stuck on SIT forever.
+    """
+    if os.environ.get("COMMANDER_SPRINT_RUNNING", "").strip():
+        return
+
+    try:
+        from services.sprint_manager.state_machine import TicketState, transition
+        transition(issue_num, TicketState.UAT, actor="finish_feature", repo=repo)
+        sys.stdout.write(str(f"Label transitioned to UAT for issue #{issue_num}\n"))
+    except Exception as exc:
+        sys.stdout.write(str(f"Warning: UAT transition failed for #{issue_num}: {exc}\n"))
+
 
 if __name__ == "__main__":
     main()

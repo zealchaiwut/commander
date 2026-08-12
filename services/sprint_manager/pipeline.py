@@ -35,7 +35,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
-from services.sprint_manager.failures import FailureCategory  # noqa: E402
 from services.sprint_manager.serialization import (  # noqa: E402
     tester_worktree_guard,
 )
@@ -356,20 +355,17 @@ from services.sprint_manager.timekeeping import (  # noqa: E402
     _token_window_sums,
     _utcnow,
 )
-from services.sprint_manager.alerts import dispatch_alerts  # noqa: E402
 from services.sprint_manager.worktree import _detect_port  # noqa: E402
-
-# model_routing and events import sprint_manager lazily inside functions, so
-# it's safe to import from them here at module level.
 from services.sprint_manager.model_routing import (  # noqa: E402
     _resolve_coder_model,
     _effective_coder_backend,
 )
-from services.sprint_manager.events import (  # noqa: E402
-    _emit_sprint_lifecycle_event,
-    _emit_ticket_failed,
-    _post_sprint_status,
-)
+
+# alerts.py and events.py deleted #2241 — stubs for Sprint 3 removal
+dispatch_alerts = lambda *args, **kwargs: None
+_emit_sprint_lifecycle_event = lambda *args, **kwargs: None
+_emit_ticket_failed = lambda *args, **kwargs: None
+_post_sprint_status = lambda *args, **kwargs: None
 
 try:
     from services.sprint_manager.state_machine import (  # noqa: PLC0415
@@ -397,6 +393,14 @@ except (ImportError, ModuleNotFoundError):
 # the moved functions use those names, so we alias them here.
 _StageResult = StageResult
 _run_pipeline_level = run_level
+
+# failures.py deleted #2241; inline enum values for Sprint 3 deletion
+class FailureCategory:  # noqa: N801
+    HANG = "HANG"; CRASH = "CRASH"; GATE_FAIL = "GATE_FAIL"
+    TESTER_REJECTED = "TESTER_REJECTED"; RETRY_EXHAUSTED = "RETRY_EXHAUSTED"
+    CODER_NO_WORK = "CODER_NO_WORK"; MERGE_CONFLICT = "MERGE_CONFLICT"
+    LINT_FAIL = "LINT_FAIL"; PYTEST_FAIL = "PYTEST_FAIL"
+    REBASE_CONFLICT = "REBASE_CONFLICT"; ENV_ERROR = "ENV_ERROR"
 
 _LOGIC_FAILURE_CATEGORIES: frozenset[str] = frozenset({
     FailureCategory.CODER_NO_WORK,
@@ -555,8 +559,7 @@ def _transition_safe(*args: Any, **kwargs: Any) -> bool:
     _f = _lookup_in_sm("_transition_safe", _transition_safe)
     if _f is not None:
         return _f(*args, **kwargs)
-    from services.sprint_manager.label_transitions import _transition_safe as _real
-    return _real(*args, **kwargs)
+    return False  # label_transitions.py deleted #2241
 
 
 def _dispatch_coder(*args: Any, **kwargs: Any) -> Any:

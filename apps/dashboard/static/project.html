@@ -21123,7 +21123,7 @@ function _smgmtKbColTickets(label) {
 
 /** Returns true if any modal, dialog, or dropdown is open. */
 function _smgmtKbAnyModalOpen() {
-  const backdropIds = ['mt-backdrop', 'hs-backdrop', 'pf-backdrop', 'ci-backdrop', 'lv-backdrop', 'rr-backdrop', 'apm-backdrop'];
+  const backdropIds = ['mt-backdrop', 'hs-backdrop', 'pf-backdrop', 'ci-backdrop', 'lv-backdrop', 'apm-backdrop'];
   if (backdropIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
   const menuIds = ['smgmt-row-menu', 'smgmt-moveto-popup', 'smgmt-ctx-menu', 'smgmt-ar-menu', 'proj-create-menu'];
   if (menuIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
@@ -22124,11 +22124,6 @@ function _setupModals() {
   document.getElementById('bc-cancel-btn').addEventListener('click', _bcClose);
   document.getElementById('bc-backdrop').addEventListener('click', _bcClose);
   document.getElementById('bc-confirm-btn').addEventListener('click', _bcConfirm);
-
-  document.getElementById('rr-close-btn').addEventListener('click', _rrClose);
-  document.getElementById('rr-cancel-btn').addEventListener('click', _rrClose);
-  document.getElementById('rr-backdrop').addEventListener('click', _rrClose);
-  document.getElementById('rr-confirm-btn').addEventListener('click', _rrConfirm);
 
   document.getElementById('ns-close-btn').addEventListener('click', _nsClose);
   document.getElementById('ns-cancel-btn').addEventListener('click', _nsClose);
@@ -26382,33 +26377,6 @@ document.addEventListener('keydown', function(e) {
   <div class="modal-footer">
     <button class="btn-ghost" id="bc-cancel-btn" type="button">Cancel</button>
     <button class="btn-primary" id="bc-confirm-btn" type="button" disabled>Bulk complete</button>
-  </div>
-</div>
-
-<!-- ── Re-run Sprint modal (issue #512) ── -->
-<div class="modal-backdrop hidden" id="rr-backdrop"></div>
-<div class="modal hidden" id="rr-modal"
-     role="dialog" aria-modal="true" aria-labelledby="rr-modal-title">
-  <div class="modal-header">
-    <span class="modal-title" id="rr-modal-title">Re-run Sprint?</span>
-    <button class="modal-close" id="rr-close-btn" aria-label="Close">&times;</button>
-  </div>
-  <div class="modal-body">
-    <div id="rr-loading" style="color:var(--text-muted);padding:8px 0">Loading preview…</div>
-    <div id="rr-content" class="hidden">
-      <div class="rr-controls">
-        <span style="font-size:13px;color:var(--text-secondary)">Select tickets to move to child sprint:</span>
-        <a onclick="_rrSelectAll(true)">Select all</a>
-        <a onclick="_rrSelectAll(false)">Select none</a>
-      </div>
-      <div class="rr-ticket-list" id="rr-ticket-list"></div>
-      <div class="rr-uat-warning" id="rr-uat-warning"></div>
-    </div>
-    <div class="modal-error hidden" id="rr-error"></div>
-  </div>
-  <div class="modal-footer">
-    <button class="btn-ghost" id="rr-cancel-btn" type="button">Cancel</button>
-    <button class="btn-primary" id="rr-confirm-btn" type="button" disabled>Create sprint and run</button>
   </div>
 </div>
 

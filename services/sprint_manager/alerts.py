@@ -175,10 +175,6 @@ def _alert_ntfy(
         "Priority": priority,
         "Tags":     category or "sprint",
     }
-    # Deep-link into Run Browser when DASHBOARD_URL is configured (issue #783).
-    dashboard_url = os.environ.get("DASHBOARD_URL", "").rstrip("/")
-    if dashboard_url and sprint_label:
-        headers["Click"] = f"{dashboard_url}/run-browser?sprint={sprint_label}"
     req = urllib.request.Request(
         topic_url,
         data=payload,

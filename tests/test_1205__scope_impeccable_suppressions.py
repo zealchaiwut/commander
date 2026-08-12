@@ -58,7 +58,7 @@ FILES_WITH_VIOLATIONS: dict[str, list[str]] = {
         "dark-glow",
         "em-dash-overuse",
     ],
-    "run_browser.html": ["single-font"],
+    # run_browser.html removed in issue #2243
 }
 
 
@@ -135,22 +135,7 @@ class TestScopedInlineSuppressions:
             "broken-image comment at the placeholder <img> element (line ~130)"
         )
 
-    def test_run_browser_flat_type_hierarchy_suppression(self):
-        """AC2 — run_browser.html flat-type-hierarchy needs scoped suppression."""
-        filepath = STATIC_DIR / "run_browser.html"
-        assert filepath.exists(), "run_browser.html must exist"
-        content = filepath.read_text(encoding="utf-8")
-        # Accept single-rule or multi-rule disable comments
-        has_suppress = any(
-            "flat-type-hierarchy" in part
-            for part in content.split("impeccable-disable")
-            if "flat-type-hierarchy" in part
-        )
-        assert has_suppress, (
-            "AC2: run_browser.html must have an inline impeccable-disable comment "
-            "for flat-type-hierarchy (pre-existing violation)"
-        )
-
+    # test_run_browser_flat_type_hierarchy_suppression removed: run_browser.html deleted in #2243
 
 # ── AC3: impeccable detect passes on the full surface ────────────────────────
 

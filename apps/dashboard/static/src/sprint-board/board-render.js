@@ -1543,17 +1543,6 @@ export function _smgmtCardHtml(
   // into a child sub-sprint instead (P0 — no same-label re-dispatch).
   const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
 
-  // Re-run Sprint button: child sprint for fully completed/stopped runs (not has_rework)
-  const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-  const rerunTitle = _smgmtAnySprintRunning
-    ? 'title="Cannot re-run: another sprint is currently running."'
-    : "";
-  const childLabel = _smgmtNextChildLabel(label);
-  const childDisplay = sprintLabelDisplay(childLabel).replace("Sprint ", "");
-  const rerunBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun" ${rerunDisabled} ${rerunTitle}
-                    onclick="smgmtRerunSprint('${escHtml(label)}')">
-                    <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
-
   const rerunInto = (_smgmtData?.sprint_rerun_into || {})[label];
   const rerunChildDisplay = rerunInto
     ? sprintLabelDisplay(rerunInto).replace("Sprint ", "")
@@ -1568,19 +1557,19 @@ export function _smgmtCardHtml(
   if (isRunning) {
     actionBtn = `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
                   <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
-  } else if (isLinger && isHasRework) {
-    // A rework finish lingers too, but the operator needs to re-run it NOW — don't
-    // make them wait out the 1h snapshot window before the rerun button appears.
-    actionBtn = rerunBtn;
   } else if (isLinger) {
     actionBtn = `<span class="smgmt-linger-note">Finished — snapshot kept 1h</span>`;
   } else if (isHasRework && rerunInto && tickets.length === 0) {
-    // Tickets moved to a child re-run — run the child, not the empty parent label.
-    actionBtn = `<button class="smgmt-run-btn" ${rerunDisabled} ${rerunTitle}
+    // Tickets moved to a child sprint — offer direct Run on the child.
+    const _rrDisabled = _smgmtAnySprintRunning ? "disabled" : "";
+    const _rrTitle = _smgmtAnySprintRunning
+      ? 'title="Cannot run: another sprint is currently running."'
+      : "";
+    actionBtn = `<button class="smgmt-run-btn" ${_rrDisabled} ${_rrTitle}
                   onclick="smgmtRunSprint('${escHtml(rerunInto)}')">
                   <i class="ti ti-player-play"></i> Run → ${escHtml(rerunChildDisplay)}</button>`;
   } else if (isHasRework || isPostRun) {
-    actionBtn = rerunBtn;
+    actionBtn = "";
   } else if (_smgmtSignoffState(label) === "pending") {
     actionBtn = _smgmtSignoffActionsHtml(label);
   } else if (_smgmtAnySprintRunning) {
@@ -2821,16 +2810,9 @@ export function _smgmtAncestorRowHtml(label, outcome, childLabel) {
     ticketsHtml = statsHtml + listHtml;
   }
 
-  const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-  const rerunTitle = _smgmtAnySprintRunning
-    ? 'title="Cannot re-run: another sprint is currently running."'
-    : "";
   const actionsHtml =
     mergeState === "needs_merge"
       ? `<div class="slp-ancestor-actions">
-          <button class="smgmt-run-btn smgmt-run-btn--rerun" ${rerunDisabled} ${rerunTitle}
-                  onclick="event.stopPropagation();smgmtRerunSprint('${safeLabel}')">
-            <i class="ti ti-refresh"></i> Re-run</button>
           <button class="smgmt-finish-btn sc-merge-link"
                   onclick="event.stopPropagation();smgmtFinishSprint('${safeLabel}')">
             <i class="ti ti-flag-check"></i> Merge Sprint</button>

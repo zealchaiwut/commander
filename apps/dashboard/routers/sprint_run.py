@@ -16,7 +16,6 @@ are accessed via the deferred ``_server()`` import to avoid circular imports.
 from __future__ import annotations
 
 import json
-import os
 import sys
 import subprocess
 import uuid
@@ -691,13 +690,6 @@ def kill_sprint(sprint_label: str, project: str):
     sprints_dir = srv._commander_dir(project_root) / "sprints"
     pid_file = sprints_dir / f"{sprint_label}-pid"
     pending_file = sprints_dir / f"{sprint_label}-pid.pending"
-
-    _kill_started_at: Optional[str] = None
-    try:
-        _kill_plan = srv._read_plan_json(project_root, sprint_label) or {}
-        _kill_started_at = _kill_plan.get("started_at")
-    except Exception:
-        pass
 
     active_file = pid_file if pid_file.exists() else (pending_file if pending_file.exists() else None)
     if active_file is None:

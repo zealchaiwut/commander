@@ -11,7 +11,6 @@ Verifies all 6 acceptance criteria:
 from __future__ import annotations
 
 import configparser
-import os
 from pathlib import Path
 
 import pytest
@@ -35,7 +34,7 @@ class TestAC1PytestTimeoutInRequirements:
         # Verify it's a real dependency line, not just a comment
         lines = [line.strip() for line in content.splitlines()
                  if line.strip() and not line.strip().startswith("#")]
-        pytest_timeout_lines = [l for l in lines if "pytest-timeout" in l]
+        pytest_timeout_lines = [ln for ln in lines if "pytest-timeout" in ln]
         assert len(pytest_timeout_lines) > 0, (
             "pytest-timeout must be an actual dependency, not just mentioned"
         )

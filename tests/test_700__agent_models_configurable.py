@@ -13,8 +13,6 @@ from __future__ import annotations
 import inspect
 from pathlib import Path
 
-import pytest
-
 # Current hardcoded defaults (must not change when no agent_config present)
 HARDCODED = {
     "coder_model":      "claude-sonnet-4-6",

@@ -2182,6 +2182,40 @@ def update_worktree_shas(
         conn.commit()
 
 
+def _manual_runs_for_sprint(
+    conn,
+    sprint_label: str,
+    project: str,
+) -> list[dict]:
+    """Return NULL-sprint agent_runs rows for issues that carry *sprint_label* in the
+    issues mirror (issue #2247).
+
+    Joins against the issues table (JSON labels column) to find which issue numbers
+    belong to the sprint, then returns manual (sprint_label IS NULL) runs for those
+    issues scoped to *project*.
+    """
+    _create_issues_table(conn)
+    issue_rows = conn.execute(
+        "SELECT issue_number FROM issues "
+        "WHERE repo = ? AND EXISTS ("
+        "  SELECT 1 FROM json_each(labels) WHERE value = ?"
+        ")",
+        (project, sprint_label),
+    ).fetchall()
+    if not issue_rows:
+        return []
+    issue_nums = [r["issue_number"] for r in issue_rows]
+    placeholders = ", ".join("?" * len(issue_nums))
+    rows = conn.execute(
+        f"SELECT * FROM agent_runs "
+        f"WHERE sprint_label IS NULL AND project = ? "
+        f"AND issue_number IN ({placeholders}) "
+        f"ORDER BY issue_number, id",
+        [project, *issue_nums],
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def agent_runs_for_sprint(sprint_label: str, project: str | None = None) -> list[dict]:
     """Return all agent_runs rows for a sprint, ordered by issue then start (#764).
 
@@ -2192,6 +2226,10 @@ def agent_runs_for_sprint(sprint_label: str, project: str | None = None) -> list
     those blank/NULL-project rows so pre-migration sprints still render. Rows
     owned by a *different* project are never returned (issue #1881 — a draft
     sprint that never ran was rendering another project's same-labelled runs).
+
+    Also includes manual (sprint_label IS NULL) runs for issues labelled with
+    *sprint_label* in the issues mirror so sprint-finish grouping captures work
+    done outside a formal sprint run (issue #2247).
     """
     with get_conn() as conn:
         _create_agent_runs_table(conn)
@@ -2202,14 +2240,22 @@ def agent_runs_for_sprint(sprint_label: str, project: str | None = None) -> list
                 (sprint_label, project),
             ).fetchall()
             if rows:
-                return [dict(r) for r in rows]
-            rows = conn.execute(
-                "SELECT * FROM agent_runs WHERE sprint_label = ? "
-                "AND (project = '' OR project IS NULL) "
-                "ORDER BY issue_number, id",
-                (sprint_label,),
-            ).fetchall()
-            return [dict(r) for r in rows]
+                labeled = [dict(r) for r in rows]
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM agent_runs WHERE sprint_label = ? "
+                    "AND (project = '' OR project IS NULL) "
+                    "ORDER BY issue_number, id",
+                    (sprint_label,),
+                ).fetchall()
+                labeled = [dict(r) for r in rows]
+
+            manual = _manual_runs_for_sprint(conn, sprint_label, project)
+            seen_ids = {r["id"] for r in labeled}
+            combined = labeled + [r for r in manual if r["id"] not in seen_ids]
+            combined.sort(key=lambda r: (r.get("issue_number") or 0, r["id"]))
+            return combined
+
         rows = conn.execute(
             "SELECT * FROM agent_runs WHERE sprint_label = ? "
             "ORDER BY issue_number, id",

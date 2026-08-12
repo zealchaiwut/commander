@@ -147,25 +147,28 @@ def list_runs() -> list[dict]:
         ).fetchall()
 
     # ── group by sprint then issue ────────────────────────────────────────────
+    # Use "null" sentinel for NULL sprint_label so the UI can build valid URLs
+    # (/runs/null/{issue}/{agent}/log) for manual sessions (issue #2247).
     sprints: dict[str, dict] = {}
     for r in rows:
         sl = r["sprint_label"]
-        if sl not in sprints:
-            sprints[sl] = {
-                "sprint": sl,
+        key = sl if sl is not None else "null"
+        if key not in sprints:
+            sprints[key] = {
+                "sprint": key,
                 "state": r["sprint_state"],
                 "started_at": r["sprint_started_at"],
                 "ended_at": r["sprint_ended_at"],
                 "tickets": {},
             }
         inum = r["issue_number"]
-        if inum not in sprints[sl]["tickets"]:
-            sprints[sl]["tickets"][inum] = {
+        if inum not in sprints[key]["tickets"]:
+            sprints[key]["tickets"][inum] = {
                 "issue_number": inum,
                 "agents": [],
                 "outcome": None,
             }
-        ticket = sprints[sl]["tickets"][inum]
+        ticket = sprints[key]["tickets"][inum]
         ticket["agents"].append({
             "id": r["id"],
             "agent": r["agent"],
@@ -225,15 +228,27 @@ def get_log_path_from_db(sprint: str, issue: int, agent: str) -> Optional[str]:
     ``agent_runs.agent`` is always lowercase.  Normalising at this lookup
     boundary fixes all callers regardless of how the URL was constructed.
     (issue #2039)
+
+    ``sprint="null"`` is a sentinel for manual sessions (sprint_label IS NULL in
+    the DB).  Callers set sprint="null" in the URL when no sprint label exists
+    (issue #2247).
     """
     with _db.get_conn() as conn:
         _db._create_agent_runs_table(conn)
-        row = conn.execute(
-            "SELECT log_path FROM agent_runs "
-            "WHERE sprint_label = ? AND issue_number = ? AND agent = ? "
-            "ORDER BY id DESC LIMIT 1",
-            (sprint, issue, agent.lower()),
-        ).fetchone()
+        if sprint == "null":
+            row = conn.execute(
+                "SELECT log_path FROM agent_runs "
+                "WHERE sprint_label IS NULL AND issue_number = ? AND agent = ? "
+                "ORDER BY id DESC LIMIT 1",
+                (issue, agent.lower()),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT log_path FROM agent_runs "
+                "WHERE sprint_label = ? AND issue_number = ? AND agent = ? "
+                "ORDER BY id DESC LIMIT 1",
+                (sprint, issue, agent.lower()),
+            ).fetchone()
     if row is None:
         return None
     return row["log_path"]

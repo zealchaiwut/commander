@@ -259,7 +259,7 @@ wall-clock span and lost per-agent resolution. Created identically on SQLite
 Indexes: `(issue_number, agent)`, `(sprint_label)`.
 
 The `provider` column drives the **`caching: reduced`** indicator on the live
-board (`project.html`) and run browser (`run_browser.html`): when an agent run's
+board (`project.html`): when an agent run's
 provider is `ICA`, the proxy strips prompt-caching headers (full context is
 re-sent each turn), so a yellow badge flags the higher token cost. It surfaces in
 the live snapshot as `coder_provider` and in `/api/runs` as `provider`.
@@ -457,13 +457,12 @@ Per-environment deploy/restart for the `prd` and `uat` environments. Each enviro
 
 > The Deploy tab is scoped to the active project only (issue #768). Deploy cards also surface and inline-edit the run folder + port (issue #769), show a live capped log tail after deploy/restart/start (issue #770), and expose Start/Stop controls with a run-state badge alongside Deploy/Restart (issue #771). Headless `gh` auth for the launchd dashboard is wired via `GH_TOKEN` in the launchd plist + agent `.env` (issue #772).
 
-### Run Browser (issue #783)
+### Run data APIs (issue #783)
 
-Forensic log viewer for all past sprint runs. All data served from local SQLite + disk log files — zero GitHub API calls.
+Forensic per-run log data for all past sprint runs. All data served from local SQLite + disk log files — zero GitHub API calls. (The standalone `/run-browser` HTML viewer page was removed in Sprint 1022.2, #2243; the data endpoints below remain.)
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/run-browser` | Serve the Run Browser HTML page; accepts `?sprint=<label>` deep-link query param |
 | `GET` | `/runs` | List all past sprints with tickets and per-agent run metadata from `agent_runs` table |
 | `GET` | `/runs/{sprint}/{issue}/{agent}/log` | Paginated log content. Query params: `page` (1-based), `limit` (lines per page, default 200) |
 | `GET` | `/runs/{sprint}/{issue}/{agent}/log/tail` | Last N KB of a log file. Query param: `kb` (default 10) |
@@ -748,6 +747,12 @@ Non-blocking estimator runs backed by FastAPI `BackgroundTasks`. Jobs are persis
 
 ### Sprint-finished webhook — optional callback_url on sprint run (issue #1865)
 
+> **Removed in Sprint 1022.3 (#2242).** The sprint-finished webhook was deleted
+> along with `routers/sprint_webhook_service.py`. The `callback_url` field on
+> `SprintMgmtRunBody` is still accepted and validated as an `http`/`https` URL,
+> but it fires nothing; the bearer-token auth (`check_callback_url_auth`) and
+> SSRF screening are gone. The behavior below is retained for historical reference.
+
 The managed sprint-run body (`SprintMgmtRunBody`, `routers/sprint_run_service.py`) accepts an optional `callback_url` (validated as a non-empty `http`/`https` URL; 422 otherwise). When present, a daemon monitor thread (`start_callback_monitor` → `_monitor_worker` in `routers/sprint_webhook_service.py`) waits for the sprint subprocess to exit and best-effort `POST`s an outcome document to the URL. Killing a running sprint (`kill_sprint`) also fires the webhook with `outcome:"killed"`. The `callback_url` is persisted into `plan.json` so a kill after restart can still fire it.
 
 Payload shape: as of issue #1945 the webhook and the on-disk report share a single builder (`build_commander_report`), so both emit the richer shape documented under **File-based sprint outcome report** below (`build_webhook_payload` now delegates to it). The pre-#1945 flat shape (`project`, `sprint_label`, `outcome`, `duration_sec`, `tickets`, `summary_url`) is no longer emitted.
@@ -755,6 +760,13 @@ Payload shape: as of issue #1945 the webhook and the on-disk report share a sing
 **Auth interplay (AC5):** when `COMMANDER_API_TOKEN` is set, a request that supplies `callback_url` must itself carry the bearer token, else the run is rejected with `403` (`check_callback_url_auth`). Webhook delivery is best-effort — failures are logged, never raised.
 
 ### File-based sprint outcome report — commander_report.latest.json (issue #1945)
+
+> **Automatic writer removed in Sprint 1022.3 (#2242).** The monitor-thread
+> writer (`start_report_monitor` / `write_commander_report` / `build_commander_report`,
+> in the deleted `routers/sprint_webhook_service.py`) no longer runs at sprint
+> terminal state. The `commander_report.latest.json` artifact is now produced on
+> demand by `scripts/export_hermes_report.py` (and `GET /api/dev-report`) rather
+> than written automatically. The mechanism below is retained for historical reference.
 
 At every sprint terminal state (normal finish, `kill_sprint`, or error) a daemon monitor thread (`start_report_monitor` → `_report_monitor_worker` in `routers/sprint_webhook_service.py`) waits for the sprint subprocess to exit and writes a JSON snapshot **atomically** (write-to-temp + `rename`) to `COMMANDER_REPORT_PATH` (env var, default `/var/run/commander/commander_report.latest.json`; documented in `.env.example`). This is unconditional — it runs regardless of whether `callback_url` is configured — so external pollers (Hermes) always have a consistent artifact even when webhook delivery fails. If the target's parent directory does not exist, `write_commander_report` logs a clear error and returns without crashing the run (a previous file is left untouched).
 

@@ -5,7 +5,7 @@ Extracted from sprint_manager.py (issue #1270) — pure move, no logic changes.
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -17,6 +17,29 @@ if TYPE_CHECKING:
 _REPO_ROOT = Path(__file__).parent.parent.parent
 _DASHBOARD_DIR = _REPO_ROOT / "apps" / "dashboard"
 _SPRINTS_DIR = _DASHBOARD_DIR / "sprints"
+
+# Public alias consumed by summary.py after decoupling from timekeeping.
+SPRINTS_DIR = _SPRINTS_DIR
+
+_BANGKOK_TZ = timezone(timedelta(hours=7))
+
+
+def _utcnow() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _bangkok_now() -> str:
+    """Return current Bangkok time (UTC+7) as YYYY-MM-DDTHH:MM:SS+07:00."""
+    return datetime.now(_BANGKOK_TZ).strftime("%Y-%m-%dT%H:%M:%S+07:00")
+
+
+def _to_bangkok(utc_str: str) -> str:
+    """Convert a UTC timestamp string ending in Z to Bangkok local time."""
+    try:
+        dt = datetime.strptime(utc_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        return dt.astimezone(_BANGKOK_TZ).strftime("%Y-%m-%dT%H:%M:%S+07:00")
+    except (ValueError, TypeError):
+        return _bangkok_now()
 
 
 def _sprint_number(label: str) -> Optional[int]:

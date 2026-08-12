@@ -23,23 +23,23 @@ from typing import TYPE_CHECKING, Optional
 
 from services.logging import log as structured_log  # noqa: E402
 from services.sprint_manager import agent_browser_runner  # noqa: E402
-from services.sprint_manager.alerts import dispatch_alerts  # noqa: E402
-from services.sprint_manager.paths import _state_path, _summary_path  # noqa: E402
+from services.sprint_manager.paths import (  # noqa: E402
+    SPRINTS_DIR,
+    _BANGKOK_TZ,
+    _bangkok_now,
+    _state_path,
+    _summary_path,
+    _to_bangkok,
+    _utcnow,
+)
 from services.sprint_manager.retro import (  # noqa: E402
     derive_key_learnings,
     write_retro_to_docs,
 )
-from services.sprint_manager.state import SprintState  # noqa: E402
-from services.sprint_manager.timekeeping import (  # noqa: E402
-    SPRINTS_DIR,
-    _BANGKOK_TZ,
-    _bangkok_now,
-    _to_bangkok,
-    _utcnow,
-)
 
 if TYPE_CHECKING:
     from services.sprint_manager.config import SprintConfig
+    from services.sprint_manager.state import SprintState
 
 try:
     from services.sprint_manager import suite_health_gate as _suite_health_gate
@@ -968,12 +968,6 @@ def write_sprint_summary(
                 exc=str(_retro_exc),
                 sprint_label=state.sprint_label,
             )
-
-    # Dispatch via all configured alert channels (issue #24)
-    if alert_modes:
-        title = f"Sprint {state.sprint_label} summary"
-        dispatch_alerts(alert_modes, title=title, body=content[:2000], cfg=cfg, repo=eff_repo,
-                        sprint_label=state.sprint_label)
 
     # AC-5: skip GitHub issue creation entirely for dry runs
     if dry_run:

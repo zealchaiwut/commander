@@ -6,8 +6,8 @@
  * concern modules also runs their side effects; ./state.js seeds modal/drag
  * state on `window`.
  *
- * Concerns: board render · drag/drop · run-controls · finish modal · rerun modal
- * · bulk-complete modal · plan-next · scheduled-run.
+ * Concerns: board render · drag/drop · run-controls · finish modal
+ * · bulk-complete modal · plan-next.
  */
 
 import './state.js';
@@ -19,20 +19,13 @@ import {
   smgmtPlanNextSprint, _smgmtLoadPendingSignoff,
 } from './plan-next.js';
 import {
-  _smgmtSchedToggleHtml, smgmtToggleRunOnSchedule, _smgmtHydrateSchedToggles,
-} from './scheduled-run.js';
-import {
   _histNeedsActionCount, _histLoadLedger, _histPrefetchLedger, _histScanStale, _histCleanupStale,
   _histToggleCard, _histToggleGroup, _histToggleFold, _histFocusLabel, _histStateChip,
-  _histRenderLedger, _histRerunSprint, _histToggleAgentTime, _histToggleMetrics, _histClearStaleLabels,
+  _histRenderLedger, _histToggleAgentTime, _histToggleMetrics, _histClearStaleLabels,
   _histResetLedgerCache, _histToggleShowClosed, _histForceRefresh, _histSetTtlMin,
   _histBulkSignOff, _histIsLoading,
 } from './history.js';
 
-import {
-  _rrOpen, _rrClose, _rrCatClass, _rrUpdateState, _rrSelectAll,
-  smgmtRerunSprint, _rrConfirm,
-} from './rerun-modal.js';
 import {
   _fsOpen, _fsClose, _fsCatClass, _fsSelectAll,
   smgmtFinishSprint, _fsConfirm, _fsRetry, finishSprintAndWait,
@@ -82,15 +75,6 @@ import {
   // Clean-up-empty pure helper (issue #2089)
   _smgmtComputeLeadingEmpty,
 } from './board-render.js';
-
-// Re-run modal (issue #512)
-globalThis._rrOpen = _rrOpen;
-globalThis._rrClose = _rrClose;
-globalThis._rrCatClass = _rrCatClass;
-globalThis._rrUpdateState = _rrUpdateState;
-globalThis._rrSelectAll = _rrSelectAll;
-globalThis.smgmtRerunSprint = smgmtRerunSprint;
-globalThis._rrConfirm = _rrConfirm;
 
 // Finish modal (issue #367)
 globalThis._fsOpen = _fsOpen;
@@ -210,11 +194,6 @@ globalThis.smgmtAddToDraft = smgmtAddToDraft;
 globalThis._boardSseOnInvalidated = _boardSseOnInvalidated;
 globalThis._boardSseOnVisible = _boardSseOnVisible;
 
-// Run-on-schedule toggle (issue #863)
-globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml;
-globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
-globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles;
-
 // Plan next sprint + pending-sign-off decoration (issue #861)
 globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;
 globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;
@@ -231,7 +210,6 @@ globalThis._histToggleFold = _histToggleFold;
 globalThis._histFocusLabel = _histFocusLabel;
 globalThis._histStateChip = _histStateChip;
 globalThis._histRenderLedger = _histRenderLedger;
-globalThis._histRerunSprint = _histRerunSprint;
 globalThis._histToggleAgentTime = _histToggleAgentTime;
 globalThis._histToggleMetrics = _histToggleMetrics;
 globalThis._histResetLedgerCache = _histResetLedgerCache;

@@ -1700,64 +1700,6 @@ Replace the existing draft (${data.existing_label})?`
     }
   }
 
-  // apps/dashboard/static/src/sprint-board/scheduled-run.js
-  var _schedMap = {};
-  function _smgmtSchedToggleHtml2(label) {
-    const on = !!_schedMap[label];
-    const id = `sched-toggle-${label}`;
-    return `<label class="smgmt-sched-toggle" title="Auto-run this sprint at the project's scheduled time">
-    <input type="checkbox" id="${escHtml(id)}" ${on ? "checked" : ""}
-      onchange="smgmtToggleRunOnSchedule('${escHtml(label)}', this)"
-      aria-label="Run sprint ${escHtml(label)} on schedule">
-    <span>Run on schedule</span>
-  </label>`;
-  }
-  async function smgmtToggleRunOnSchedule(label, el) {
-    const repo = typeof _smgmtRepo === "function" ? _smgmtRepo() : null;
-    if (!repo)
-      return;
-    const enabled = !!(el && el.checked);
-    _schedMap[label] = enabled;
-    try {
-      const res = await fetch("/api/scheduler/sprints", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: repo, sprint_label: label, enabled })
-      });
-      if (!res.ok)
-        throw new Error(`HTTP ${res.status}`);
-    } catch (e) {
-      _schedMap[label] = !enabled;
-      if (el)
-        el.checked = !enabled;
-      if (typeof _smgmtShowToast === "function") {
-        _smgmtShowToast("Could not update schedule: " + (e.message || e));
-      }
-    }
-  }
-  async function _smgmtHydrateSchedToggles2(repo) {
-    if (!repo)
-      return;
-    try {
-      const res = await fetch(`/api/scheduler/sprints?project=${encodeURIComponent(repo)}`);
-      if (!res.ok)
-        return;
-      const data = await res.json();
-      const map = data.run_on_schedule || {};
-      for (const k of Object.keys(_schedMap))
-        delete _schedMap[k];
-      Object.keys(map).forEach((k) => {
-        _schedMap[k] = !!map[k];
-      });
-      Object.keys(map).forEach((label) => {
-        const cb = document.getElementById(`sched-toggle-${label}`);
-        if (cb)
-          cb.checked = !!map[label];
-      });
-    } catch (_) {
-    }
-  }
-
   // apps/dashboard/static/src/sprint-board/history.js
   var _HIST_ACTION_STATES = /* @__PURE__ */ new Set([
     "ready_to_merge",
@@ -2951,14 +2893,7 @@ Replace the existing draft (${data.existing_label})?`
       title="Reconcile this sprint's DB state against GitHub truth">
       <i class="ti ti-git-compare"></i> Reconcile</button>`;
     if (_histSprintFailed(s) || state === "needs_rework" || state === "failed" || state === "cancelled") {
-      const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-      const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
-      const childDisplay = sprintLabelDisplay(
-        _histNextChildLabel(rawLabel)
-      ).replace("Sprint ", "");
-      return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${rerunDisabled} ${rerunTitle}
-      onclick="event.stopPropagation();_histRerunSprint('${lbl}')">
-      <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
+      return reconcileBtn;
     }
     if (state === "ready_to_merge") {
       return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--bulk"
@@ -2969,7 +2904,7 @@ Replace the existing draft (${data.existing_label})?`
     if (state === "draft" && s.parent) {
       const runDisabled = _smgmtAnySprintRunning ? "disabled" : "";
       const runTitle = _smgmtAnySprintRunning ? 'title="Cannot run: another sprint is currently running."' : "";
-      return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--rerun hist-head-btn--rerun-primary" ${runDisabled} ${runTitle}
+      return `${reconcileBtn}<button type="button" class="hist-head-btn hist-head-btn--bulk" ${runDisabled} ${runTitle}
       onclick="event.stopPropagation();smgmtRunSprint('${lbl}')">
       <i class="ti ti-player-play"></i> Run</button>`;
     }
@@ -3462,11 +3397,6 @@ Replace the existing draft (${data.existing_label})?`
     }
     el.innerHTML = _histLegendHtml() + _histToolbarHtml() + bodyHtml;
   }
-  function _histRerunSprint(label) {
-    if (typeof globalThis.smgmtRerunSprint === "function") {
-      return globalThis.smgmtRerunSprint(label);
-    }
-  }
   function _histPrefetchLedger(repo) {
     if (!repo)
       return;
@@ -3590,9 +3520,6 @@ Replace the existing draft (${data.existing_label})?`
     const repo = _cachedFullRepo[_slug];
     if (repo)
       _histLoadLedger2(repo, { force: true });
-  }
-  function _histNextChildLabel(parentLabel) {
-    return _nextSprintSublabel(parentLabel);
   }
   function _histBulkSignOffTargets(sprints) {
     const groups = _histGroupSprints(sprints || []).filter(
@@ -3718,234 +3645,6 @@ ${listing}`
     } else {
       alert(finishMsg);
       _histForceRefresh();
-    }
-  }
-
-  // apps/dashboard/static/src/sprint-board/rerun-modal.js
-  function _rrShowPreviewLoading(current) {
-    const loading = document.getElementById("rr-loading");
-    if (!loading)
-      return;
-    loading.innerHTML = renderProgressActivity(
-      {
-        status: "running",
-        mode: "indeterminate",
-        current: current || "Loading preview\u2026"
-      },
-      {
-        id: "rr-preview-pa",
-        hideLog: true
-      }
-    );
-    loading.classList.remove("hidden");
-  }
-  function _rrShowCreateProgress(done, total, current, status, error) {
-    const loading = document.getElementById("rr-loading");
-    if (!loading)
-      return;
-    loading.innerHTML = renderProgressActivity(
-      {
-        status: status || "running",
-        mode: "bar",
-        done: done || 0,
-        total: total || 3,
-        current: current || "",
-        error: error || "",
-        result: status === "done" ? "Sub-sprint created" : ""
-      },
-      {
-        id: "rr-create-pa",
-        hideLog: true
-      }
-    );
-    loading.classList.remove("hidden");
-  }
-  function _rrOpen() {
-    _setBodyInert(["rr-backdrop", "rr-modal"]);
-    document.getElementById("rr-backdrop").classList.remove("hidden");
-    document.getElementById("rr-modal").classList.remove("hidden");
-  }
-  function _rrClose() {
-    document.getElementById("rr-backdrop").classList.add("hidden");
-    document.getElementById("rr-modal").classList.add("hidden");
-    _clearBodyInert();
-    _rrLabel = null;
-    _rrVersionedLabel = null;
-  }
-  function _rrCatClass(cat) {
-    if (cat === "UAT")
-      return "rr-cat-uat";
-    if (cat === "SIT")
-      return "rr-cat-sit";
-    if (cat === "needs-rework")
-      return "rr-cat-rework";
-    return "rr-cat-queued";
-  }
-  function _rrUpdateState() {
-    const checkboxes = document.querySelectorAll(
-      "#rr-ticket-list input[type=checkbox]"
-    );
-    const checked = Array.from(checkboxes).filter((c) => c.checked);
-    const uatChecked = Array.from(checkboxes).filter(
-      (c) => c.checked && c.dataset.cat === "UAT"
-    ).length;
-    const confirmBtn = document.getElementById("rr-confirm-btn");
-    if (confirmBtn)
-      confirmBtn.disabled = checked.length === 0;
-    const warnEl = document.getElementById("rr-uat-warning");
-    if (warnEl) {
-      if (uatChecked > 0) {
-        warnEl.textContent = `${uatChecked} ticket${uatChecked !== 1 ? "s" : ""} in UAT will be re-tested from scratch.`;
-      } else {
-        warnEl.textContent = "";
-      }
-    }
-  }
-  function _rrSelectAll(checked) {
-    document.querySelectorAll("#rr-ticket-list input[type=checkbox]").forEach((cb) => {
-      cb.checked = checked;
-    });
-    _rrUpdateState();
-  }
-  async function smgmtRerunSprint(label) {
-    const repo = _smgmtRepo();
-    if (!repo) {
-      _smgmtShowToast(
-        "No project loaded \u2014 please refresh and try again.",
-        "warning"
-      );
-      return;
-    }
-    _rrLabel = label;
-    _rrVersionedLabel = null;
-    _rrOpen();
-    try {
-      document.getElementById("rr-modal-title").textContent = `Re-run ${sprintLabelDisplay(label)}?`;
-      _rrShowPreviewLoading("Loading preview\u2026");
-      document.getElementById("rr-content").classList.add("hidden");
-      document.getElementById("rr-error").classList.add("hidden");
-      document.getElementById("rr-error").textContent = "";
-      const confirmBtn = document.getElementById("rr-confirm-btn");
-      if (confirmBtn) {
-        confirmBtn.disabled = true;
-        confirmBtn.textContent = "Create sprint and run";
-      }
-      const res = await fetch(
-        `/api/sprints/${encodeURIComponent(label)}/rerun-preview?project=${encodeURIComponent(repo)}`
-      );
-      if (!res.ok)
-        throw new Error(await res.text());
-      const preview = await res.json();
-      _rrVersionedLabel = preview.suggested_versioned_label;
-      document.getElementById("rr-modal-title").textContent = `Re-run ${sprintLabelDisplay(label)} as ${sprintLabelDisplay(_rrVersionedLabel)}?`;
-      if (confirmBtn)
-        confirmBtn.textContent = `Create & run ${sprintLabelDisplay(_rrVersionedLabel)}`;
-      const listEl = document.getElementById("rr-ticket-list");
-      if ((preview.tickets || []).length === 0) {
-        listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No tickets in this sprint.</div>';
-      } else {
-        listEl.innerHTML = (preview.tickets || []).map((t) => {
-          const checked = t.checked ? "checked" : "";
-          const catClass = _rrCatClass(t.category);
-          return `<label class="rr-ticket-row">
-          <input type="checkbox" ${checked} data-issue="${t.number}" data-cat="${escHtml(t.category)}" onchange="_rrUpdateState()">
-          <span class="rr-ticket-num">#${t.number}</span>
-          <span class="rr-ticket-title" title="${escHtml(t.title)}">${escHtml(t.title)}</span>
-          <span class="rr-ticket-cat ${catClass}">${escHtml(t.category)}</span>
-        </label>`;
-        }).join("");
-      }
-      document.getElementById("rr-loading").classList.add("hidden");
-      document.getElementById("rr-content").classList.remove("hidden");
-      _rrUpdateState();
-    } catch (e) {
-      document.getElementById("rr-loading").classList.add("hidden");
-      const errEl = document.getElementById("rr-error");
-      errEl.textContent = "Failed to load preview: " + e.message;
-      errEl.classList.remove("hidden");
-      _smgmtShowToast("Re-run preview failed: " + e.message, "error");
-    }
-  }
-  async function _rrConfirm() {
-    const repo = _smgmtRepo();
-    if (!_rrLabel || !repo)
-      return;
-    const parentLabel = _rrLabel;
-    const checkboxes = Array.from(
-      document.querySelectorAll("#rr-ticket-list input[type=checkbox]")
-    );
-    const ticketNumbers = checkboxes.filter((c) => c.checked).map((c) => parseInt(c.dataset.issue, 10));
-    if (ticketNumbers.length === 0)
-      return;
-    const confirmBtn = document.getElementById("rr-confirm-btn");
-    if (confirmBtn) {
-      confirmBtn.disabled = true;
-      confirmBtn.textContent = "Creating\u2026";
-    }
-    _rrShowCreateProgress(0, 3, "Creating sprint\u2026", "running", "");
-    document.getElementById("rr-content").classList.add("hidden");
-    try {
-      const res = await fetch(
-        `/api/sprints/${encodeURIComponent(parentLabel)}/rerun?project=${encodeURIComponent(repo)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ticket_numbers: ticketNumbers,
-            auto_run: false
-          })
-        }
-      );
-      if (!res.ok) {
-        let detail = await res.text();
-        try {
-          const parsed = JSON.parse(detail);
-          detail = parsed.detail || detail;
-        } catch (_) {
-        }
-        throw new Error(
-          typeof detail === "string" ? detail : JSON.stringify(detail)
-        );
-      }
-      const data = await res.json();
-      const subLabel = data.sub_label;
-      _rrShowCreateProgress(1, 3, "Applying local updates\u2026", "running", "");
-      if (typeof _smgmtApplyRerunOptimistic === "function") {
-        _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers);
-      }
-      loadSprintMgmt(true).catch(() => {
-      });
-      if (typeof globalThis._histLoadLedger === "function") {
-        globalThis._histLoadLedger(repo).catch(() => {
-        });
-      }
-      _rrShowCreateProgress(2, 3, "Queueing sprint run\u2026", "running", "");
-      const subDisplay = subLabel ? sprintLabelDisplay(subLabel) : "Sub-sprint";
-      if (data.errors && data.errors.length > 0) {
-        _smgmtShowToast(
-          `${subDisplay} created with label errors \u2014 check GitHub.`
-        );
-      } else {
-        _smgmtShowToast(`${subDisplay} ready \u2014 confirm run`);
-      }
-      if (subLabel && typeof smgmtRunSprint === "function") {
-        _rrShowCreateProgress(3, 3, "Done", "done", "");
-        smgmtRunSprint(subLabel);
-      }
-      _rrClose();
-    } catch (e) {
-      const errMsg = e.message || "Failed to create re-run sprint";
-      _rrShowCreateProgress(0, 3, "", "error", errMsg);
-      const errEl = document.getElementById("rr-error");
-      errEl.textContent = "Failed to re-run sprint: " + errMsg;
-      errEl.classList.remove("hidden");
-      document.getElementById("rr-loading").classList.add("hidden");
-      document.getElementById("rr-content").classList.remove("hidden");
-      _smgmtShowToast("Re-run failed: " + errMsg, "error");
-      if (confirmBtn) {
-        confirmBtn.disabled = false;
-        confirmBtn.textContent = _rrVersionedLabel ? `Create & run ${sprintLabelDisplay(_rrVersionedLabel)}` : "Create sprint and run";
-      }
     }
   }
 
@@ -4420,14 +4119,17 @@ ${listing}`
     const loading = document.getElementById("bc-loading");
     if (!loading)
       return;
-    loading.innerHTML = renderProgressActivity({
-      status: "running",
-      mode: "indeterminate",
-      current: current || "Loading preview\u2026"
-    }, {
-      id: "bc-preview-pa",
-      hideLog: true
-    });
+    loading.innerHTML = renderProgressActivity(
+      {
+        status: "running",
+        mode: "indeterminate",
+        current: current || "Loading preview\u2026"
+      },
+      {
+        id: "bc-preview-pa",
+        hideLog: true
+      }
+    );
     loading.classList.remove("hidden");
   }
   function _bcOpen() {
@@ -4500,7 +4202,9 @@ ${listing}`
       if (groups.length === 0) {
         listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No open tickets in this sprint lineage.</div>';
       } else {
-        listEl.innerHTML = groups.map((g) => `<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 2px">${escHtml(sprintLabelDisplay(g.label))} \xB7 ${g.tickets.length}</div>` + g.tickets.map(_ticketRow).join("")).join("");
+        listEl.innerHTML = groups.map(
+          (g) => `<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 2px">${escHtml(sprintLabelDisplay(g.label))} \xB7 ${g.tickets.length}</div>` + g.tickets.map(_ticketRow).join("")
+        ).join("");
       }
       const members = preview.members || [];
       const actionsEl = document.getElementById("bc-actions");
@@ -4575,7 +4279,9 @@ ${listing}`
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
+        throw new Error(
+          err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`
+        );
       }
     }
     return { label, steps: order.length };
@@ -4601,7 +4307,6 @@ ${listing}`
     }
     let doneSteps = 0;
     const totalSteps = order.length + 1;
-    let failedIdx = 0;
     _smgmtBoardLock(`Completing ${sprintLabelDisplay(label)}\u2026`, {
       progress: true,
       total: totalSteps,
@@ -4618,7 +4323,6 @@ ${listing}`
     };
     try {
       for (let i = 0; i < order.length; i++) {
-        failedIdx = i;
         const sLabel = order[i];
         _smgmtBoardLog(`Completing ${sprintLabelDisplay(sLabel)}\u2026`, "step");
         const res = await fetch(
@@ -4631,7 +4335,9 @@ ${listing}`
         );
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
+          throw new Error(
+            err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`
+          );
         }
         const sd = await res.json();
         doneSteps += 1;
@@ -4651,180 +4357,10 @@ ${listing}`
       });
     } catch (e) {
       _smgmtBoardLog(`\u2717 ${e.message}`, "err");
-      const isConflict = /merge conflict/i.test(e.message);
       _smgmtBoardFinish({
         ok: false,
-        message: "Stopped: " + e.message + (isConflict ? '\n\nClick "Resolve with AI" to fix automatically, or resolve manually and re-run.' : "\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped)."),
+        message: "Stopped: " + e.message + "\n\nResolve the conflict manually, then re-run Bulk complete to resume (done steps are skipped).",
         onDone: _onDone
-      });
-      if (isConflict) {
-        const cinfo = _bcParseConflictInfo(e.message);
-        if (cinfo) {
-          setTimeout(() => {
-            _bcInjectResolveButton(cinfo, owner, repoName, label, order, failedIdx, doneSteps, totalSteps, _onDone);
-          }, 0);
-        }
-      }
-    }
-  }
-  function _bcParseConflictInfo(msg) {
-    const m = msg.match(/Merge\s+(sprint-[\d.]+)\s*[→>]\s*(sprint-[\d.]+|develop|master)\s+failed/i);
-    if (!m)
-      return null;
-    const baseRaw = m[2];
-    const base = /^(develop|master)$/i.test(baseRaw) ? baseRaw : `sprint/${baseRaw}`;
-    return { head: `sprint/${m[1]}`, base };
-  }
-  function _bcInjectResolveButton(cinfo, owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone) {
-    const doneEl = document.getElementById("smgmt-op-done");
-    if (!doneEl)
-      return;
-    const existing = document.getElementById("smgmt-op-resolve-ai-btn");
-    if (existing)
-      existing.remove();
-    const btn = document.createElement("button");
-    btn.id = "smgmt-op-resolve-ai-btn";
-    btn.type = "button";
-    btn.className = "btn-primary";
-    btn.textContent = "\u2726 Resolve with AI";
-    btn.style.cssText = "margin-right:8px;background:var(--violet,#6e56cf);border-color:var(--violet,#6e56cf)";
-    btn.onclick = () => {
-      btn.disabled = true;
-      _bcLaunchAIResolve(cinfo, owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone);
-    };
-    const doneBtn = document.getElementById("smgmt-op-done-btn");
-    if (doneBtn)
-      doneEl.insertBefore(btn, doneBtn);
-    else
-      doneEl.prepend(btn);
-  }
-  async function _bcLaunchAIResolve(cinfo, owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone) {
-    const spinner = document.getElementById("smgmt-move-spinner");
-    const msgEl = document.getElementById("smgmt-move-overlay-msg");
-    const errEl = document.getElementById("smgmt-op-error");
-    const doneEl = document.getElementById("smgmt-op-done");
-    const overlay = document.getElementById("smgmt-move-overlay");
-    if (spinner)
-      spinner.style.display = "";
-    if (errEl) {
-      errEl.hidden = true;
-      errEl.textContent = "";
-    }
-    if (doneEl) {
-      doneEl.hidden = true;
-      doneEl.innerHTML = "";
-    }
-    if (overlay)
-      overlay.setAttribute("aria-busy", "true");
-    const startMs = Date.now();
-    const timerInterval = setInterval(() => {
-      const secs = Math.floor((Date.now() - startMs) / 1e3);
-      const mins = Math.floor(secs / 60);
-      const ts = mins > 0 ? `${mins}m ${secs % 60}s` : `${secs}s`;
-      if (msgEl)
-        msgEl.textContent = `Resolving conflicts with AI\u2026 (${ts})`;
-    }, 1e3);
-    if (msgEl)
-      msgEl.textContent = "Resolving conflicts with AI\u2026 (0s)";
-    try {
-      const startRes = await fetch(
-        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/resolve-branch-conflict`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ head: cinfo.head, base: cinfo.base })
-        }
-      );
-      if (!startRes.ok) {
-        const err = await startRes.json().catch(() => ({}));
-        throw new Error(err.detail || `HTTP ${startRes.status}`);
-      }
-      const { job_key } = await startRes.json();
-      _smgmtBoardLog("AI resolver started\u2026", "step");
-      await new Promise((resolve, reject) => {
-        const es = new EventSource(
-          `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/resolve-conflict-stream/${encodeURIComponent(job_key)}`
-        );
-        es.onmessage = (ev) => {
-          try {
-            const snap = JSON.parse(ev.data);
-            if (snap.ping)
-              return;
-            if (snap.current && snap.status === "running")
-              _smgmtBoardLog(snap.current, "step");
-            if (snap.status === "done") {
-              es.close();
-              resolve(snap);
-            } else if (snap.status === "error") {
-              es.close();
-              reject(new Error(snap.error || "Resolve failed"));
-            }
-          } catch (_) {
-          }
-        };
-        es.onerror = () => {
-          es.close();
-          reject(new Error("SSE connection lost"));
-        };
-      });
-      clearInterval(timerInterval);
-      if (msgEl)
-        msgEl.textContent = "\u2713 Resolved \u2014 retrying bulk complete\u2026";
-      _smgmtBoardLog("\u2713 Conflicts resolved \u2014 resuming\u2026", "ok");
-      if (spinner)
-        spinner.style.display = "";
-      await _bcResumeFrom(owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone);
-    } catch (resolveErr) {
-      clearInterval(timerInterval);
-      _smgmtBoardLog(`\u2717 AI resolve failed: ${resolveErr.message}`, "err");
-      _smgmtBoardFinish({
-        ok: false,
-        message: `AI resolution failed: ${resolveErr.message}
-
-Resolve manually and re-run Bulk complete.`,
-        onDone
-      });
-    }
-  }
-  async function _bcResumeFrom(owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone) {
-    try {
-      for (let i = fromIdx; i < order.length; i++) {
-        const sLabel = order[i];
-        _smgmtBoardLog(`Completing ${sprintLabelDisplay(sLabel)}\u2026`, "step");
-        const res = await fetch(
-          `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(sLabel)}/complete-step`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ confirmed: true })
-          }
-        );
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
-        }
-        const sd = await res.json();
-        doneSteps += 1;
-        _smgmtBoardProgress(doneSteps, totalSteps);
-        const into = sd.merged ? ` \u2192 merged into ${sd.merged_into}` : "";
-        _smgmtBoardLog(`\u2713 ${sprintLabelDisplay(sLabel)} completed${into}`, "ok");
-      }
-      _smgmtBoardLog("Refreshing board\u2026", "step");
-      await loadSprintMgmt();
-      doneSteps += 1;
-      _smgmtBoardProgress(doneSteps, totalSteps);
-      _smgmtBoardLog("\u2713 Complete finished", "ok");
-      _smgmtBoardFinish({
-        ok: true,
-        message: `\u2713 ${sprintLabelDisplay(label)} completed \u2014 ${order.length} sprint(s) settled.`,
-        onDone
-      });
-    } catch (e2) {
-      _smgmtBoardLog(`\u2717 ${e2.message}`, "err");
-      _smgmtBoardFinish({
-        ok: false,
-        message: "Stopped: " + e2.message + "\n\nResolve the conflict, then re-run Bulk complete.",
-        onDone
       });
     }
   }
@@ -5252,9 +4788,6 @@ Resolve manually and re-run Bulk complete.`,
       }
       const data = _smgmtAggToRenderData(agg);
       _smgmtRender(data);
-      if (typeof _smgmtHydrateSchedToggles === "function") {
-        _smgmtHydrateSchedToggles(repo);
-      }
       _smgmtLivePollRestart();
       const lingerLbl = typeof _smgmtPrimaryRunningLabel === "function" ? _smgmtPrimaryRunningLabel() : null;
       if (lingerLbl && typeof _smgmtRunningViewUpdate === "function") {
@@ -5633,7 +5166,7 @@ Resolve manually and re-run Bulk complete.`,
     const planState = (_smgmtData && _smgmtData.sprint_plan_states || {})[label];
     return planState === "draft" || planState === "planning";
   }
-  function _smgmtApplyRerunOptimistic2(parentLabel, subLabel, ticketNumbers) {
+  function _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers) {
     if (!_smgmtData || !parentLabel || !subLabel)
       return;
     const nums = new Set(ticketNumbers || []);
@@ -6119,29 +5652,22 @@ Resolve manually and re-run Bulk complete.`,
     const showRunningChrome = isRunningView && !isAwaitingMerge;
     const isPostRun = !isRunningView && !planBlocksPostRun && hasLedgerRun;
     const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
-    const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-    const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
-    const childLabel = _smgmtNextChildLabel(label);
-    const childDisplay = sprintLabelDisplay(childLabel).replace("Sprint ", "");
-    const rerunBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun" ${rerunDisabled} ${rerunTitle}
-                    onclick="smgmtRerunSprint('${escHtml(label)}')">
-                    <i class="ti ti-refresh"></i> Re-run \u2192 ${escHtml(childDisplay)}</button>`;
     const rerunInto = (_smgmtData?.sprint_rerun_into || {})[label];
     const rerunChildDisplay = rerunInto ? sprintLabelDisplay(rerunInto).replace("Sprint ", "") : "";
     let actionBtn;
     if (isRunning) {
       actionBtn = `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
                   <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
-    } else if (isLinger && isHasRework) {
-      actionBtn = rerunBtn;
     } else if (isLinger) {
       actionBtn = `<span class="smgmt-linger-note">Finished \u2014 snapshot kept 1h</span>`;
     } else if (isHasRework && rerunInto && tickets.length === 0) {
-      actionBtn = `<button class="smgmt-run-btn" ${rerunDisabled} ${rerunTitle}
+      const _rrDisabled = _smgmtAnySprintRunning ? "disabled" : "";
+      const _rrTitle = _smgmtAnySprintRunning ? 'title="Cannot run: another sprint is currently running."' : "";
+      actionBtn = `<button class="smgmt-run-btn" ${_rrDisabled} ${_rrTitle}
                   onclick="smgmtRunSprint('${escHtml(rerunInto)}')">
                   <i class="ti ti-player-play"></i> Run \u2192 ${escHtml(rerunChildDisplay)}</button>`;
     } else if (isHasRework || isPostRun) {
-      actionBtn = rerunBtn;
+      actionBtn = "";
     } else if (_smgmtSignoffState(label) === "pending") {
       actionBtn = _smgmtSignoffActionsHtml(label);
     } else if (_smgmtAnySprintRunning) {
@@ -6152,10 +5678,9 @@ Resolve manually and re-run Bulk complete.`,
     } else {
       const runDisabled = !canRun ? "disabled" : "";
       const runTitle = !canRun ? 'title="No dispatchable tickets \u2014 remaining items are already SIT/UAT or in progress"' : "";
-      const schedToggle = typeof _smgmtSchedToggleHtml === "function" ? _smgmtSchedToggleHtml(label) : "";
       actionBtn = `<button class="smgmt-run-btn" ${runDisabled} ${runTitle}
                   onclick="smgmtRunSprint('${label}')">
-                  <i class="ti ti-player-play"></i> Run Sprint</button>${schedToggle}`;
+                  <i class="ti ti-player-play"></i> Run Sprint</button>`;
     }
     const isOutcomeCompleted = isReadyToMerge || isHasRework || outcomeState === "completed";
     const finishHidden = isOutcomeCompleted || isPostRun && !outcome ? "" : "hidden";
@@ -7033,12 +6558,7 @@ Resolve manually and re-run Bulk complete.`,
       const listHtml = (outcome.issues || []).length > 0 ? _smgmtAncestorTicketsHtml(label, outcome, rerunInto) : '<div class="slp-no-tickets">No per-ticket records found.</div>';
       ticketsHtml = statsHtml + listHtml;
     }
-    const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-    const rerunTitle = _smgmtAnySprintRunning ? 'title="Cannot re-run: another sprint is currently running."' : "";
     const actionsHtml = mergeState === "needs_merge" ? `<div class="slp-ancestor-actions">
-          <button class="smgmt-run-btn smgmt-run-btn--rerun" ${rerunDisabled} ${rerunTitle}
-                  onclick="event.stopPropagation();smgmtRerunSprint('${safeLabel}')">
-            <i class="ti ti-refresh"></i> Re-run</button>
           <button class="smgmt-finish-btn sc-merge-link"
                   onclick="event.stopPropagation();smgmtFinishSprint('${safeLabel}')">
             <i class="ti ti-flag-check"></i> Merge Sprint</button>
@@ -7286,7 +6806,7 @@ Resolve manually and re-run Bulk complete.`,
   function smgmtRunBlockedToast() {
     _smgmtShowToast("Another sprint is running \u2014 wait for it to finish or cancel it");
   }
-  function smgmtRunSprint2(label) {
+  function smgmtRunSprint(label) {
     const mode = _smgmtDorMode();
     if (mode === "warn") {
       const tickets = typeof _smgmtBySprint !== "undefined" && _smgmtBySprint && _smgmtBySprint[label] || [];
@@ -8668,13 +8188,6 @@ Proceed anyway?`)) {
   }
 
   // apps/dashboard/static/src/sprint-board/index.js
-  globalThis._rrOpen = _rrOpen;
-  globalThis._rrClose = _rrClose;
-  globalThis._rrCatClass = _rrCatClass;
-  globalThis._rrUpdateState = _rrUpdateState;
-  globalThis._rrSelectAll = _rrSelectAll;
-  globalThis.smgmtRerunSprint = smgmtRerunSprint;
-  globalThis._rrConfirm = _rrConfirm;
   globalThis._fsOpen = _fsOpen;
   globalThis._fsClose = _fsClose;
   globalThis._fsCatClass = _fsCatClass;
@@ -8694,7 +8207,7 @@ Proceed anyway?`)) {
   globalThis._recApply = _recApply;
   globalThis._recClose = _recClose;
   globalThis.smgmtRunBlockedToast = smgmtRunBlockedToast;
-  globalThis.smgmtRunSprint = smgmtRunSprint2;
+  globalThis.smgmtRunSprint = smgmtRunSprint;
   globalThis.smgmtCancelSprint = smgmtCancelSprint;
   globalThis.smgmtApproveSprint = smgmtApproveSprint;
   globalThis.smgmtRejectSprint = smgmtRejectSprint;
@@ -8765,7 +8278,7 @@ Proceed anyway?`)) {
   globalThis._smgmtTicketRowHtml = _smgmtTicketRowHtml;
   globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;
   globalThis._smgmtBacklogTicketHtml = _smgmtBacklogTicketHtml;
-  globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic2;
+  globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic;
   globalThis._smgmtAncestorMergeState = _smgmtAncestorMergeState;
   globalThis._smgmtAncestorCarrySummary = _smgmtAncestorCarrySummary;
   globalThis._smgmtAncestorTicketsHtml = _smgmtAncestorTicketsHtml;
@@ -8775,9 +8288,6 @@ Proceed anyway?`)) {
   globalThis.smgmtAddToDraft = smgmtAddToDraft;
   globalThis._boardSseOnInvalidated = _boardSseOnInvalidated;
   globalThis._boardSseOnVisible = _boardSseOnVisible;
-  globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml2;
-  globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
-  globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles2;
   globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;
   globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;
   globalThis._histNeedsActionCount = _histNeedsActionCount;
@@ -8791,7 +8301,6 @@ Proceed anyway?`)) {
   globalThis._histFocusLabel = _histFocusLabel;
   globalThis._histStateChip = _histStateChip;
   globalThis._histRenderLedger = _histRenderLedger;
-  globalThis._histRerunSprint = _histRerunSprint;
   globalThis._histToggleAgentTime = _histToggleAgentTime;
   globalThis._histToggleMetrics = _histToggleMetrics;
   globalThis._histResetLedgerCache = _histResetLedgerCache;

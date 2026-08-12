@@ -2404,17 +2404,37 @@ def _sprint_goal_path(project_root: Path, sprint_label: str) -> Path:
     return _commander_dir(project_root) / "sprints" / f"{sprint_label}-goal.txt"
 
 
-# Shared sprint-dispatch env builder now lives in routers.dispatch_service so
-# the extracted routers and the sprint_manager-facing run/finish endpoints share
-# one implementation (issue #795). Re-exported under the original private name so
-# existing callers and tests (which patch server._build_sprint_subprocess_env)
-# keep working unchanged. The actual re-export was dropped in the refactor, which
-# broke run/finish-sprint with AttributeError at dispatch time — restored here.
 def _build_sprint_subprocess_env() -> dict:
-    # Lazy import: routers.dispatch_service resolves server/startup at request
-    # time, so importing it at module load would be circular.
-    from routers.dispatch_service import build_sprint_subprocess_env
-    return build_sprint_subprocess_env()
+    """Build the subprocess environment for sprint_manager.
+
+    Strips ANTHROPIC_API_KEY and resolves DB_PATH to an absolute path.
+    Injects GH_TOKEN so the subprocess's gh works without the macOS Keychain
+    (which launchd-spawned children cannot reach).
+    """
+    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    db_val = env.get("DB_PATH", "")
+    if db_val and not os.path.isabs(db_val):
+        env["DB_PATH"] = str(Path(db_val).resolve())
+    # Resolve a GH token: prefer env vars already set, then fall back to gh CLI.
+    token = ""
+    for key in ("GH_TOKEN", "GITHUB_TOKEN"):
+        val = os.environ.get(key, "").strip()
+        if val:
+            token = val
+            break
+    if not token:
+        try:
+            res = subprocess.run(
+                ["gh", "auth", "token"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if res.returncode == 0:
+                token = res.stdout.strip()
+        except Exception:
+            pass
+    if token:
+        env["GH_TOKEN"] = token
+    return env
 
 
 

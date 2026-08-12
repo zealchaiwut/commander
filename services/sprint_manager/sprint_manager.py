@@ -121,19 +121,31 @@ from services.sprint_manager.model_routing import (  # noqa: E402
     get_role_profile,
 )
 
-from services.sprint_manager.failures import (  # noqa: E402,F401
-    FailureCategory,
-    record_failure,
-    _build_failure_suffix,  # re-exported for backward compat
-    _generate_gate_failure_analysis,  # re-exported for backward compat
-    _publish_gate_failure_analyses,
-    _gate_failures_log_path,  # re-exported for backward compat
-    _read_gate_failure_records,  # re-exported for backward compat
-    _clear_gate_failure_records,
-    _extract_analysis_json,  # re-exported for backward compat
-    _post_gate_failure_analysis_comment,  # re-exported for backward compat
-    _append_gate_failure_to_sprint_log,  # re-exported for backward compat
-)
+# failures.py deleted #2241 — stubs retained until Sprint 3 deletion
+class FailureCategory:  # noqa: N801
+    HANG = "HANG"
+    CRASH = "CRASH"
+    GATE_FAIL = "GATE_FAIL"
+    TESTER_REJECTED = "TESTER_REJECTED"
+    RETRY_EXHAUSTED = "RETRY_EXHAUSTED"
+    CODER_NO_WORK = "CODER_NO_WORK"
+    MERGE_CONFLICT = "MERGE_CONFLICT"
+    LINT_FAIL = "LINT_FAIL"
+    PYTEST_FAIL = "PYTEST_FAIL"
+    REBASE_CONFLICT = "REBASE_CONFLICT"
+    ENV_ERROR = "ENV_ERROR"
+
+
+def record_failure(*a, **kw): pass
+def _build_failure_suffix(*a, **kw): return ""
+def _generate_gate_failure_analysis(*a, **kw): pass
+def _publish_gate_failure_analyses(*a, **kw): pass
+def _gate_failures_log_path(*a, **kw): pass
+def _read_gate_failure_records(*a, **kw): return []
+def _clear_gate_failure_records(*a, **kw): pass
+def _extract_analysis_json(*a, **kw): pass
+def _post_gate_failure_analysis_comment(*a, **kw): pass
+def _append_gate_failure_to_sprint_log(*a, **kw): pass
 
 try:
     from services.sprint_manager.state_machine import (  # noqa: PLC0415
@@ -195,20 +207,13 @@ from services.sprint_manager.state import (  # noqa: E402
     SprintSummary,
     _apply_token_ceiling,
 )
-from services.sprint_manager.ica_preflight import (  # noqa: E402
-    check_ica_readiness,
-    IcaPreflightError,
-)
+# ica_preflight.py deleted #2241
+def check_ica_readiness(*a, **kw): pass
+class IcaPreflightError(Exception): pass  # noqa: E701
 
-try:
-    # issue #860
-    from services.sprint_manager.brief_generator import (
-        write_sprint_brief as _write_sprint_brief,
-    )
-    _BRIEF_GENERATOR_AVAILABLE = True
-except ImportError:  # pragma: no cover
-    _write_sprint_brief = None  # type: ignore[assignment]
-    _BRIEF_GENERATOR_AVAILABLE = False
+# brief_generator.py deleted #2241
+_write_sprint_brief = None
+_BRIEF_GENERATOR_AVAILABLE = False
 
 try:
     # issue #1862
@@ -234,15 +239,12 @@ except ImportError:
     _db_record_event = None  # type: ignore[assignment]
     _RECORD_EVENT_AVAILABLE = False
 
-# Event-emission helpers extracted to events.py (issue #1275); re-exported here
-# so all existing call sites within this module remain unmodified.
-from services.sprint_manager.events import (  # noqa: E402
-    _emit_sprint_lifecycle_event,
-    _emit_ticket_failed,
-    _failure_event_detail,  # noqa: F401  (re-exported for callers/tests)
-    _post_agent_event,
-    _post_sprint_status,
-)
+# events.py deleted #2241
+def _emit_sprint_lifecycle_event(*a, **kw): pass
+def _emit_ticket_failed(*a, **kw): pass
+def _failure_event_detail(*a, **kw): return {}
+def _post_agent_event(*a, **kw): pass
+def _post_sprint_status(*a, **kw): pass
 
 # Timekeeping helpers extracted to timekeeping.py (issue #1277); re-exported here
 # so all existing call sites within this module remain unmodified.
@@ -298,16 +300,13 @@ from services.sprint_manager.gates import (  # noqa: E402, F401
     _revert_to_sit,
 )
 
-# Label transition helpers extracted to label_transitions.py (issue #1282);
-# re-exported here so all existing call sites within this module remain unmodified.
-from services.sprint_manager.label_transitions import (  # noqa: E402, F401
-    _get_issue_labels,
-    _sweep_stale_status,
-    _current_status_labels,
-    _emit_label_transition_event,
-    _transition_safe,
-    _add_blocked_label,
-)
+# label_transitions.py deleted #2241
+def _get_issue_labels(*a, **kw): return []
+def _sweep_stale_status(*a, **kw): pass
+def _current_status_labels(*a, **kw): return set()
+def _emit_label_transition_event(*a, **kw): pass
+def _transition_safe(*a, **kw): return False
+def _add_blocked_label(*a, **kw): pass
 
 # Worktree/env helpers extracted to worktree.py (issue #1283); re-exported here
 # so all existing call sites within this module remain unmodified.
@@ -350,29 +349,10 @@ from services.sprint_manager.summary import (  # noqa: E402, F401
     _build_screenshots_section,
 )
 
-# Post-sprint agent helpers extracted to post_sprint.py (issue #1288); re-exported
-# here so all existing call sites within this module remain unmodified.
 from services.sprint_manager.ticket_spec import parse_ticket_spec  # noqa: E402
 
-from services.sprint_manager.post_sprint import (  # noqa: E402, F401
-    DEFAULT_REVIEWER_PROMPT,
-    DEFAULT_DOCUMENTER_PROMPT,
-    _extract_follow_up_issue_nums,
-    _create_sprint_pr,
-    _dispatch_documenter,
-    _dispatch_reviewer,
-    _dispatch_ba_for_followup,
-    _dispatch_estimator_for_followup,
-    _enrich_followup_tickets,
-    _BA_REWRITE_PROMPT,
-    _BA_DISPATCH_TIMEOUT,
-    _ESTIMATOR_DISPATCH_TIMEOUT,
-    _ESTIMATE_ISSUE_SCRIPT_SM,
-)
-
-from services.sprint_manager.api_client import (  # noqa: E402
-    is_retryable_rate_limit as _is_retryable_rate_limit,
-)
+# api_client.py deleted #2241
+def _is_retryable_rate_limit(*a, **kw): return False
 
 # Import failure-parsing helpers from post_test_report (no circular deps)
 try:
@@ -962,20 +942,23 @@ def _extract_rebase_conflict_files(output: str) -> list[str]:
     return list(seen)
 
 
-# ── alert channels (extracted to alerts.py, issue #1271) ─────────────────────
+# alerts.py and dead_letter_escalation.py deleted #2241
+class AlertMode:  # noqa: N801
+    NTFY = "ntfy"
+    SILENT = "silent"
 
-from services.sprint_manager.alerts import (  # noqa: E402
-    AlertMode,
-    dispatch_alerts,
-    HangDetector,  # noqa: F401 — re-exported; tests patch sm.HangDetector
-)
 
-# ── dead-letter escalation (issue #2033) ──────────────────────────────────────
+def dispatch_alerts(*a, **kw): pass
 
-from services.sprint_manager.dead_letter_escalation import (  # noqa: E402
-    check_dead_letter_escalation,
-    get_escalation_threshold,
-)
+
+class HangDetector:  # noqa: N801
+    def __init__(self, *a, **kw): pass
+    def __enter__(self): return self
+    def __exit__(self, *a): pass
+
+
+def check_dead_letter_escalation(*a, **kw): pass
+def get_escalation_threshold(*a, **kw): return 3
 
 # ── subprocess helpers ────────────────────────────────────────────────────────
 
@@ -1813,53 +1796,6 @@ def _apply_needs_rework_label(
     if sprint_label:
         sub_env["COMMANDER_SPRINT_RUNNING"] = sprint_label
     subprocess.run(cmd, capture_output=True, text=True, env=sub_env)
-
-
-# ── documentor integration (issue #103) ──────────────────────────────────────
-
-def _run_documentor(
-    issue_nums: "list[int]",
-    sprint_label: str,
-    repo_name: Optional[str],
-    cfg: Optional["SprintConfig"] = None,
-) -> None:
-    """Invoke document_issue.py for every issue in issue_nums (best-effort, non-blocking).
-
-    Called once per sprint after the dispatch loop, with the full list of
-    merged issue numbers and the sprint label as context (issue #697).
-    Failures are logged as warnings so they never block the pipeline.
-    """
-    document_script = Path(__file__).parent / "document_issue.py"
-    if not document_script.exists():
-        sys.stderr.write(str("  [documentor] document_issue.py not found — skipping") + "\n")
-        return
-
-    eff_repo = repo_name or (cfg.repo_name if cfg else None)
-    # Log-format contract (issue #705): the opening/closing lines below are
-    # per-sprint (issue #697). The only on-disk consumer is the dashboard's
-    # log_source.read_log, which returns the raw tail verbatim — no structured
-    # parsing — so the format is safe to display. The exact shape is pinned by
-    # tests/test_705__documentor_log_format_contract.py; keep them in sync.
-    sys.stdout.write(str(f"  [documentor] running for sprint {sprint_label} "
-        f"({len(issue_nums)} ticket(s): {issue_nums}) ...") + "\n")
-    for issue_num in issue_nums:
-        cmd = [sys.executable, str(document_script), "--issue", str(issue_num), "--mode", "both"]
-        if eff_repo:
-            cmd += ["--repo", eff_repo]
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            if result.stdout:
-                for line in result.stdout.splitlines():
-                    sys.stdout.write(str(f"  {line}") + "\n")
-            if result.returncode != 0:
-                sys.stderr.write(str(f"  [documentor] issue #{issue_num} exited {result.returncode} (non-fatal)") + "\n")
-                if result.stderr:
-                    sys.stderr.write(str(f"  [documentor] stderr: {result.stderr.strip()[:400]}") + "\n")
-        except subprocess.TimeoutExpired:
-            structured_log.warn("documentor_timeout", "[documentor] timed out after 300s", issue_num=issue_num)
-        except Exception as e:
-            structured_log.error("documentor_error", f"[documentor] error: {e}", issue_num=issue_num, exc=str(e))
-    sys.stdout.write(str(f"  [documentor] completed for sprint {sprint_label}") + "\n")
 
 
 # ── post-tester hook ──────────────────────────────────────────────────────────
@@ -4906,17 +4842,6 @@ def run_sprint(
     except Exception:
         pass
 
-    # Run documentor once for all merged tickets, before reviewer (issue #697)
-    _eff_documentor = cfg.documentor_enabled if cfg is not None else False
-    if _eff_documentor and summary.merged:
-        _merged_issue_nums = [
-            int(s.lstrip("#").split()[0])
-            for s in summary.merged
-            if s.lstrip("#").split()[0].isdigit()
-        ]
-        if _merged_issue_nums:
-            _run_documentor(_merged_issue_nums, label, eff_repo, cfg=cfg)
-
     # ── Worktree pool teardown (issue #1411) ───────────────────────────────────
     # Tear down the pool at sprint end so no stray worktrees remain.
     global _ACTIVE_WORKTREE_POOL
@@ -5101,22 +5026,6 @@ def main() -> None:
             "Always update the sprint summary GitHub issue regardless of whether an "
             "existing issue is detected as valid or stale."
         ),
-    )
-
-    # Reviewer control (issue #159)
-    p.add_argument(
-        "--skip-reviewer",
-        action="store_true",
-        default=False,
-        help="Skip the post-sprint reviewer agent entirely.",
-    )
-
-    # Documenter control (issue #165)
-    p.add_argument(
-        "--skip-documenter",
-        action="store_true",
-        default=False,
-        help="Skip the post-summary documenter agent entirely.",
     )
 
     # Estimator control (issue #166, #696, #704) — default skips; --no-skip-estimator opts in
@@ -5462,77 +5371,6 @@ def main() -> None:
     # Regenerate STATUS.md after sprint closes (#584)
     _regenerate_status_md(cfg=cfg, dry_run=args.dry_run)
 
-    # Dispatch documenter after sprint summary, before sprint PR (issue #165)
-    if not args.skip_documenter and not args.dry_run and state is not None and state.issues:
-        doc_cwd = str(cfg.worktree_tester) if cfg else None
-        try:
-            r_head = subprocess.run(
-                ["git", "rev-parse", f"origin/{effective_target}"],
-                capture_output=True, text=True, check=False, cwd=doc_cwd,
-            )
-            r_base = subprocess.run(
-                ["git", "merge-base", f"origin/{effective_target}", "origin/develop"],
-                capture_output=True, text=True, check=False, cwd=doc_cwd,
-            )
-            doc_head_sha = r_head.stdout.strip() or "HEAD"
-            doc_base_sha = r_base.stdout.strip() or "develop"
-        except Exception:
-            doc_head_sha = "HEAD"
-            doc_base_sha = "develop"
-
-        state_path_doc = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
-        # issue #764: track documenter as a sprint-level agent run (issue 0).
-        _db_agent_start_sm(0, state.sprint_label, "documenter")
-        _doc_t0 = time.monotonic()
-        try:
-            _dispatch_documenter(
-                state         = state,
-                sprint_branch = effective_target,
-                base_sha      = doc_base_sha,
-                head_sha      = doc_head_sha,
-                cfg           = cfg,
-                repo_name     = eff_repo,
-                merge_target  = effective_target,
-            )
-            _db_agent_finish_sm(
-                0, state.sprint_label, "documenter",
-                duration_seconds=time.monotonic() - _doc_t0,
-                outcome=state.documenter_status or "succeeded",
-            )
-        except RuntimeError as e_doc:
-            # AC6: documenter errors must fail the pipeline loudly, not silently skip.
-            # issue #2030: do NOT re-raise — sprint PR / reviewer / reconcile must
-            # still run.  Overwrite terminal state to needs_rework so the dashboard
-            # reflects the documenter failure even when all tickets merged cleanly.
-            _db_agent_finish_sm(
-                0, state.sprint_label, "documenter",
-                duration_seconds=time.monotonic() - _doc_t0, outcome="failed",
-            )
-            structured_log.error("documenter_failed", f"documenter failed: {e_doc}", exc=str(e_doc))
-            sys.stdout.write(str(f"\n[ERROR] Documenter failed: {e_doc}") + "\n")
-            sys.stdout.flush()
-            _doc_ended_at = datetime.now(timezone.utc).isoformat()
-            _plan_json_set_state_sm(
-                args.label, "needs_rework", cfg=cfg,
-                ended_at=_doc_ended_at, end_reason="documenter-crash",
-            )
-            _sprint_db_set_state_sm(
-                args.label, "needs_rework", project=eff_repo or "",
-                ended_at=_doc_ended_at, end_reason="documenter-crash",
-            )
-            # fall through — sprint PR / reviewer / reconcile execute below
-
-        # Persist documenter outcome into the state JSON
-        if state_path_doc.exists():
-            try:
-                sd3 = json.loads(state_path_doc.read_text())
-                sd3["documenter_status"]        = state.documenter_status
-                sd3["documenter_files_touched"] = state.documenter_files_touched
-                sd3["documenter_commit_sha"]    = state.documenter_commit_sha
-                state_path_doc.write_text(json.dumps(sd3, indent=2))
-            except Exception as e_persist:
-                structured_log.warn("documenter_state_persist_failed", f"could not persist documenter outcome: {e_persist}", exc=str(e_persist))
-
     # Write per-sprint brief after documenter (issue #860).
     # Parked/deprecated (issue #1687) — default-off pending platform stability;
     # override with COMMANDER_DISABLE_BRIEF=0 to re-enable per machine.
@@ -5575,103 +5413,7 @@ def main() -> None:
             sys.stdout.write(str(f"  [code_state] WARNING: snapshot failed: {e_cs}") + "\n")
             sys.stdout.flush()
 
-    # AC6, AC7: child sprints get an open PR into the base branch at sprint end.
-    # develop is reached only at Merge Sprint — no auto-merge here.
     sprint_pr_url: Optional[str] = None
-    if (
-        state is not None
-        and state.issues
-        and not args.dry_run
-        and args.target_branch != "develop"
-        and _is_child_sprint_label(args.label)
-    ):
-        sprint_pr_url = _create_sprint_pr(
-            sprint_branch  = sprint_branch,
-            sprint_label   = args.label,
-            sprint_number  = _sprint_number(args.label),
-            state          = state,
-            repo_name      = eff_repo,
-            pr_base        = _immediate_parent_branch(args.label, cfg),
-            merge_target   = effective_target,
-        )
-
-    # Dispatch reviewer after sprint PR creation (issue #159)
-    if not args.skip_reviewer and not args.dry_run and state is not None and state.issues:
-        rev_cwd = str(cfg.worktree_coder) if cfg else None
-        try:
-            r_head = subprocess.run(
-                ["git", "rev-parse", f"origin/{effective_target}"],
-                capture_output=True, text=True, check=False, cwd=rev_cwd,
-            )
-            r_base = subprocess.run(
-                ["git", "merge-base", f"origin/{effective_target}", "origin/develop"],
-                capture_output=True, text=True, check=False, cwd=rev_cwd,
-            )
-            head_sha = r_head.stdout.strip() or "HEAD"
-            base_sha = r_base.stdout.strip() or "develop"
-        except Exception:
-            head_sha = "HEAD"
-            base_sha = "develop"
-
-        # Read summary_issue_num from state JSON (set by write_sprint_summary)
-        summary_issue_num_for_reviewer: Optional[int] = None
-        state_path_rev = _state_path(state.sprint_number, state.sprint_label, cfg=cfg)
-        if state_path_rev.exists():
-            try:
-                sd = json.loads(state_path_rev.read_text())
-                surl = sd.get("summary_issue_url", "")
-                m_issue = re.search(r"/issues/(\d+)$", surl)
-                if m_issue:
-                    summary_issue_num_for_reviewer = int(m_issue.group(1))
-            except Exception:
-                pass
-
-        # issue #764: track reviewer as a sprint-level agent run (issue 0).
-        _db_agent_start_sm(0, state.sprint_label, "reviewer")
-        _rev_t0 = time.monotonic()
-        try:
-            _dispatch_reviewer(
-                state             = state,
-                summary_issue_num = summary_issue_num_for_reviewer,
-                sprint_branch     = effective_target,
-                base_sha          = base_sha,
-                head_sha          = head_sha,
-                cfg               = cfg,
-                repo_name         = eff_repo,
-                merge_target      = effective_target,
-            )
-            _db_agent_finish_sm(
-                0, state.sprint_label, "reviewer",
-                duration_seconds=time.monotonic() - _rev_t0,
-                outcome=state.reviewer_status or "succeeded",
-            )
-            # Persist reviewer outcome into the state JSON
-            if state_path_rev.exists():
-                try:
-                    sd2 = json.loads(state_path_rev.read_text())
-                    sd2["reviewer_status"]      = state.reviewer_status
-                    sd2["reviewer_comment_url"] = state.reviewer_comment_url
-                    sd2["reviewer_findings"]    = state.reviewer_findings
-                    state_path_rev.write_text(json.dumps(sd2, indent=2))
-                except Exception as e_persist:
-                    structured_log.warn("reviewer_state_persist_failed", f"could not persist reviewer outcome: {e_persist}", exc=str(e_persist))
-        except Exception as e_rev:
-            _db_agent_finish_sm(
-                0, state.sprint_label, "reviewer",
-                duration_seconds=time.monotonic() - _rev_t0, outcome="failed",
-            )
-            structured_log.error("reviewer_failed", f"reviewer stage failed: {e_rev}", exc=str(e_rev))
-            state.reviewer_status = "failed"
-
-        # Enrich follow-up tickets with BA rewrite + estimator
-        follow_ups = (state.reviewer_findings or {}).get("follow_up_tickets", [])
-        if follow_ups and eff_repo:
-            _enrich_followup_tickets(
-                follow_up_tickets = follow_ups,
-                eff_repo          = eff_repo,
-                cfg               = cfg,
-                state             = state,
-            )
 
     # Post-sprint reconciliation (issue #856): surface loose ends — a missing
     # summary issue, an unmerged sprint PR, or stale status labels. Runs for any

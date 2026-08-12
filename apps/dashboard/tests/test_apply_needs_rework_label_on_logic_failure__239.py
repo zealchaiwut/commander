@@ -80,7 +80,6 @@ class TestAC1LogicFailureTriggerNeedsRework:
 
     def test_needs_rework_transition_routes_to_state_machine(self):
         sm = _import_sprint_manager()
-        from services.sprint_manager import label_transitions as lt
 
         captured = []
 
@@ -88,8 +87,7 @@ class TestAC1LogicFailureTriggerNeedsRework:
             captured.append((issue, target_state))
             return True
 
-        with patch.object(sm, "_sm_transition", fake_transition), \
-             patch.object(lt, "_current_status_labels", lambda n, repo: frozenset()):
+        with patch.object(sm, "_sm_transition", fake_transition):
             sm._transition_safe(42, sm._TicketState.NEEDS_REWORK, actor="sprint_manager")
 
         assert captured == [(42, sm._TicketState.NEEDS_REWORK)], (
@@ -244,17 +242,13 @@ class TestAC4Resilience:
     # best-effort behaviour: a failed transition must never raise out of the
     # sprint pipeline — it is logged as a warning instead.
 
-    def _patch_labels(self):
-        from services.sprint_manager import label_transitions as lt
-        return patch.object(lt, "_current_status_labels", lambda n, repo: frozenset())
-
     def test_transition_safe_survives_generic_exception(self):
         sm = _import_sprint_manager()
 
         def boom(*a, **kw):
             raise RuntimeError("network error")
 
-        with patch.object(sm, "_sm_transition", boom), self._patch_labels():
+        with patch.object(sm, "_sm_transition", boom):
             # Must not raise — exceptions are caught and logged as warnings.
             sm._transition_safe(7, sm._TicketState.NEEDS_REWORK, actor="sprint_manager")
 
@@ -264,7 +258,7 @@ class TestAC4Resilience:
         def boom(*a, **kw):
             raise sm._TransitionError("gh issue edit failed after retries")
 
-        with patch.object(sm, "_sm_transition", boom), self._patch_labels():
+        with patch.object(sm, "_sm_transition", boom):
             sm._transition_safe(7, sm._TicketState.NEEDS_REWORK, actor="sprint_manager")
 
     def test_transition_safe_returns_none_on_failure(self):
@@ -273,22 +267,18 @@ class TestAC4Resilience:
         def boom(*a, **kw):
             raise RuntimeError("boom")
 
-        with patch.object(sm, "_sm_transition", boom), self._patch_labels():
+        with patch.object(sm, "_sm_transition", boom):
             result = sm._transition_safe(8, sm._TicketState.NEEDS_REWORK, actor="sprint_manager")
         assert result is None, "_transition_safe is best-effort and returns None"
 
     def test_transition_safe_logs_warning_on_failure(self):
         sm = _import_sprint_manager()
-        from services.sprint_manager import label_transitions as lt
 
         def boom(*a, **kw):
             raise RuntimeError("label missing on repo")
 
         warn_mock = MagicMock()
-        log_stub = MagicMock(warn=warn_mock)
-        with patch.object(sm, "_sm_transition", boom), \
-             patch.object(lt, "structured_log", log_stub), \
-             self._patch_labels():
+        with patch.object(sm, "_sm_transition", boom):
             sm._transition_safe(9, sm._TicketState.NEEDS_REWORK, actor="sprint_manager")
 
         assert warn_mock.called, (

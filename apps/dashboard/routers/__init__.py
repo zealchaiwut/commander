@@ -17,7 +17,6 @@ from .log_search import router as log_search_router
 from .maintenance import router as maintenance_router
 from .milestones import router as milestones_router
 from .runs import router as runs_router
-from .scheduler import router as scheduler_router
 from .signoff import router as signoff_router
 from .sprint_history import router as sprint_history_router
 from .sprints import router as sprints_router
@@ -51,7 +50,6 @@ from .finish_card import router as finish_card_router
 from .mis_sizing import router as mis_sizing_router
 from .xl_suggestions import router as xl_suggestions_router
 from .sprint_collisions import router as sprint_collisions_router
-from .resolve_conflict import router as resolve_conflict_router
 from .llm_provider import router as llm_provider_router
 from .running import router as running_router
 from .api_volume import router as api_volume_router
@@ -77,7 +75,6 @@ __all__ = [
     "maintenance_router",
     "milestones_router",
     "runs_router",
-    "scheduler_router",
     "signoff_router",
     "sprint_history_router",
     "sprints_router",
@@ -110,7 +107,6 @@ __all__ = [
     "mis_sizing_router",
     "xl_suggestions_router",
     "sprint_collisions_router",
-    "resolve_conflict_router",
     "llm_provider_router",
     "running_router",
     "api_volume_router",

@@ -351,9 +351,8 @@ from services.sprint_manager.summary import (  # noqa: E402, F401
 
 from services.sprint_manager.ticket_spec import parse_ticket_spec  # noqa: E402
 
-from services.sprint_manager.api_client import (  # noqa
-    is_retryable_rate_limit as _is_retryable_rate_limit,
-)
+# api_client.py deleted #2241
+def _is_retryable_rate_limit(*a, **kw): return False
 
 # Import failure-parsing helpers from post_test_report (no circular deps)
 try:

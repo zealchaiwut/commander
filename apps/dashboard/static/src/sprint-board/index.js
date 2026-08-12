@@ -37,6 +37,8 @@ import {
 import {
   smgmtReconcileSprint, _recApply, _recClose,
 } from './reconcile-modal.js';
+// Dispatch controls removed (issue #2251). run-controls.js is now a stub
+// that forwards to preflight-warnings.js for the real warning functions.
 import {
   smgmtRunBlockedToast, smgmtRunSprint, smgmtCancelSprint,
   smgmtApproveSprint, smgmtRejectSprint,
@@ -51,6 +53,7 @@ import {
   _pfStepperInit, _pfStepState, _pfStepperAnimate, _pfStepperSummary,
   smgmtKickoffRun, smgmtKickoffRetry,
 } from './run-controls.js';
+import { smgmtOpenPreflightWarnings } from './preflight-warnings.js';
 import {
   _smgmtBoardLock, _smgmtBoardUnlock, _smgmtBoardProgress,
   _smgmtBoardLog, _smgmtBoardFinish, _smgmtBoardHalt,
@@ -61,7 +64,7 @@ import {
   _smgmtFetchMissingOutcomes, _smgmtLoadEstimates, _smgmtLoadConflicts,
   _smgmtLoadDepOrder, _smgmtLoadGoals, _smgmtOutcomeBandHtml,
   _smgmtOutcomeTicketListHtml, _smgmtLoadFinishCards, _smgmtRenderFinishCard,
-  _smgmtFinishCardInnerHtml, _smgmtCardHtml, _smgmtRunningCardHtml,
+  _smgmtFinishCardInnerHtml, _smgmtCardHtml, _smgmtCardActionBtnHtml, _smgmtRunningCardHtml,
   _smgmtRunningBoardBannerHtml, _smgmtBoardBannerPatch, _smgmtRunningLevelText,
   _smgmtRollupText, _smgmtTicketSize, _smgmtTicketHasEstimate, _smgmtUpdateColRollup, _smgmtTicketRowHtml,
   _smgmtRenderBacklog, _smgmtBacklogTicketHtml,
@@ -99,7 +102,10 @@ globalThis.smgmtReconcileSprint = smgmtReconcileSprint;
 globalThis._recApply = _recApply;
 globalThis._recClose = _recClose;
 
-// Run controls + preflight modal (issue #448)
+// Preflight warnings — read-only view (issue #2251)
+globalThis.smgmtOpenPreflightWarnings = smgmtOpenPreflightWarnings;
+
+// Run controls stubs (issue #2251 — dispatch removed; stubs keep project.html wiring intact)
 globalThis.smgmtRunBlockedToast = smgmtRunBlockedToast;
 globalThis.smgmtRunSprint = smgmtRunSprint;
 globalThis.smgmtCancelSprint = smgmtCancelSprint;
@@ -167,6 +173,7 @@ globalThis._smgmtLoadFinishCards = _smgmtLoadFinishCards;
 globalThis._smgmtRenderFinishCard = _smgmtRenderFinishCard;
 globalThis._smgmtFinishCardInnerHtml = _smgmtFinishCardInnerHtml;
 globalThis._smgmtCardHtml = _smgmtCardHtml;
+globalThis._smgmtCardActionBtnHtml = _smgmtCardActionBtnHtml;
 globalThis._smgmtRunningCardHtml = _smgmtRunningCardHtml;
 globalThis._smgmtRunningBoardBannerHtml = _smgmtRunningBoardBannerHtml;
 globalThis._smgmtBoardBannerPatch = _smgmtBoardBannerPatch;

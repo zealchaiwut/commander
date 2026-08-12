@@ -1082,7 +1082,6 @@
           html += `</div>
       <div class="pbrief-foot">
         ${_reviewLink(p, slug)}
-        ${_runSprintBtn(p, slug)}
         <a class="open-proj" href="${esc(_sprintMgmtHref(slug))}" aria-label="Open ${esc(slug)} project">${esc(slug)} <i class="ti ti-arrow-right" style="font-size:12px" aria-hidden="true"></i></a>
       </div>`;
         }
@@ -1266,16 +1265,6 @@
         return `<a class="planner-link" href="${esc(href)}">Review <i class="ti ti-arrow-right" style="font-size:11px"></i></a>`;
       }
 
-      function _runSprintBtn(p, slug) {
-        const up = p.up_next;
-        if (!up || !up.ready || p.status === "running") return "";
-        const repo = _projBySlug[slug] ? _projBySlug[slug].repo : slug;
-        const label = up.label || "";
-        const id = "run-" + esc(slug);
-        return `<button class="planner-link primary" id="${id}"
-      onclick="runSprintAction('${esc(repo || slug)}','${esc(label)}','${esc(id)}')">Run sprint</button>`;
-      }
-
       // ── collapse toggle ───────────────────────────────────────────────────────
       function toggleProject(slug) {
         const card = document.querySelector(
@@ -1307,37 +1296,6 @@
       function onDatePick(ev) {
         const v = ev.target.value;
         if (v) _go(v);
-      }
-
-      // ── run sprint action (reuse existing handler) ────────────────────────────
-      async function runSprintAction(repo, label, id) {
-        const b = document.getElementById(id);
-        if (b) {
-          b.disabled = true;
-          b.textContent = "Starting…";
-        }
-        try {
-          const r = await fetch("/api/sprints/run", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ project: repo, sprint_label: label }),
-          });
-          if (r.ok || r.status === 202) {
-            if (b) {
-              b.textContent = "Started ✓";
-            }
-          } else {
-            if (b) {
-              b.textContent = "Retry";
-              b.disabled = false;
-            }
-          }
-        } catch (_) {
-          if (b) {
-            b.textContent = "Retry";
-            b.disabled = false;
-          }
-        }
       }
 
       // ── add project ───────────────────────────────────────────────────────────

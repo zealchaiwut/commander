@@ -31,7 +31,7 @@ import json
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).parent.parent
+REPO_ROOT = Path(__file__).parent.parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
 for _p in (str(REPO_ROOT), str(DASHBOARD_DIR)):
     if _p not in sys.path:

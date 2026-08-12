@@ -4119,14 +4119,17 @@ ${listing}`
     const loading = document.getElementById("bc-loading");
     if (!loading)
       return;
-    loading.innerHTML = renderProgressActivity({
-      status: "running",
-      mode: "indeterminate",
-      current: current || "Loading preview\u2026"
-    }, {
-      id: "bc-preview-pa",
-      hideLog: true
-    });
+    loading.innerHTML = renderProgressActivity(
+      {
+        status: "running",
+        mode: "indeterminate",
+        current: current || "Loading preview\u2026"
+      },
+      {
+        id: "bc-preview-pa",
+        hideLog: true
+      }
+    );
     loading.classList.remove("hidden");
   }
   function _bcOpen() {
@@ -4199,7 +4202,9 @@ ${listing}`
       if (groups.length === 0) {
         listEl.innerHTML = '<div style="padding:10px;color:var(--text-muted);font-size:13px">No open tickets in this sprint lineage.</div>';
       } else {
-        listEl.innerHTML = groups.map((g) => `<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 2px">${escHtml(sprintLabelDisplay(g.label))} \xB7 ${g.tickets.length}</div>` + g.tickets.map(_ticketRow).join("")).join("");
+        listEl.innerHTML = groups.map(
+          (g) => `<div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 2px">${escHtml(sprintLabelDisplay(g.label))} \xB7 ${g.tickets.length}</div>` + g.tickets.map(_ticketRow).join("")
+        ).join("");
       }
       const members = preview.members || [];
       const actionsEl = document.getElementById("bc-actions");
@@ -4274,7 +4279,9 @@ ${listing}`
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
+        throw new Error(
+          err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`
+        );
       }
     }
     return { label, steps: order.length };
@@ -4300,7 +4307,6 @@ ${listing}`
     }
     let doneSteps = 0;
     const totalSteps = order.length + 1;
-    let failedIdx = 0;
     _smgmtBoardLock(`Completing ${sprintLabelDisplay(label)}\u2026`, {
       progress: true,
       total: totalSteps,
@@ -4317,7 +4323,6 @@ ${listing}`
     };
     try {
       for (let i = 0; i < order.length; i++) {
-        failedIdx = i;
         const sLabel = order[i];
         _smgmtBoardLog(`Completing ${sprintLabelDisplay(sLabel)}\u2026`, "step");
         const res = await fetch(
@@ -4330,7 +4335,9 @@ ${listing}`
         );
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
+          throw new Error(
+            err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`
+          );
         }
         const sd = await res.json();
         doneSteps += 1;
@@ -4350,180 +4357,10 @@ ${listing}`
       });
     } catch (e) {
       _smgmtBoardLog(`\u2717 ${e.message}`, "err");
-      const isConflict = /merge conflict/i.test(e.message);
       _smgmtBoardFinish({
         ok: false,
-        message: "Stopped: " + e.message + (isConflict ? '\n\nClick "Resolve with AI" to fix automatically, or resolve manually and re-run.' : "\n\nResolve the conflict, then re-run Bulk complete to resume (done steps are skipped)."),
+        message: "Stopped: " + e.message + "\n\nResolve the conflict manually, then re-run Bulk complete to resume (done steps are skipped).",
         onDone: _onDone
-      });
-      if (isConflict) {
-        const cinfo = _bcParseConflictInfo(e.message);
-        if (cinfo) {
-          setTimeout(() => {
-            _bcInjectResolveButton(cinfo, owner, repoName, label, order, failedIdx, doneSteps, totalSteps, _onDone);
-          }, 0);
-        }
-      }
-    }
-  }
-  function _bcParseConflictInfo(msg) {
-    const m = msg.match(/Merge\s+(sprint-[\d.]+)\s*[→>]\s*(sprint-[\d.]+|develop|master)\s+failed/i);
-    if (!m)
-      return null;
-    const baseRaw = m[2];
-    const base = /^(develop|master)$/i.test(baseRaw) ? baseRaw : `sprint/${baseRaw}`;
-    return { head: `sprint/${m[1]}`, base };
-  }
-  function _bcInjectResolveButton(cinfo, owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone) {
-    const doneEl = document.getElementById("smgmt-op-done");
-    if (!doneEl)
-      return;
-    const existing = document.getElementById("smgmt-op-resolve-ai-btn");
-    if (existing)
-      existing.remove();
-    const btn = document.createElement("button");
-    btn.id = "smgmt-op-resolve-ai-btn";
-    btn.type = "button";
-    btn.className = "btn-primary";
-    btn.textContent = "\u2726 Resolve with AI";
-    btn.style.cssText = "margin-right:8px;background:var(--violet,#6e56cf);border-color:var(--violet,#6e56cf)";
-    btn.onclick = () => {
-      btn.disabled = true;
-      _bcLaunchAIResolve(cinfo, owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone);
-    };
-    const doneBtn = document.getElementById("smgmt-op-done-btn");
-    if (doneBtn)
-      doneEl.insertBefore(btn, doneBtn);
-    else
-      doneEl.prepend(btn);
-  }
-  async function _bcLaunchAIResolve(cinfo, owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone) {
-    const spinner = document.getElementById("smgmt-move-spinner");
-    const msgEl = document.getElementById("smgmt-move-overlay-msg");
-    const errEl = document.getElementById("smgmt-op-error");
-    const doneEl = document.getElementById("smgmt-op-done");
-    const overlay = document.getElementById("smgmt-move-overlay");
-    if (spinner)
-      spinner.style.display = "";
-    if (errEl) {
-      errEl.hidden = true;
-      errEl.textContent = "";
-    }
-    if (doneEl) {
-      doneEl.hidden = true;
-      doneEl.innerHTML = "";
-    }
-    if (overlay)
-      overlay.setAttribute("aria-busy", "true");
-    const startMs = Date.now();
-    const timerInterval = setInterval(() => {
-      const secs = Math.floor((Date.now() - startMs) / 1e3);
-      const mins = Math.floor(secs / 60);
-      const ts = mins > 0 ? `${mins}m ${secs % 60}s` : `${secs}s`;
-      if (msgEl)
-        msgEl.textContent = `Resolving conflicts with AI\u2026 (${ts})`;
-    }, 1e3);
-    if (msgEl)
-      msgEl.textContent = "Resolving conflicts with AI\u2026 (0s)";
-    try {
-      const startRes = await fetch(
-        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/resolve-branch-conflict`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ head: cinfo.head, base: cinfo.base })
-        }
-      );
-      if (!startRes.ok) {
-        const err = await startRes.json().catch(() => ({}));
-        throw new Error(err.detail || `HTTP ${startRes.status}`);
-      }
-      const { job_key } = await startRes.json();
-      _smgmtBoardLog("AI resolver started\u2026", "step");
-      await new Promise((resolve, reject) => {
-        const es = new EventSource(
-          `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/resolve-conflict-stream/${encodeURIComponent(job_key)}`
-        );
-        es.onmessage = (ev) => {
-          try {
-            const snap = JSON.parse(ev.data);
-            if (snap.ping)
-              return;
-            if (snap.current && snap.status === "running")
-              _smgmtBoardLog(snap.current, "step");
-            if (snap.status === "done") {
-              es.close();
-              resolve(snap);
-            } else if (snap.status === "error") {
-              es.close();
-              reject(new Error(snap.error || "Resolve failed"));
-            }
-          } catch (_) {
-          }
-        };
-        es.onerror = () => {
-          es.close();
-          reject(new Error("SSE connection lost"));
-        };
-      });
-      clearInterval(timerInterval);
-      if (msgEl)
-        msgEl.textContent = "\u2713 Resolved \u2014 retrying bulk complete\u2026";
-      _smgmtBoardLog("\u2713 Conflicts resolved \u2014 resuming\u2026", "ok");
-      if (spinner)
-        spinner.style.display = "";
-      await _bcResumeFrom(owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone);
-    } catch (resolveErr) {
-      clearInterval(timerInterval);
-      _smgmtBoardLog(`\u2717 AI resolve failed: ${resolveErr.message}`, "err");
-      _smgmtBoardFinish({
-        ok: false,
-        message: `AI resolution failed: ${resolveErr.message}
-
-Resolve manually and re-run Bulk complete.`,
-        onDone
-      });
-    }
-  }
-  async function _bcResumeFrom(owner, repoName, label, order, fromIdx, doneSteps, totalSteps, onDone) {
-    try {
-      for (let i = fromIdx; i < order.length; i++) {
-        const sLabel = order[i];
-        _smgmtBoardLog(`Completing ${sprintLabelDisplay(sLabel)}\u2026`, "step");
-        const res = await fetch(
-          `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/sprints/${encodeURIComponent(sLabel)}/complete-step`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ confirmed: true })
-          }
-        );
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.detail || `Failed completing ${sLabel} (HTTP ${res.status})`);
-        }
-        const sd = await res.json();
-        doneSteps += 1;
-        _smgmtBoardProgress(doneSteps, totalSteps);
-        const into = sd.merged ? ` \u2192 merged into ${sd.merged_into}` : "";
-        _smgmtBoardLog(`\u2713 ${sprintLabelDisplay(sLabel)} completed${into}`, "ok");
-      }
-      _smgmtBoardLog("Refreshing board\u2026", "step");
-      await loadSprintMgmt();
-      doneSteps += 1;
-      _smgmtBoardProgress(doneSteps, totalSteps);
-      _smgmtBoardLog("\u2713 Complete finished", "ok");
-      _smgmtBoardFinish({
-        ok: true,
-        message: `\u2713 ${sprintLabelDisplay(label)} completed \u2014 ${order.length} sprint(s) settled.`,
-        onDone
-      });
-    } catch (e2) {
-      _smgmtBoardLog(`\u2717 ${e2.message}`, "err");
-      _smgmtBoardFinish({
-        ok: false,
-        message: "Stopped: " + e2.message + "\n\nResolve the conflict, then re-run Bulk complete.",
-        onDone
       });
     }
   }

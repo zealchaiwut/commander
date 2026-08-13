@@ -1,0 +1,35 @@
+name: no-live-http-in-tests
+
+# Reject test files that make live HTTP calls against UAT_BASE_URL, UAT_PORT,
+# or hardcoded localhost/127.0.0.1 URLs.  AC tests must use TestClient(srv.app)
+# instead — see CLAUDE.md #1746.
+
+on:
+  pull_request:
+    paths:
+      - 'tests/**'
+      - 'scripts/check_no_live_http_in_tests.py'
+      - 'tests/.live-http-allowlist'
+      - '.github/workflows/no-live-http.yml'
+  push:
+    branches:
+      - develop
+      - master
+
+jobs:
+  check:
+    name: No live HTTP in tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run check
+        run: python3 scripts/check_no_live_http_in_tests.py tests/

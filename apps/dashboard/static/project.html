@@ -3311,6 +3311,65 @@
       font-family: var(--mono); font-size: 11px; color: var(--text-sub);
       min-width: 60px; text-align: right; flex-shrink: 0;
     }
+    /* ── Planning insights: stale-estimate row (issue #2264 AC1) ── */
+    .pi-stale-slot:empty { display: none; }
+    .pi-stale-row {
+      display: flex; align-items: center; gap: 6px;
+      margin: 0 12px 8px; padding: 7px 10px;
+      background: var(--amber-bg, rgba(217,119,6,.08));
+      border: 1px solid rgba(217,119,6,.25); border-radius: 6px;
+      font-size: 12px; color: var(--amber, #b45309);
+    }
+    .pi-stale-icon { font-size: 13px; flex-shrink: 0; }
+    .pi-stale-label { font-weight: 600; }
+    .pi-stale-ids { font-family: var(--mono); color: var(--text-sub); }
+
+    /* ── Estimate-vs-actual section (issue #2264 AC3) ── */
+    .pi-ev-slot:empty { display: none; }
+    .pi-ev-section {
+      margin: 0 12px 8px;
+      border: 1px solid var(--border); border-radius: 6px;
+      overflow: hidden;
+    }
+    .pi-ev-toggle-btn {
+      display: flex; align-items: center; gap: 6px; width: 100%;
+      padding: 7px 10px; background: var(--surface-2); border: none;
+      cursor: pointer; font-size: 12px; color: var(--text-sub);
+      text-align: left;
+    }
+    .pi-ev-toggle-btn:hover { color: var(--text); background: var(--surface-3, var(--surface-2)); }
+    .pi-ev-chevron { margin-left: auto; transition: transform .15s; }
+    .pi-ev-content { padding: 0 10px 8px; }
+    .pi-ev-header-row {
+      display: grid;
+      grid-template-columns: 46px 1fr 64px 56px 52px 52px;
+      gap: 6px; padding: 6px 0 4px;
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .05em; color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .pi-ev-row {
+      display: grid;
+      grid-template-columns: 46px 1fr 64px 56px 52px 52px;
+      gap: 6px; padding: 4px 0;
+      font-size: 12px; border-bottom: 1px solid var(--border-subtle, var(--border));
+      align-items: center;
+    }
+    .pi-ev-row:last-child { border-bottom: none; }
+    .pi-ev-num { font-family: var(--mono); font-size: 11px; color: var(--text-sub); }
+    .pi-ev-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pi-ev-est, .pi-ev-act { font-family: var(--mono); font-size: 11px; text-align: right; }
+    .pi-ev-delta {
+      font-family: var(--mono); font-size: 11px; font-weight: 600; text-align: right;
+    }
+    .pi-ev-under { color: var(--green, #16a34a); }
+    .pi-ev-over  { color: var(--red, #dc2626); }
+    .pi-ev-on    { color: var(--text-sub); }
+    .pi-ev-status { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+    .pi-ev-status-done { color: var(--green); }
+    .pi-ev-status-fail { color: var(--red); }
+    .pi-ev-status-skip { color: var(--text-muted); }
+
     /* ── Pre-flight check banner (issue #434) ── */
     .smgmt-preflight-banner {
       margin: 0 12px 10px;

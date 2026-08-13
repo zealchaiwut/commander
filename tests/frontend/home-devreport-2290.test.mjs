@@ -1,10 +1,9 @@
 /**
  * Behavioral tests for issue #2290:
- * Demote the Dev Report to its own route so a missing digest cannot blank the home page.
+ * Demote the Dev Report to its own route — /report page behavior.
  *
- * AC2: home page renders digest block when /api/dev-report returns 200; empty slot on 404
- * AC3: 404 / 500 / network error from /api/dev-report never blocks project navigation
- * AC5: with /api/dev-report stubbed to 404, home still renders project list, no error state
+ * AC6a: /report page renders content when /api/dev-report returns 200 with data
+ * AC6b: /report page shows a clean empty state when /api/dev-report returns 404
  *
  * Pattern: VM sandbox with fetch spy — not source-regex checks (issue #1746).
  * Run with: node --test tests/frontend/home-devreport-2290.test.mjs
@@ -18,7 +17,7 @@ import { dirname, resolve } from 'node:path';
 import vm from 'node:vm';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const HTML_PATH = resolve(__dir, '../../apps/dashboard/static/home.html');
+const REPORT_HTML_PATH = resolve(__dir, '../../apps/dashboard/static/report.html');
 
 function extractInlineScripts(html) {
   const re = /<script(?![^>]*\bsrc\b)[^>]*>([\s\S]*?)<\/script>/gi;
@@ -28,64 +27,34 @@ function extractInlineScripts(html) {
   return parts.join('\n');
 }
 
-function makeEl() {
+function makeEl(id) {
   let _innerHTML = '';
+  let _textContent = '';
   const el = {
     get innerHTML() { return _innerHTML; },
     set innerHTML(v) { _innerHTML = String(v); },
-    textContent: '',
-    children: { length: 0 },
-    getAttribute: () => null,
-    setAttribute: () => {},
-    querySelector: () => ({
-      textContent: '',
-      classList: { add() {}, remove() {} },
-      setAttribute() {},
-    }),
-    querySelectorAll: () => [],
-    classList: { add() {}, remove() {}, toggle() { return false; }, contains() { return false; } },
-    insertAdjacentHTML: () => {},
-    insertBefore: () => {},
-    remove: () => {},
-    appendChild: () => {},
-    firstChild: null,
-    disabled: false,
+    get textContent() { return _textContent; },
+    set textContent(v) { _textContent = String(v); },
+    id: id || '',
     value: '',
     max: '',
+    disabled: false,
     style: {},
-    id: '',
+    getAttribute: () => null,
+    setAttribute: () => {},
+    addEventListener: () => {},
+    classList: { add() {}, remove() {}, toggle() { return false; }, contains() { return false; } },
+    querySelector: () => makeEl(),
+    querySelectorAll: () => [],
+    insertAdjacentHTML: () => {},
+    appendChild: () => {},
+    remove: () => {},
+    firstChild: null,
   };
   return el;
 }
 
-function fakeHomeResponse() {
-  return {
-    stats: {
-      sprint_running: { count: 1, projects: [] },
-      awaiting_uat: { count: 2, projects: 1, oldest_age_sec: 3600 },
-      backlog: { count: 5, per_project: [] },
-      sprints_planned: { count: 1, total_tickets: 4 },
-    },
-    projects: [
-      {
-        slug: 'alpha',
-        name: 'Alpha Project',
-        repo: 'org/alpha',
-        icon: 'ti-rocket',
-        color: 'blue',
-        status: 'running',
-        uat_count: 2,
-        backlog_count: 3,
-        last_activity_at: new Date(Date.now() - 3600 * 1000).toISOString(),
-        sprint_running: { label: 'sprint-10', elapsed_sec: 120 },
-        last_sprint: { sprint_num: 10, date: '2026-08-13', status: 'running' },
-      },
-    ],
-    activity: [],
-  };
-}
-
-function fakeDevReportResponse() {
+function fakeReportData() {
   return {
     for_date: '2026-08-13',
     generated_at: '2026-08-13T03:00:00Z',
@@ -101,16 +70,16 @@ function fakeDevReportResponse() {
 }
 
 /**
- * Build a VM context and run init() through the inline scripts.
- * Returns { homeEl, digestEl, fetchCalls }.
+ * Run the report.html scripts in a VM sandbox.
+ * Returns { reportRootEl, fetchCalls }.
  */
-async function runHomePage(fetchOverride) {
-  const html = readFileSync(HTML_PATH, 'utf-8');
+async function runReportPage(fetchOverride) {
+  const html = readFileSync(REPORT_HTML_PATH, 'utf-8');
   const code = extractInlineScripts(html);
 
-  const homeEl = makeEl();
-  const digestEl = makeEl();
+  const reportRootEl = makeEl('report-root');
   const fetchCalls = [];
+  let domContentLoadedHandler = null;
 
   const ctx = {
     fetch: async (url) => {
@@ -121,21 +90,27 @@ async function runHomePage(fetchOverride) {
 
     document: {
       documentElement: makeEl(),
-      addEventListener: () => {},
+      addEventListener: (event, handler) => {
+        if (event === 'DOMContentLoaded') domContentLoadedHandler = handler;
+      },
       getElementById: (id) => {
-        if (id === 'home') return homeEl;
-        if (id === 'digest-slot') return digestEl;
-        return makeEl();
+        if (id === 'report-root') return reportRootEl;
+        return makeEl(id);
       },
       querySelector: () => null,
       querySelectorAll: () => [],
       createElement: () => makeEl(),
     },
 
-    location: { href: 'http://localhost/', search: '' },
+    location: { href: 'http://localhost/report', search: '' },
     URL: class {
       constructor() {
-        this.searchParams = { get: () => null, toString: () => '', set: () => {}, delete: () => {} };
+        this.searchParams = {
+          get: () => null,
+          toString: () => '',
+          set: () => {},
+          delete: () => {},
+        };
       }
     },
     URLSearchParams: class {
@@ -156,8 +131,6 @@ async function runHomePage(fetchOverride) {
     Promise,
     Boolean, Array, Object, String, Number, Set, Math, Date, JSON,
     console: { log() {}, warn() {}, error() {}, info() {} },
-    CSS: { escape: (s) => s },
-    visibilityInterval: () => {},
   };
   ctx.window = ctx;
 
@@ -167,134 +140,83 @@ async function runHomePage(fetchOverride) {
     vm.runInContext(code, ctx, { timeout: 5000 });
   } catch (_) {}
 
-  if (ctx._homeBootPromise && typeof ctx._homeBootPromise.then === 'function') {
-    await ctx._homeBootPromise.catch(() => {});
-  } else {
-    await new Promise(r => setTimeout(r, 100));
+  // Trigger DOMContentLoaded which calls _loadReport()
+  if (domContentLoadedHandler) {
+    await domContentLoadedHandler();
   }
   await new Promise(r => setTimeout(r, 50));
 
-  return { homeEl, digestEl, fetchCalls };
+  return { reportRootEl, fetchCalls };
 }
 
-// ── AC5: /api/dev-report 404 → project list renders, no error state ───────────
+// ── AC6a: /report renders content when /api/dev-report returns 200 ────────────
 
-test('AC5: project links render when /api/dev-report returns 404', async () => {
-  const { homeEl, fetchCalls } = await runHomePage(url => {
+test('AC6a: report page fetches /api/dev-report on load', async () => {
+  const { fetchCalls } = await runReportPage(url => {
     if (url.includes('/api/dev-report')) {
-      return Promise.resolve({ ok: false, status: 404, json: async () => null });
-    }
-    if (url.includes('/api/home') && !url.includes('/api/home/')) {
-      return Promise.resolve({ ok: true, json: async () => fakeHomeResponse() });
+      return Promise.resolve({ ok: true, json: async () => fakeReportData() });
     }
     return Promise.resolve({ ok: true, json: async () => ({}) });
   });
 
-  const html = homeEl.innerHTML;
+  const devReportCalls = fetchCalls.filter(u => u.includes('/api/dev-report'));
+  assert.ok(devReportCalls.length >= 1, `report page must fetch /api/dev-report, got: ${JSON.stringify(fetchCalls)}`);
+});
+
+test('AC6a: report page renders completed items when /api/dev-report returns 200', async () => {
+  const { reportRootEl } = await runReportPage(url => {
+    if (url.includes('/api/dev-report')) {
+      return Promise.resolve({ ok: true, json: async () => fakeReportData() });
+    }
+    return Promise.resolve({ ok: true, json: async () => ({}) });
+  });
+
+  const html = reportRootEl.innerHTML;
+  assert.ok(html.includes('Fix login bug'), `rendered HTML must include "Fix login bug", got: ${html.slice(0, 300)}`);
+  assert.ok(html.includes('Add export feature'), `rendered HTML must include "Add export feature", got: ${html.slice(0, 300)}`);
+});
+
+test('AC6a: report page renders needs-review items when /api/dev-report returns 200', async () => {
+  const { reportRootEl } = await runReportPage(url => {
+    if (url.includes('/api/dev-report')) {
+      return Promise.resolve({ ok: true, json: async () => fakeReportData() });
+    }
+    return Promise.resolve({ ok: true, json: async () => ({}) });
+  });
+
+  const html = reportRootEl.innerHTML;
+  assert.ok(html.includes('Sprint dashboard lag'), `rendered HTML must include "Sprint dashboard lag", got: ${html.slice(0, 300)}`);
+});
+
+// ── AC6b: /report shows clean empty state on 404 ──────────────────────────────
+
+test('AC6b: report page shows empty state when /api/dev-report returns 404', async () => {
+  const { reportRootEl } = await runReportPage(url => {
+    if (url.includes('/api/dev-report')) {
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }
+    return Promise.resolve({ ok: true, json: async () => ({}) });
+  });
+
+  const html = reportRootEl.innerHTML;
   assert.ok(
-    html.includes('pb-title-link'),
-    `project links (.pb-title-link) must be present even with /api/dev-report returning 404, got: ${html.slice(0, 300)}`,
-  );
-  assert.ok(
-    html.includes('/project/alpha/sprint-mgmt'),
-    'alpha project link must be present despite /api/dev-report 404',
+    html.includes('No report available') || html.includes('empty-state'),
+    `empty state must be shown on 404, got: ${html.slice(0, 300)}`,
   );
 });
 
-test('AC5: no error state shown when /api/dev-report returns 404', async () => {
-  const { homeEl, digestEl } = await runHomePage(url => {
+test('AC6b: report page empty state does not show an error alert or blocking UI on 404', async () => {
+  const { reportRootEl } = await runReportPage(url => {
     if (url.includes('/api/dev-report')) {
-      return Promise.resolve({ ok: false, status: 404, json: async () => null });
-    }
-    if (url.includes('/api/home') && !url.includes('/api/home/')) {
-      return Promise.resolve({ ok: true, json: async () => fakeHomeResponse() });
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
     }
     return Promise.resolve({ ok: true, json: async () => ({}) });
   });
 
-  const html = homeEl.innerHTML;
-  assert.ok(html.length > 100, `home must not be blank, got length ${html.length}`);
-  assert.ok(!html.includes('Could not load projects'), 'error banner must not appear when /api/home succeeds');
-  // digest slot must be empty (no content from 404)
-  assert.equal(digestEl.innerHTML, '', 'digest slot must be empty when dev-report returns 404');
-});
-
-// ── AC2: digest block visible when /api/dev-report returns 200 ────────────────
-
-test('AC2: digest block appears in digest-slot when dev-report returns 200', async () => {
-  const { digestEl, homeEl } = await runHomePage(url => {
-    if (url.includes('/api/dev-report')) {
-      return Promise.resolve({ ok: true, json: async () => fakeDevReportResponse() });
-    }
-    if (url.includes('/api/home') && !url.includes('/api/home/')) {
-      return Promise.resolve({ ok: true, json: async () => fakeHomeResponse() });
-    }
-    return Promise.resolve({ ok: true, json: async () => ({}) });
-  });
-
-  const digestHtml = digestEl.innerHTML;
-  assert.ok(
-    digestHtml.length > 0,
-    `digest slot must contain content when /api/dev-report returns 200, got empty string`,
-  );
-  assert.ok(
-    digestHtml.includes('/report'),
-    `digest block must link to /report, got: ${digestHtml.slice(0, 200)}`,
-  );
-  // project list also renders (dev-report doesn't block it)
-  assert.ok(
-    homeEl.innerHTML.includes('pb-title-link'),
-    'project links must be present even when dev-report loads successfully',
-  );
-});
-
-test('AC2: digest slot is empty when /api/dev-report returns 404', async () => {
-  const { digestEl } = await runHomePage(url => {
-    if (url.includes('/api/dev-report')) {
-      return Promise.resolve({ ok: false, status: 404, json: async () => null });
-    }
-    if (url.includes('/api/home') && !url.includes('/api/home/')) {
-      return Promise.resolve({ ok: true, json: async () => fakeHomeResponse() });
-    }
-    return Promise.resolve({ ok: true, json: async () => ({}) });
-  });
-
-  assert.equal(digestEl.innerHTML, '', 'digest slot must be empty when dev-report returns 404');
-});
-
-// ── AC3: 500 and network errors don't block navigation ────────────────────────
-
-test('AC3: project links present when /api/dev-report returns 500', async () => {
-  const { homeEl } = await runHomePage(url => {
-    if (url.includes('/api/dev-report')) {
-      return Promise.resolve({ ok: false, status: 500, json: async () => null });
-    }
-    if (url.includes('/api/home') && !url.includes('/api/home/')) {
-      return Promise.resolve({ ok: true, json: async () => fakeHomeResponse() });
-    }
-    return Promise.resolve({ ok: true, json: async () => ({}) });
-  });
-
-  assert.ok(
-    homeEl.innerHTML.includes('pb-title-link'),
-    'project links must be present even with /api/dev-report returning 500',
-  );
-});
-
-test('AC3: project links present when /api/dev-report throws network error', async () => {
-  const { homeEl, digestEl } = await runHomePage(url => {
-    if (url.includes('/api/dev-report')) {
-      return Promise.reject(new Error('network failure'));
-    }
-    if (url.includes('/api/home') && !url.includes('/api/home/')) {
-      return Promise.resolve({ ok: true, json: async () => fakeHomeResponse() });
-    }
-    return Promise.resolve({ ok: true, json: async () => ({}) });
-  });
-
-  assert.ok(
-    homeEl.innerHTML.includes('pb-title-link'),
-    'project links must be present even when /api/dev-report network fails',
-  );
-  assert.equal(digestEl.innerHTML, '', 'digest slot must be empty on network error');
+  const html = reportRootEl.innerHTML;
+  // Must not contain blocking error UI patterns
+  assert.ok(!html.includes('<alert'), `must not render an alert element on 404, got: ${html.slice(0, 300)}`);
+  assert.ok(!html.includes('class="error"'), `must not have class="error" on 404, got: ${html.slice(0, 300)}`);
+  // Must have some clean empty-state content
+  assert.ok(html.length > 0, 'report root must have content (not be blank) on 404');
 });

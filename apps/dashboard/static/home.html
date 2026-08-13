@@ -678,41 +678,6 @@
       }
       .dr-fetch-error button:hover { opacity: 1; }
 
-      /* ── dev-report digest block (issue #2290) ── */
-      #digest-slot:empty { display: none; }
-      .digest-block {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 10px 14px;
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-xl);
-        margin-bottom: 16px;
-        font-size: 13px;
-      }
-      .digest-label {
-        font-family: var(--mono);
-        font-size: 11px;
-        color: var(--text-muted);
-        font-weight: 600;
-        white-space: nowrap;
-      }
-      .digest-counts {
-        color: var(--text);
-        font-size: 12px;
-        font-family: var(--mono);
-      }
-      .digest-link {
-        margin-left: auto;
-        font-size: 12px;
-        color: var(--blue);
-        text-decoration: none;
-        white-space: nowrap;
-        flex-shrink: 0;
-      }
-      .digest-link:hover { text-decoration: underline; }
-
       /* ── global stats strip (issue #2261) ── */
       .home-stats-strip {
         display: flex;
@@ -841,7 +806,6 @@
     </nav>
 
     <div class="page-body">
-      <div id="digest-slot"></div>
       <div id="home">
         <div class="loading-state" id="boot-note">
           <i class="ti ti-loader-2"></i> Loading…
@@ -932,39 +896,6 @@
         return "/project/" + encodeURIComponent(slug) + "/sprint-mgmt";
       }
 
-      // ── dev-report digest (issue #2290) ───────────────────────────────────────
-      async function loadDigest() {
-        var slot = document.getElementById("digest-slot");
-        if (!slot) return;
-        try {
-          var resp = await fetch("/api/dev-report");
-          if (!resp.ok) { slot.innerHTML = ""; return; }
-          var data = await resp.json();
-          slot.innerHTML = _renderDigest(data);
-        } catch (_) {
-          slot.innerHTML = "";
-        }
-      }
-
-      function _renderDigest(data) {
-        var completed = (data.completed || []).length;
-        var needsReview = (data.needs_review || []).length;
-        var date = data.for_date || "";
-        if (!completed && !needsReview && !date) return "";
-        var parts = [];
-        if (completed) parts.push(completed + " completed");
-        if (needsReview) parts.push(needsReview + " need review");
-        return (
-          '<div class="digest-block">' +
-          '<span class="digest-label">' + esc(date ? date + " report" : "Dev report") + "</span>" +
-          (parts.length
-            ? '<span class="digest-counts">' + esc(parts.join(" \xB7 ")) + "</span>"
-            : "") +
-          '<a class="digest-link" href="/report">View →</a>' +
-          "</div>"
-        );
-      }
-
       // ── boot / redirect ────────────────────────────────────────────────────────
       function _deckRedirect() {
         const p = new URLSearchParams(window.location.search);
@@ -987,7 +918,6 @@
       async function init() {
         if (_deckRedirect()) return;
         await loadReport();
-        await loadDigest().catch(function () {});
       }
 
       // ── home data load ─────────────────────────────────────────────────────────

@@ -36,7 +36,8 @@ def test_demote_dev_report__date_picker_navigation(client):
 
 def test_demote_dev_report__home_page_has_plain_link(client):
     # AC3: The home page links to `/report` — a plain navigation link
-    r = client.get("/home")
+    # /home is a 301 redirect; the actual home page content is served at /
+    r = client.get("/")
     assert r.status_code == 200
     # Check for a link to /report
     assert 'href="/report"' in r.text or "href='/report'" in r.text

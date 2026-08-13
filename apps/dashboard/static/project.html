@@ -9396,21 +9396,6 @@
   });
 </script>
 
-<!-- ── Docked per-project to-do panel (#844): always available, collapsible ── -->
-<aside class="todo-dock collapsed" id="todo-dock" aria-label="Project to-do list">
-  <div class="todo-dock-bar" id="todo-dock-bar" role="button" tabindex="0"
-       aria-expanded="false" onclick="toggleTodoDock()">
-    <i class="ti ti-checklist"></i> To-do
-    <button type="button" class="todo-dock-expand" title="Open full screen"
-            onclick="event.stopPropagation();if(window.CommanderTodo)CommanderTodo.openFullscreen(_slug)"
-            aria-label="Open to-do full screen"><i class="ti ti-arrows-maximize"></i></button>
-    <i class="ti ti-chevron-down" style="font-size:13px"></i>
-  </div>
-  <div class="todo-dock-body">
-    <div class="todo" id="todo-dock-panel"></div>
-  </div>
-</aside>
-
 <!-- ── Page layout: sidebar + main ── -->
 <div class="page-layout">
 
@@ -12615,15 +12600,6 @@ async function _prefetchFullRepo() {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-// AC2: expand/collapse the docked to-do panel (#844)
-function toggleTodoDock() {
-  const dock = document.getElementById('todo-dock');
-  if (!dock) return;
-  const collapsed = dock.classList.toggle('collapsed');
-  const bar = document.getElementById('todo-dock-bar');
-  if (bar) bar.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-}
-
 async function init() {
   const { slug, tab, view, filter } = parseUrl();
 
@@ -12643,11 +12619,6 @@ async function init() {
   _deepLinkView = view;
   _deepLinkFilter = filter;
   if (filter === 'errors') _evlState.errorsOnly = true;  // applied on first activity render
-
-  // AC2/AC3: mount the docked per-project to-do panel, keyed by slug so it shows
-  // the identical list as this project's home-page block (#844).
-  const _todoDockPanel = document.getElementById('todo-dock-panel');
-  if (_todoDockPanel && window.CommanderTodo) CommanderTodo.mount(_todoDockPanel, slug);
 
   initTheme();
   updateSidebarFooter();
@@ -28913,8 +28884,6 @@ async function scaffoldApplyConfirm() {
 <script src="/static/dist/bundle.js"></script>
 <!-- Shared Add Project modal logic (single source of truth for home + project) -->
 <script src="/static/add-project-modal.js"></script>
-<!-- Shared per-project to-do panel (single source of truth for home + project, #844) -->
-<script src="/static/project-todo.js"></script>
 
 </body>
 </html>

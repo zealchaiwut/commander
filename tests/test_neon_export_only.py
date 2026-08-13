@@ -12,8 +12,8 @@ so a future change doesn't silently reconnect runtime code against the
 stale "Neon holds lifecycle" assumption these modules predate.
 
 neon_db.py and models.py are NOT guarded here — both are legitimately
-shared with the runtime settings/todo KV path (settings_repo.py /
-todo_repo.py) when Neon is enabled; see their module docstrings.
+shared with the runtime settings KV path (settings_repo.py) when Neon is
+enabled; see their module docstrings.
 """
 from __future__ import annotations
 

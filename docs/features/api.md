@@ -620,7 +620,7 @@ An unknown `project=` raises `404`.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/sprints/{sprint_label}/preflight` | Full preflight health check before dispatch. Cycle, file-overlap conflict, and dependency-order data are returned inline in this aggregate response (issue #2234) |
+| `GET` | `/api/sprints/{sprint_label}/preflight` | Full preflight health check before dispatch. Cycle, file-overlap conflict, and dependency-order data are returned inline in this aggregate response (issue #2234). Also returns `dor_mode` and inline `readiness` (`ready` / `not_ready` with per-ticket `missing` reasons); when `dor_mode == "block"` and any work ticket is `not_ready`, `ok` is `false` (Definition of Ready gate, issue #2262) |
 | `POST` | `/api/sprints/{sprint_label}/preflight-fix` | Auto-fix a preflight issue |
 | `GET` | `/api/sprints/{sprint_label}/preview-dag` | Preview the ticket dependency DAG |
 | `GET` | `/api/sprints/{sprint_label}/dag-order-preview` | Preview DAG-resolved execution order |

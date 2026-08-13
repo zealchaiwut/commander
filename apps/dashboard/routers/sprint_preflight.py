@@ -8,7 +8,7 @@ The standalone cycle-check, conflicts, and dep-order endpoints were removed in
 issue #2234 (zero frontend callers); their data is still returned inline by the
 aggregate GET preflight response.
 
-Helpers that are also used by other routes in server.py (e.g. _sprint_dag_tickets,
+Helpers also used by other routes in server.py (e.g. _sprint_dag_tickets,
 _check_estimate_stale, _resolve_issue_estimate) are accessed via a deferred
 import of server at request time to avoid the import-time circular dependency.
 """
@@ -25,9 +25,13 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 from services.sprint_manager import fill_acceptance_criteria as _fill_ac
-from services.sprint_manager.ticket_spec import parse_ticket_spec as _parse_ticket_spec
+from services.sprint_manager.ticket_spec import (
+    parse_ticket_spec as _parse_ticket_spec,
+)
 from services.sprint_manager.sizing import SIZE_TO_MINUTES as _SIZE_TO_MINUTES
-from services.sprint_manager.definition_of_ready import check_ticket_readiness as _check_dor
+from services.sprint_manager.definition_of_ready import (
+    check_ticket_readiness as _check_dor,
+)
 import services.sprint_manager.settings_repo as _settings_repo
 from services.sprint_manager.settings_schema import (
     APP_CONFIG_KEY as _APP_CONFIG_KEY,
@@ -75,21 +79,23 @@ def _preflight_estimate_one(issue_num: int, repo: str) -> bool:
     return True
 
 
-# ── Route handlers ────────────────────────────────────────────────────────────
+# ── Route handlers ───────────────────────────────────────────────────────────
 
 @router.post("/api/sprints/{sprint_label}/preflight-fix")
 async def preflight_fix(sprint_label: str, project: str):
-    """Fix auto-fixable pre-flight issues for a sprint, streaming progress as SSE.
+    """Fix auto-fixable pre-flight issues for a sprint, streaming as SSE.
 
-    For each work ticket in the sprint that is missing acceptance criteria or a
-    size estimate: generate AC (append-only, idempotent) and/or run the estimator
-    to apply a size label. Streams `log` events (the current action) and a final
-    `done` event with counts. Conflicts (file-overlap / dep-order) are not
-    auto-fixable and are left untouched.
+    For each work ticket missing acceptance criteria or a size estimate:
+    generate AC (append-only, idempotent) and/or run the estimator to
+    apply a size label. Streams ``log`` events (the current action) and
+    a final ``done`` event with counts. Conflicts (file-overlap /
+    dep-order) are not auto-fixable and are left untouched.
     """
     srv = _server()
     if not srv._SPRINT_LABEL_RE.match(sprint_label):
-        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+        raise HTTPException(
+            400, detail=f"Invalid sprint label: {sprint_label!r}"
+        )
 
     repo = srv.github_client.get_repo_for_operation(project)
     try:
@@ -142,7 +148,7 @@ async def preflight_fix(sprint_label: str, project: str):
             if item["needs_ac"]:
                 yield _sse(
                     "log",
-                    f"Generating acceptance criteria for #{num} ({idx}/{total})…",
+                    f"Generating AC for #{num} ({idx}/{total})…",
                 )
                 try:
                     status, err = await asyncio.to_thread(
@@ -163,7 +169,9 @@ async def preflight_fix(sprint_label: str, project: str):
             if item["needs_size"]:
                 yield _sse("log", f"Estimating #{num} ({idx}/{total})…")
                 try:
-                    ok = await asyncio.to_thread(_preflight_estimate_one, num, repo)
+                    ok = await asyncio.to_thread(
+                        _preflight_estimate_one, num, repo
+                    )
                     if ok:
                         estimated += 1
                     else:
@@ -198,15 +206,22 @@ async def preflight_fix(sprint_label: str, project: str):
 def get_sprint_preflight(sprint_label: str, project: str):
     """Preflight check returned before running a sprint.
 
-    Returns DAG visualization data (layers, edges, ticket metadata) alongside ok flag,
-    warnings (unestimated, stale_estimates, missing_ac), and cycle path if detected.
+    Returns DAG visualization data (layers, edges, ticket metadata)
+    alongside ok flag, warnings (unestimated, stale_estimates,
+    missing_ac), and cycle path if detected.
     """
     srv = _server()
     if not srv._SPRINT_LABEL_RE.match(sprint_label):
-        raise HTTPException(400, detail=f"Invalid sprint label: {sprint_label!r}")
+        raise HTTPException(
+            400, detail=f"Invalid sprint label: {sprint_label!r}"
+        )
 
     dag_payload: dict | None = None
-    warnings: dict = {"unestimated": [], "stale_estimates": [], "missing_ac": []}
+    warnings: dict = {
+        "unestimated": [],
+        "stale_estimates": [],
+        "missing_ac": [],
+    }
     cycle_path: list[str] | None = None
     sprint_issues: list[dict] = []
 
@@ -216,7 +231,8 @@ def get_sprint_preflight(sprint_label: str, project: str):
             project_root = srv._project_root_path(project)
             estimates_dir = srv._commander_dir(project_root) / "estimates"
             stale_cutoff = (
-                datetime.now(timezone.utc) - timedelta(days=_STALE_ESTIMATE_DAYS)
+                datetime.now(timezone.utc)
+                - timedelta(days=_STALE_ESTIMATE_DAYS)
             )
 
             ticket_map: dict[str, dict] = {}
@@ -275,7 +291,10 @@ def get_sprint_preflight(sprint_label: str, project: str):
             edges: list[list[str]]
             if srv._DAG_BUILDER_AVAILABLE:
                 dag_tickets = [
-                    {"id": tid, "files_touched": ticket_map[tid]["files_touched"]}
+                    {
+                        "id": tid,
+                        "files_touched": ticket_map[tid]["files_touched"],
+                    }
                     for tid in ticket_map
                 ]
                 dag_result = srv._build_dag(dag_tickets)
@@ -341,8 +360,11 @@ def get_sprint_preflight(sprint_label: str, project: str):
             )
             size = resolved.get("size")
             est_minutes = _SIZE_TO_MINUTES.get(size, 0) if size else 0
-            if _xl_svc.is_xl_suggestion(size=size, estimated_minutes=est_minutes,
-                                        threshold=xl_threshold):
+            if _xl_svc.is_xl_suggestion(
+                size=size,
+                estimated_minutes=est_minutes,
+                threshold=xl_threshold,
+            ):
                 xl_suggestions.append({
                     "issue_number": num,
                     "title": iss.get("title", ""),
@@ -385,8 +407,12 @@ def get_sprint_preflight(sprint_label: str, project: str):
         except Exception:
             pass  # DoR is advisory — don't fail preflight
 
+    ok = True
+    if dor_mode == "block" and readiness and readiness.get("not_ready"):
+        ok = False
+
     response: dict = {
-        "ok": True,
+        "ok": ok,
         "sprint_label": sprint_label,
         "project": project,
         "dag": dag_payload,

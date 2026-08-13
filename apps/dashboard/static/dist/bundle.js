@@ -930,6 +930,24 @@
     return _parseUrlImpl(loc.pathname, loc.search);
   }
 
+  // apps/dashboard/static/src/shell/project-switcher.js
+  function buildProjectSwitcherOptions(projects, currentSlug) {
+    if (!projects || !projects.length)
+      return "";
+    return projects.map((proj) => {
+      const slug = proj.slug || "";
+      const name = proj.name || slug;
+      const selected = slug === currentSlug ? " selected" : "";
+      return `<option value="${escHtml(slug)}"${selected}>${escHtml(name)}</option>`;
+    }).join("");
+  }
+  function navigateToProject(slug, currentSlug, currentTab) {
+    if (!slug || slug === currentSlug)
+      return;
+    const tab = currentTab || "sprint-mgmt";
+    window.location.href = "/project/" + encodeURIComponent(slug) + "/" + tab;
+  }
+
   // apps/dashboard/static/src/shell/visibility.js
   var _viHandles = /* @__PURE__ */ new Map();
   var _viIdSeq = 1e6;
@@ -1538,6 +1556,148 @@
   globalThis._pfXLMinutesSaved ??= 0;
   globalThis._smgmtMoveLock ??= false;
   globalThis._smgmtGhostNextNum ??= null;
+
+  // apps/dashboard/static/src/sprint-board/planning-insights.js
+  function _smgmtStaleEstimateHtml(stale) {
+    if (!stale || stale.length === 0)
+      return "";
+    const count = stale.length;
+    const ids = escHtml(stale.join(", "));
+    return `<div class="pi-stale-row" role="status" aria-live="polite">
+    <i class="ti ti-clock-exclamation pi-stale-icon" aria-hidden="true"></i>
+    <span class="pi-stale-label">${count} stale estimate${count !== 1 ? "s" : ""}:</span>
+    <span class="pi-stale-ids">${ids}</span>
+  </div>`;
+  }
+  async function _smgmtLoadPlanningInsights2(orderedLabels) {
+    const repo = _smgmtRepo();
+    if (!repo)
+      return;
+    await Promise.all(orderedLabels.map(async (label) => {
+      if (_smgmtRunningLabels.has(label))
+        return;
+      if (_smgmtFinishedLabels.has(label))
+        return;
+      const slot = document.getElementById(`pi-stale-${label}`);
+      if (!slot || slot.dataset.loaded)
+        return;
+      try {
+        const resp = await fetch(
+          `/api/sprints/${encodeURIComponent(label)}/preflight?project=${encodeURIComponent(repo)}`
+        );
+        if (!resp.ok)
+          return;
+        const data = await resp.json();
+        const stale = (data.warnings || {}).stale_estimates || [];
+        slot.dataset.loaded = "1";
+        if (!stale.length)
+          return;
+        slot.innerHTML = _smgmtStaleEstimateHtml(stale);
+      } catch (_) {
+      }
+    }));
+  }
+
+  // apps/dashboard/static/src/sprint-board/est-vs-actual.js
+  function _fmtMin(minutes) {
+    if (minutes == null)
+      return "\u2014";
+    const m = Math.round(minutes);
+    return m >= 60 ? `${(Math.abs(minutes) / 60).toFixed(1)}h` : `${m}m`;
+  }
+  function _fmtDelta(delta) {
+    if (delta == null)
+      return { text: "\u2014", cls: "" };
+    const abs = Math.abs(delta);
+    const sign = delta < 0 ? "-" : "+";
+    const text = `${sign}${abs >= 60 ? (abs / 60).toFixed(1) + "h" : Math.round(abs) + "m"}`;
+    const cls = delta < -5 ? "pi-ev-under" : delta > 5 ? "pi-ev-over" : "pi-ev-on";
+    return { text, cls };
+  }
+  function _smgmtEstVsActualSectionHtml(label, data) {
+    const tickets = data && data.tickets || [];
+    if (!tickets.length)
+      return "";
+    const safeLabel = escHtml(label);
+    const jsLabel = "'" + String(label).replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
+    const rows = tickets.map((t) => {
+      const estStr = t.estimated_size ? `${_fmtMin(t.estimated_minutes)} (${escHtml(t.estimated_size)})` : _fmtMin(t.estimated_minutes);
+      const actStr = _fmtMin(t.actual_elapsed_minutes);
+      const { text: deltaText, cls: deltaCls } = _fmtDelta(t.delta_minutes);
+      const statusCls = t.status === "done" ? "pi-ev-status-done" : t.status === "failed" ? "pi-ev-status-fail" : "pi-ev-status-skip";
+      return `<div class="pi-ev-row">
+      <span class="pi-ev-num">#${t.ticket_id}</span>
+      <span class="pi-ev-title" title="${escHtml(t.title || "")}">${escHtml(t.title || "")}</span>
+      <span class="pi-ev-est">${estStr}</span>
+      <span class="pi-ev-act">${actStr}</span>
+      <span class="pi-ev-delta ${deltaCls}">${escHtml(deltaText)}</span>
+      <span class="pi-ev-status ${statusCls}">${escHtml(t.status || "\u2014")}</span>
+    </div>`;
+    }).join("");
+    return `<div class="pi-ev-section" id="pi-ev-section-${safeLabel}">
+    <button class="pi-ev-toggle-btn" type="button"
+            onclick="_smgmtToggleEstVsActual(${jsLabel})"
+            aria-expanded="false"
+            aria-controls="pi-ev-content-${safeLabel}">
+      <i class="ti ti-chart-bar" aria-hidden="true"></i>
+      Estimate vs Actual
+      <i class="ti ti-chevron-down pi-ev-chevron" aria-hidden="true"></i>
+    </button>
+    <div class="pi-ev-content" id="pi-ev-content-${safeLabel}" style="display:none">
+      <div class="pi-ev-header-row">
+        <span class="pi-ev-num">Ticket</span>
+        <span class="pi-ev-title">Title</span>
+        <span class="pi-ev-est">Est</span>
+        <span class="pi-ev-act">Actual</span>
+        <span class="pi-ev-delta">Delta</span>
+        <span class="pi-ev-status">Status</span>
+      </div>
+      ${rows}
+    </div>
+  </div>`;
+  }
+  function _smgmtToggleEstVsActual(label) {
+    const content = document.getElementById(`pi-ev-content-${label}`);
+    const btn = document.querySelector(`#pi-ev-section-${label} .pi-ev-toggle-btn`);
+    const chevron = document.querySelector(`#pi-ev-section-${label} .pi-ev-chevron`);
+    if (!content)
+      return;
+    const isExpanded = content.style.display !== "none";
+    content.style.display = isExpanded ? "none" : "block";
+    if (btn)
+      btn.setAttribute("aria-expanded", String(!isExpanded));
+    if (chevron) {
+      chevron.classList.toggle("ti-chevron-down", isExpanded);
+      chevron.classList.toggle("ti-chevron-up", !isExpanded);
+    }
+  }
+  async function _smgmtLoadEstVsActual2(orderedLabels) {
+    const repo = _smgmtRepo();
+    if (!repo)
+      return;
+    await Promise.all(orderedLabels.map(async (label) => {
+      if (_smgmtRunningLabels.has(label))
+        return;
+      if (!_smgmtFinishedLabels.has(label))
+        return;
+      const slot = document.getElementById(`pi-ev-${label}`);
+      if (!slot || slot.dataset.loaded)
+        return;
+      try {
+        const resp = await fetch(
+          `/api/sprints/${encodeURIComponent(label)}/estimate-vs-actual?project=${encodeURIComponent(repo)}`
+        );
+        slot.dataset.loaded = "1";
+        if (!resp.ok)
+          return;
+        const data = await resp.json();
+        const html = _smgmtEstVsActualSectionHtml(label, data);
+        if (html)
+          slot.innerHTML = html;
+      } catch (_) {
+      }
+    }));
+  }
 
   // apps/dashboard/static/src/sprint-board/health-strip.js
   function _fmtPct(rate) {
@@ -5380,6 +5540,12 @@ ${listing}`
       _smgmtMiniRailRestoreCached(orderedLabels, bySprint);
     }
     _smgmtLoadMiniRail(orderedLabels, bySprint);
+    if (typeof _smgmtLoadPlanningInsights === "function") {
+      _smgmtLoadPlanningInsights(orderedLabels);
+    }
+    if (typeof _smgmtLoadEstVsActual === "function") {
+      _smgmtLoadEstVsActual(orderedLabels);
+    }
     _smgmtUpdateCleanupBtn(data);
     _smgmtLabelFilterRender(issues);
     _smgmtLabelFilterApply();
@@ -6050,7 +6216,9 @@ ${listing}`
     <div class="cap" id="smgmt-cap-${escHtml(label)}"></div>
     <div class="smgmt-sprint-goal-text" id="smgmt-goal-${escHtml(label)}" style="display:none"></div>
   </div>
-  <div class="sc-preview-slot" id="sc-preview-${escHtml(label)}"></div>`;
+  <div class="sc-preview-slot" id="sc-preview-${escHtml(label)}"></div>
+  <div class="pi-stale-slot" id="pi-stale-${escHtml(label)}"></div>
+  <div class="pi-ev-slot" id="pi-ev-${escHtml(label)}"></div>`;
     const logHtml = "";
     const cancelBannerHtml = "";
     const plannedBadge = !finished && !isPostRun && !outcomeBadgeHtml && !isRunningView ? '<span class="sc-draft-badge">DRAFT</span>' : "";
@@ -7191,6 +7359,11 @@ ${listing}`
   globalThis._sHealthStripRender = _sHealthStripRender;
   globalThis.sprintHealthStripInit = sprintHealthStripInit2;
   globalThis._smgmtComputeLeadingEmpty = _smgmtComputeLeadingEmpty;
+  globalThis._smgmtStaleEstimateHtml = _smgmtStaleEstimateHtml;
+  globalThis._smgmtLoadPlanningInsights = _smgmtLoadPlanningInsights2;
+  globalThis._smgmtEstVsActualSectionHtml = _smgmtEstVsActualSectionHtml;
+  globalThis._smgmtToggleEstVsActual = _smgmtToggleEstVsActual;
+  globalThis._smgmtLoadEstVsActual = _smgmtLoadEstVsActual2;
 
   // apps/dashboard/static/src/failures/failures.js
   async function fetchFailures(project, category) {
@@ -7504,6 +7677,8 @@ ${listing}`
   root.toggleStabDropdown = toggleStabDropdown;
   root.closeAllStabDropdowns = closeAllStabDropdowns;
   root.parseUrl = parseUrl2;
+  root.buildProjectSwitcherOptions = buildProjectSwitcherOptions;
+  root.navigateToProject = navigateToProject;
   root.loadCommanderFeatures = loadCommanderFeatures;
   root.visibilityInterval = visibilityInterval;
   root.snavNavStatusFetch = snavNavStatusFetch;
@@ -7512,6 +7687,8 @@ ${listing}`
   globalThis.toggleStabDropdown = toggleStabDropdown;
   globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
   globalThis.parseUrl = parseUrl2;
+  globalThis.buildProjectSwitcherOptions = buildProjectSwitcherOptions;
+  globalThis.navigateToProject = navigateToProject;
   globalThis.loadCommanderFeatures = loadCommanderFeatures;
   globalThis.visibilityInterval = visibilityInterval;
   globalThis.snavNavStatusFetch = snavNavStatusFetch;

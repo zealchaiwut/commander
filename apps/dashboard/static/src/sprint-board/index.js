@@ -13,6 +13,12 @@
 import './state.js';
 
 import {
+  _smgmtStaleEstimateHtml, _smgmtLoadPlanningInsights,
+} from './planning-insights.js';
+import {
+  _smgmtEstVsActualSectionHtml, _smgmtToggleEstVsActual, _smgmtLoadEstVsActual,
+} from './est-vs-actual.js';
+import {
   _sHealthBuildHtml, _sHealthStripRender, sprintHealthStripInit,
 } from './health-strip.js';
 import {
@@ -234,3 +240,12 @@ globalThis.sprintHealthStripInit = sprintHealthStripInit;
 
 // Clean-up-empty pure helper (issue #2089)
 globalThis._smgmtComputeLeadingEmpty = _smgmtComputeLeadingEmpty;
+
+// Planning insights — inline stale-estimate warnings (issue #2264 AC1)
+globalThis._smgmtStaleEstimateHtml = _smgmtStaleEstimateHtml;
+globalThis._smgmtLoadPlanningInsights = _smgmtLoadPlanningInsights;
+
+// Estimate-vs-actual — inline section for finished sprints (issue #2264 AC3)
+globalThis._smgmtEstVsActualSectionHtml = _smgmtEstVsActualSectionHtml;
+globalThis._smgmtToggleEstVsActual = _smgmtToggleEstVsActual;
+globalThis._smgmtLoadEstVsActual = _smgmtLoadEstVsActual;

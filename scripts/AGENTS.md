@@ -67,7 +67,6 @@ Scripts that generate reports, snapshots, and digests from project state.
 - `sync_status_md.py` — regenerate STATUS.md and commit only when content changed; `[--repo owner/repo] [--out PATH] [--note TEXT]`
 - `generate_context_digest.py` [GH] — build context digest for new Claude Code sessions; `[--repo owner/repo] [--out PATH] [--decisions PATH]`
 - `generate_code_state.py` — generate docs/architecture/code-state.md for a sprint; `--sprint-label LABEL [--repo-root PATH] [--base-sha SHA] [--head-sha SHA]`
-- `check_docs_freshness.py` — check whether docs are stale relative to recent code changes; `[--base SHA] [--head SHA] [--repo owner/repo]`
 - `export_hermes_report.py` — export nightly dev-report JSON contract for Hermes; `[--dry-run] [--output PATH] [--db-path PATH]`
 
 ## Project Setup

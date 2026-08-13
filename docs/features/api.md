@@ -580,7 +580,7 @@ canonical, bare slug accepted).
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/sprints/{sprint_label}/finish-preview?project=` | Preview what "finish sprint" would do |
-| `POST` | `/api/sprints/{sprint_label}/finish?project=` | Finish a sprint (merge, close, summarize). Returns `409 {code: "merge_failed", message, merge_errors}` and closes **nothing** when the branch merge fails or is a silent no-op — issues are never closed and the sprint is never marked completed unless the merge actually landed (issue #2086) |
+| `POST` | `/api/sprints/{sprint_label}/finish?project=` | Finish a sprint (merge, close, summarize). Returns `409 {code: "merge_failed", message, merge_errors}` and closes **nothing** when the branch merge fails or is a silent no-op — issues are never closed and the sprint is never marked completed unless the merge actually landed (issue #2086). On a successful base-sprint (non-child) finish it also generates the sprint-summary artifact via `_generate_finish_summary` and surfaces its URL in the finish event's `summary_issue_url`, replacing the deleted orchestrator's summary step (issue #2248). Best-effort — summary failure never aborts the finish. *(Known regression as of Sprint 1023: #2249 removed `services/sprint_manager/state.py`, which `_generate_finish_summary` imports, so summary generation currently no-ops; pending a follow-up fix.)* |
 | `POST` | `/api/sprints/{sprint_label}/finish-bg?project=` | Start finish-sprint as a background job; returns `{started, job_key}` |
 | `GET` | `/api/sprints/{sprint_label}/finish-stream?project=` | SSE stream of finish-sprint progress; resends current snapshot on reconnect |
 | `GET` | `/api/sprints/{sprint_label}/bulk-complete-preview?project=` | Dry-run preview of bulk-complete. Returns `400` when the sprint has no child sprints (bulk-complete requires a parent sprint with at least one child) instead of a misleading `200` empty preview (issue #2160). Each `members[].merged` flag distinguishes a properly-merged-then-pruned branch from one deleted without merging: a branch absent from GitHub is reported `merged` only when a merged PR into its parent branch exists (issue #2086) |
@@ -704,9 +704,10 @@ An unknown `project=` raises `404`.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/runs` | List past sprints + tickets from `agent_runs`, for the Run Browser |
-| `GET` | `/runs/{sprint}/{issue}/{agent}/log` | Paginated log content for one run |
-| `GET` | `/runs/{sprint}/{issue}/{agent}/log/tail` | Last N KB of a run's log |
+| `GET` | `/runs` | List past sprints + tickets from `agent_runs`, for the Run Browser. Manual (non-sprint) sessions — `agent_runs.sprint_label IS NULL` — are grouped under the sprint key `"null"` so the UI can still build valid log URLs (issue #2247) |
+| `GET` | `/runs/{sprint}/{issue}/{agent}/log` | Paginated log content for one run. Pass `sprint=null` to resolve a manual session's log (`sprint_label IS NULL`) (issue #2247) |
+| `GET` | `/runs/{sprint}/{issue}/{agent}/log/tail` | Last N KB of a run's log. Pass `sprint=null` for a manual session (issue #2247) |
+| `GET` | `/api/manual/live` | Active manual (non-sprint) agent sessions — `agent_runs` rows where `sprint_label IS NULL AND finished_at IS NULL`. Optional `project` query param scopes to one repo. Returns `{"sessions": [{"id", "issue_number", "agent", "project", "session_id", "started_at", "log_path"}, ...]}` (issue #2247) |
 | `GET` | `/api/logs/runs/{sprint_label}/ticket-stats` | Per-ticket stats for a sprint's runs |
 | `GET` | `/api/logs/runs/{sprint_label}/ica-cost` | ICA (claude-proxy) cost breakdown for a sprint's runs |
 | `GET` | `/logs/tail` | Tail arbitrary log output |

@@ -9721,17 +9721,7 @@
             <p class="smgmt-running-empty-title">No sprint is running</p>
             <p class="smgmt-running-empty-sub">Start a sprint from the Board to watch it live here.</p>
           </div>
-          <!-- Kickoff stepper (issue #932) — shown while sprint is being launched -->
-          <div id="smgmt-kickoff-shell" hidden>
-            <div class="smgmt-kickoff-wrap">
-              <p class="smgmt-kickoff-title">Starting sprint…</p>
-              <div class="pf-stepper" id="smgmt-kickoff-steps"></div>
-              <div id="smgmt-kickoff-error" hidden>
-                <span id="smgmt-kickoff-error-msg"></span>
-                <button class="smgmt-kickoff-retry-btn" onclick="smgmtKickoffRetry()">Retry</button>
-              </div>
-            </div>
-          </div>
+          <!-- Kickoff stepper removed (issue #2251 — dispatch controls removed) -->
           <div class="run-shell" id="smgmt-run-shell" hidden>
             <div id="smgmt-run-head" aria-live="polite"></div>
             <!-- Orchestrator log panel (issue #1106) -->
@@ -15545,9 +15535,8 @@ function _smgmtRunHeadHtml(label, live, isLinger) {
       ? '<span class="run-head-badge run-head-badge--cancelled"><span class="run-head-badge-dot"></span>Cancelled</span>'
       : '<span class="run-head-badge"><span class="run-head-badge-dot"></span>Finished</span>')
     : '<span class="run-head-badge"><span class="run-head-badge-dot"></span>Running</span>';
-  const cancelBtn = isLinger ? '' :
-    `<button type="button" class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${safeLabel}')">
-        <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
+  // Cancel sprint button removed (issue #2251 — dispatch controls removed).
+  const cancelBtn = '';
   const watchdog = isLinger
     ? `<span class="run-head-watchdog" id="smgmt-run-head-watchdog">kept for 1h after finish</span>`
     : `<span class="run-head-watchdog" id="smgmt-run-head-watchdog">watchdog heartbeat ${_smgmtLiveHeartbeatSec()}s ago</span>`;
@@ -26633,23 +26622,18 @@ document.addEventListener('keydown', function(e) {
   </div>
 </div>
 
-<!-- ── Run Sprint preflight modal (issue #448) ── -->
+<!-- ── Preflight Warnings modal (read-only, issue #2251) ── -->
 <div class="modal-backdrop hidden" id="pf-backdrop" onclick="_pfClose()"></div>
 <div class="modal pf-modal hidden" id="pf-modal"
      role="dialog" aria-modal="true" aria-labelledby="pf-modal-title">
   <div class="modal-header">
-    <span class="modal-title" id="pf-modal-title">Run Sprint</span>
+    <span class="modal-title" id="pf-modal-title">Preflight Warnings</span>
     <button class="modal-close" id="pf-close-btn" onclick="_pfClose()" aria-label="Close">&times;</button>
   </div>
   <div class="modal-body" id="pf-body">
     <div id="pf-loading" class="hidden" style="text-align:center;padding:24px 0;">
       <span class="pf-spinner" aria-label="Loading…"></span>
       <p style="margin:12px 0 0;font-size:13px;color:var(--text-muted);">Checking sprint…</p>
-    </div>
-    <!-- Pre-flight stepper component (shared ProgressActivity — stepper mode, issue #933) -->
-    <div id="pf-stepper" class="hidden">
-      <div class="pf-stepper" id="pf-stepper-steps"></div>
-      <div class="pf-stepper-summary hidden" id="pf-stepper-summary"></div>
     </div>
     <div id="pf-content" class="hidden"></div>
     <div id="pf-error" class="hidden">
@@ -26659,11 +26643,11 @@ document.addEventListener('keydown', function(e) {
       </div>
     </div>
   </div>
-  <div class="modal-footer hidden" id="pf-footer">
-    <button class="btn-ghost" id="pf-cancel-btn" type="button" onclick="_pfClose()">Cancel</button>
-    <button class="btn-primary" id="pf-confirm-btn" type="button" onclick="_pfConfirm()" disabled>Run Sprint</button>
+  <div class="modal-footer" id="pf-footer">
+    <button class="btn-ghost" id="pf-cancel-btn" type="button" onclick="_pfClose()">Close</button>
   </div>
-  <!-- Bulk flag action progress overlay (Approve All / Re-estimate All) -->
+  <!-- pf-confirm-btn kept as hidden for backward compat with project.html init wiring -->
+  <button id="pf-confirm-btn" type="button" style="display:none" onclick="_pfConfirm()"></button>
   <div class="pf-bulk-overlay hidden" id="pf-bulk-overlay">
     <div class="pf-bulk-overlay-header">
       <span class="pf-bulk-overlay-title" id="pf-bulk-title"></span>

@@ -240,7 +240,7 @@ wall-clock span and lost per-agent resolution. Created identically on SQLite
 |---|---|---|
 | `id` | integer PK | Auto-increment |
 | `issue_number` | integer NOT NULL | GitHub issue number |
-| `sprint_label` | text NOT NULL | Sprint label, e.g. `sprint-59` |
+| `sprint_label` | text | Sprint label, e.g. `sprint-59`; **nullable** — `NULL` for manual (non-sprint) hook-driven sessions (issue #2246). Pre-#2246 DBs created this `NOT NULL`; `_maybe_make_sprint_label_nullable` recreates the table to drop the constraint |
 | `agent` | text NOT NULL | Agent role (`coder`, `tester`, `documenter`, `reviewer`, `estimator`) |
 | `started_at` | text NOT NULL | ISO 8601 dispatch timestamp |
 | `finished_at` | text | ISO 8601 finish timestamp; nullable while running |
@@ -255,8 +255,17 @@ wall-clock span and lost per-agent resolution. Created identically on SQLite
 | `attempt_kind` | text | Dispatch type: `initial`, `redispatch`, `continuation`; nullable (issue #787) |
 | `log_path` | text | Absolute path to the issue log file for this run; nullable (issue #783) |
 | `provider` | text | LLM provider identifier for this run (e.g. `ICA`); set from the role's `CCPROXY_PROFILE` at dispatch; nullable (issue #1673) |
+| `session_id` | text | Hook-driven session key for manual runs; used to pair `record_manual_run_open` / `record_manual_run_close`; nullable (issue #2246) |
 
 Indexes: `(issue_number, agent)`, `(sprint_label)`.
+
+**Manual-run rows (issue #2246).** As of issue #2246 rows are also written for
+hook-driven Claude Code sessions run *outside* a sprint: `record_manual_run_open`
+inserts a row (with `sprint_label = NULL` and a `session_id`) on the first
+tool_use of a session, and `record_manual_run_close` finalizes it on agent_stop.
+`agent_runs_for_sprint` folds these NULL-sprint runs back into a sprint's history
+by joining the issues mirror on the sprint label (issue #2247), and
+`GET /api/manual/live` exposes the currently-open ones.
 
 The `provider` column drives the **`caching: reduced`** indicator on the live
 board (`project.html`): when an agent run's

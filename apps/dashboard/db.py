@@ -1699,6 +1699,85 @@ def list_sprint_history() -> list[dict]:
 # blended `sprint_tickets` tracking is unchanged (issue #764 AC8).
 
 
+def _maybe_make_sprint_label_nullable(conn: sqlite3.Connection) -> None:
+    """Drop the NOT NULL constraint on sprint_label via table recreation (issue #2246).
+
+    SQLite cannot remove NOT NULL with ALTER TABLE; the table must be recreated.
+    Called at the end of _create_agent_runs_table after ALTER TABLE migrations
+    have run, so the existing column list is final when we copy data.
+    Best-effort: any exception is silently swallowed so a migration failure
+    never crashes the dashboard or blocks an agent session.
+    """
+    try:
+        info = conn.execute("PRAGMA table_info(agent_runs)").fetchall()
+        sprint_col = next((r for r in info if r["name"] == "sprint_label"), None)
+        if sprint_col is None or sprint_col["notnull"] == 0:
+            return  # already nullable — nothing to do
+
+        # Columns we know about across all migrations (safe intersection set).
+        _known = {
+            "id", "issue_number", "sprint_label", "agent", "started_at",
+            "finished_at", "duration_seconds", "outcome", "total_tokens",
+            "risk_tier", "model_used", "routing_reason", "worktree_sha",
+            "base_sha", "attempt_kind", "log_path", "provider", "is_ica",
+            "cost_usd", "final_message", "transcript_path", "backend",
+            "project", "session_id",
+        }
+        copy_cols = [r["name"] for r in info if r["name"] in _known]
+        col_list = ", ".join(copy_cols)
+
+        conn.execute("ALTER TABLE agent_runs RENAME TO _agent_runs_pre2246")
+        try:
+            conn.execute("""
+                CREATE TABLE agent_runs (
+                    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                    issue_number     INTEGER NOT NULL,
+                    sprint_label     TEXT,
+                    agent            TEXT NOT NULL,
+                    started_at       TEXT NOT NULL,
+                    finished_at      TEXT,
+                    duration_seconds INTEGER,
+                    outcome          TEXT,
+                    total_tokens     INTEGER,
+                    risk_tier        TEXT,
+                    model_used       TEXT,
+                    routing_reason   TEXT,
+                    worktree_sha     TEXT,
+                    base_sha         TEXT,
+                    attempt_kind     TEXT,
+                    log_path         TEXT,
+                    provider         TEXT,
+                    is_ica           INTEGER DEFAULT 0,
+                    cost_usd         REAL,
+                    final_message    TEXT,
+                    transcript_path  TEXT,
+                    backend          TEXT,
+                    project          TEXT,
+                    session_id       TEXT
+                )
+            """)
+            conn.execute(
+                f"INSERT INTO agent_runs ({col_list}) "
+                f"SELECT {col_list} FROM _agent_runs_pre2246"
+            )
+            conn.execute("DROP TABLE _agent_runs_pre2246")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_agent_runs_issue_agent "
+                "ON agent_runs (issue_number, agent)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS ix_agent_runs_sprint "
+                "ON agent_runs (sprint_label)"
+            )
+        except Exception:
+            try:
+                conn.execute("ALTER TABLE _agent_runs_pre2246 RENAME TO agent_runs")
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
     """Create the agent_runs table (issue #764).
 
@@ -1709,13 +1788,14 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
     0009_add_agent_runs so the schema is identical on SQLite and Postgres.
     `risk_tier` and `model_used` added by issue #790 (alembic 0010).
     `attempt_kind` added by issue #787 (initial/fix_round/hang_continue).
+    `session_id` added by issue #2246 (manual-run recorder).
     """
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS agent_runs (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             issue_number     INTEGER NOT NULL,
-            sprint_label     TEXT NOT NULL,
+            sprint_label     TEXT,
             agent            TEXT NOT NULL,
             started_at       TEXT NOT NULL,
             finished_at      TEXT,
@@ -1745,7 +1825,7 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS ix_agent_runs_sprint "
         "ON agent_runs (sprint_label)"
     )
-    # Best-effort ALTER TABLE for existing DBs that predate issue #790/#789/#788/#787/#783.
+    # Best-effort ALTER TABLE for existing DBs that predate issue #790/#789/#788/#787/#783/#2246.
     for col, typedef in (
         ("risk_tier", "TEXT"),
         ("model_used", "TEXT"),
@@ -1770,11 +1850,15 @@ def _create_agent_runs_table(conn: sqlite3.Connection) -> None:
         # transcript_path: absolute path to the Claude Code session JSONL, when known.
         ("final_message", "TEXT"),
         ("transcript_path", "TEXT"),
+        # Hook-driven session key for manual runs (issue #2246).
+        ("session_id", "TEXT"),
     ):
         try:
             conn.execute(f"ALTER TABLE agent_runs ADD COLUMN {col} {typedef}")
         except Exception:
             pass
+    # Make sprint_label nullable on existing DBs that created it as NOT NULL (issue #2246).
+    _maybe_make_sprint_label_nullable(conn)
 
 
 def _create_advisor_suggestions_table(conn: sqlite3.Connection) -> None:
@@ -1998,6 +2082,66 @@ def record_agent_finish(
         conn.commit()
 
 
+def record_manual_run_open(
+    session_id: str,
+    issue_number: int,
+    agent: str,
+    project: str,
+    sprint_label: str | None = None,
+    started_at: str | None = None,
+) -> None:
+    """Insert an agent_runs row at hook session-start for manual runs (issue #2246).
+
+    Called from logs_service when the first tool_use fires for a new session.
+    sprint_label is NULL for non-sprint sessions.  Best-effort: any exception
+    is silently swallowed so a DB failure never blocks or fails the agent.
+    """
+    try:
+        started_at = started_at or _now_iso()
+        with get_conn() as conn:
+            _create_agent_runs_table(conn)
+            conn.execute(
+                "INSERT INTO agent_runs "
+                "(issue_number, sprint_label, agent, started_at, project, session_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (int(issue_number), sprint_label, agent, started_at, project, session_id),
+            )
+            conn.commit()
+    except Exception:
+        pass
+
+
+def record_manual_run_close(
+    session_id: str,
+    finished_at: str | None = None,
+) -> None:
+    """Close the open agent_runs row keyed by session_id (issue #2246).
+
+    Called from logs_service when agent_stop fires.  Best-effort: any exception
+    is silently swallowed so a DB failure never blocks the session stop path.
+    """
+    try:
+        finished_at = finished_at or _now_iso()
+        with get_conn() as conn:
+            _create_agent_runs_table(conn)
+            row = conn.execute(
+                "SELECT id, started_at FROM agent_runs "
+                "WHERE session_id = ? AND finished_at IS NULL "
+                "ORDER BY id DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                return
+            duration = _duration_between(row["started_at"], finished_at)
+            conn.execute(
+                "UPDATE agent_runs SET finished_at = ?, duration_seconds = ? WHERE id = ?",
+                (finished_at, duration, row["id"]),
+            )
+            conn.commit()
+    except Exception:
+        pass
+
+
 def agent_runs_for_issue(issue_number: int, sprint_label: str | None = None) -> list[dict]:
     """Return agent_runs rows for an issue (optionally scoped to a sprint) (#764)."""
     with get_conn() as conn:
@@ -2038,6 +2182,40 @@ def update_worktree_shas(
         conn.commit()
 
 
+def _manual_runs_for_sprint(
+    conn,
+    sprint_label: str,
+    project: str,
+) -> list[dict]:
+    """Return NULL-sprint agent_runs rows for issues that carry *sprint_label* in the
+    issues mirror (issue #2247).
+
+    Joins against the issues table (JSON labels column) to find which issue numbers
+    belong to the sprint, then returns manual (sprint_label IS NULL) runs for those
+    issues scoped to *project*.
+    """
+    _create_issues_table(conn)
+    issue_rows = conn.execute(
+        "SELECT issue_number FROM issues "
+        "WHERE repo = ? AND EXISTS ("
+        "  SELECT 1 FROM json_each(labels) WHERE value = ?"
+        ")",
+        (project, sprint_label),
+    ).fetchall()
+    if not issue_rows:
+        return []
+    issue_nums = [r["issue_number"] for r in issue_rows]
+    placeholders = ", ".join("?" * len(issue_nums))
+    rows = conn.execute(
+        f"SELECT * FROM agent_runs "
+        f"WHERE sprint_label IS NULL AND project = ? "
+        f"AND issue_number IN ({placeholders}) "
+        f"ORDER BY issue_number, id",
+        [project, *issue_nums],
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def agent_runs_for_sprint(sprint_label: str, project: str | None = None) -> list[dict]:
     """Return all agent_runs rows for a sprint, ordered by issue then start (#764).
 
@@ -2048,6 +2226,10 @@ def agent_runs_for_sprint(sprint_label: str, project: str | None = None) -> list
     those blank/NULL-project rows so pre-migration sprints still render. Rows
     owned by a *different* project are never returned (issue #1881 — a draft
     sprint that never ran was rendering another project's same-labelled runs).
+
+    Also includes manual (sprint_label IS NULL) runs for issues labelled with
+    *sprint_label* in the issues mirror so sprint-finish grouping captures work
+    done outside a formal sprint run (issue #2247).
     """
     with get_conn() as conn:
         _create_agent_runs_table(conn)
@@ -2058,14 +2240,22 @@ def agent_runs_for_sprint(sprint_label: str, project: str | None = None) -> list
                 (sprint_label, project),
             ).fetchall()
             if rows:
-                return [dict(r) for r in rows]
-            rows = conn.execute(
-                "SELECT * FROM agent_runs WHERE sprint_label = ? "
-                "AND (project = '' OR project IS NULL) "
-                "ORDER BY issue_number, id",
-                (sprint_label,),
-            ).fetchall()
-            return [dict(r) for r in rows]
+                labeled = [dict(r) for r in rows]
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM agent_runs WHERE sprint_label = ? "
+                    "AND (project = '' OR project IS NULL) "
+                    "ORDER BY issue_number, id",
+                    (sprint_label,),
+                ).fetchall()
+                labeled = [dict(r) for r in rows]
+
+            manual = _manual_runs_for_sprint(conn, sprint_label, project)
+            seen_ids = {r["id"] for r in labeled}
+            combined = labeled + [r for r in manual if r["id"] not in seen_ids]
+            combined.sort(key=lambda r: (r.get("issue_number") or 0, r["id"]))
+            return combined
+
         rows = conn.execute(
             "SELECT * FROM agent_runs WHERE sprint_label = ? "
             "ORDER BY issue_number, id",

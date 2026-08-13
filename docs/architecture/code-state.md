@@ -1,4 +1,4 @@
-# Code State — sprint-1022.3
+# Code State — sprint-1023
 
 _Deterministic snapshot generated at sprint finish. Do not hand-edit — regenerated each sprint._
 
@@ -15,44 +15,41 @@ _Deterministic snapshot generated at sprint finish. Do not hand-edit — regener
 - **`docs/`** — Project documentation
 - **`alembic/`** — Database migration scripts
 
-## Recent Deltas (sprint-1022.3)
+## Recent Deltas (sprint-1023)
 
-Files changed: **86**
+Files changed: **177**
 
-- `tests/` — 37 file(s)
-- `apps/` — 24 file(s)
-- `services/` — 18 file(s)
-- `(root)/` — 3 file(s)
-- `docs/` — 2 file(s)
-- `scripts/` — 2 file(s)
+- `tests/` — 145 file(s)
+- `apps/` — 19 file(s)
+- `services/` — 13 file(s)
 
 ## Hot Files (last 90 days)
 
 | File | Commits |
 |------|---------|
-| `apps/dashboard/static/project.html` | 540 |
+| `apps/dashboard/static/project.html` | 541 |
 | `apps/dashboard/server.py` | 402 |
-| `services/sprint_manager/sprint_manager.py` | 295 |
-| `apps/dashboard/static/dist/bundle.js.map` | 216 |
-| `apps/dashboard/static/dist/bundle.js` | 206 |
-| `CHANGELOG.md` | 129 |
+| `services/sprint_manager/sprint_manager.py` | 297 |
+| `apps/dashboard/static/dist/bundle.js.map` | 219 |
+| `apps/dashboard/static/dist/bundle.js` | 209 |
+| `CHANGELOG.md` | 130 |
 | `apps/dashboard/static/app.js` | 106 |
-| `apps/dashboard/static/src/sprint-board/board-render.js` | 94 |
-| `apps/dashboard/db.py` | 75 |
+| `apps/dashboard/static/src/sprint-board/board-render.js` | 96 |
+| `apps/dashboard/db.py` | 77 |
 | `apps/dashboard/static/index.html` | 75 |
 | `apps/dashboard/routers/__init__.py` | 55 |
 | `README.md` | 52 |
 | `apps/dashboard/startup.py` | 50 |
+| `SCHEMA.md` | 49 |
 | `apps/dashboard/static/src/sprint-board/history.js` | 49 |
-| `SCHEMA.md` | 48 |
-| `docs/architecture/code-state.md` | 46 |
-| `apps/dashboard/static/src/sprint-board/index.js` | 42 |
+| `docs/architecture/code-state.md` | 47 |
+| `apps/dashboard/static/src/sprint-board/index.js` | 43 |
 | `apps/dashboard/github_client.py` | 42 |
 | `apps/dashboard/routers/sprint_history_service.py` | 39 |
 | `services/sprint_manager/estimate_issue.py` | 38 |
 
 ## Generated
 
-Sprint: `sprint-1022.3`  
-Timestamp: `2026-08-12T19:15:52Z`  
+Sprint: `sprint-1023`  
+Timestamp: `2026-08-13T01:02:52Z`  
 _Generated deterministically — no LLM required._

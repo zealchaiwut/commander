@@ -63,7 +63,6 @@ review, health gating, and promotion.
 
 Scripts that generate reports, snapshots, and digests from project state.
 
-- `generate_daily_report.py` — generate Commander daily summary report; `[--date YYYY-MM-DD] [--db-path PATH]`
 - `generate_status.py` [GH] — generate STATUS.md snapshot from GitHub issues/PRs; `[--repo owner/repo] [--out PATH]`
 - `sync_status_md.py` — regenerate STATUS.md and commit only when content changed; `[--repo owner/repo] [--out PATH] [--note TEXT]`
 - `generate_context_digest.py` [GH] — build context digest for new Claude Code sessions; `[--repo owner/repo] [--out PATH] [--decisions PATH]`
@@ -85,7 +84,6 @@ Scripts for onboarding new projects and provisioning machines and services.
 - `setup_machine.sh` — one-time machine provisioning (deps, paths, dotfiles) — do not call from agent code
 - `setup_cline.sh` — install Cline CLI and verify coder worktree for sprint dispatch
 - `install_launchd.sh` — install Commander dashboard as macOS LaunchAgent on port 8000
-- `install_daily_report_launchd.sh` — install nightly daily-report LaunchAgent (fires at 23:55)
 - `install_shell_shortcuts.sh` — append Commander shell functions to ~/.commander.zsh
 - `install_agent_skills.sh` — install caveman + code-review-graph skills into all clones
 - `uninstall_launchd.sh` — unload and remove the Commander dashboard LaunchAgent
@@ -142,6 +140,5 @@ Scripts for repair, backfill, calibration, migration, cleanup, and diagnostics.
 ## What NOT to Touch from Agent Code
 
 - `start_prd.sh` / `start_uat.sh` — production launch scripts; coordinate with the system owner.
-- `install_launchd.sh` / `install_daily_report_launchd.sh` — install system-level LaunchAgent services.
-- `com.commander.daily-report.plist` — launchd plist; changes affect the live unattended runner.
+- `install_launchd.sh` — installs the system-level Commander LaunchAgent service.
 - `setup_machine.sh` — one-time machine provisioning; do not call from agent code.

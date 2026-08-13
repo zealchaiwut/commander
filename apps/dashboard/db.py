@@ -603,8 +603,11 @@ def get_mirrored_milestone(repo: str, number: int) -> dict | None:
 # deterministic templated fallback is recomputed on the fly so a transient model
 # failure never poisons the cache.
 
+# ORPHANED (#2257): brief_summary.py was deleted; these helpers and the
+# brief_summaries table are no longer written to. Kept to avoid a schema
+# migration — existing rows remain in the DB but nothing reads or writes them.
 def _create_brief_summaries_table(conn: sqlite3.Connection) -> None:
-    """Create the brief_summaries cache table (issue #840)."""
+    """Create the brief_summaries cache table (issue #840 — orphaned #2257)."""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS brief_summaries (
             scope      TEXT NOT NULL,

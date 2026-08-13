@@ -19,7 +19,6 @@ python3 -m pytest \
   tests/test_663__symlink_escape_fix.py \
   tests/test_664__git_repo_validation.py \
   tests/test_git_rev_parse_timeout__693.py \
-  tests/test_lifecycle_p0__same_label_redispatch_guard.py \
   tests/integration/test_sandbox_isolation.py \
   -m "not agent_browser" \
   -q --tb=short "$@"

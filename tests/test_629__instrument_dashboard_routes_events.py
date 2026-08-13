@@ -18,7 +18,7 @@ import os
 import sys
 import uuid
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -90,11 +90,22 @@ def _find_emit_calls(src: str, func_name: str) -> list[dict]:
 
 _ALL_EMIT_CALLS = _find_emit_calls(_SERVER_SRC, "_emit_dashboard_event")
 
+# Aggregate emit calls across server.py + all router modules.
+# Event emissions migrated from server.py into routers in issue #1267+;
+# scanning only server.py misses them.
+_ROUTERS_DIR = DASHBOARD_DIR / "routers"
+_ALL_DASHBOARD_EMIT_CALLS: list[dict] = list(_ALL_EMIT_CALLS)
+_DASHBOARD_COMBINED_SRC = _SERVER_SRC
+for _py in sorted(_ROUTERS_DIR.glob("*.py")):
+    _src = _py.read_text()
+    _ALL_DASHBOARD_EMIT_CALLS.extend(_find_emit_calls(_src, "_emit_dashboard_event"))
+    _DASHBOARD_COMBINED_SRC += "\n" + _src
+
 
 def _record_event_types() -> set[str]:
-    """Set of event type strings statically passed to _emit_dashboard_event()."""
+    """Set of event type strings statically passed to _emit_dashboard_event() anywhere in the dashboard."""
     types = set()
-    for call in _ALL_EMIT_CALLS:
+    for call in _ALL_DASHBOARD_EMIT_CALLS:
         t = call["kwargs"].get("type") or (call["args"][1] if len(call["args"]) > 1 else None)
         if t and t != "__dynamic__":
             types.add(t)
@@ -104,52 +115,46 @@ def _record_event_types() -> set[str]:
 # ── AC-static: record_event called for each required event type ───────────────
 
 class TestStaticEventTypesPresent:
-    """Verify db.record_event() calls exist in server source for each required event type."""
+    """Verify _emit_dashboard_event() calls exist in the dashboard codebase for each required event type.
+
+    Note: AC-5 (sprint_run) and AC-6 (sprint_cancelled) removed in issue #2250 —
+    those routes were deleted along with sprint_run.py.
+    """
 
     def test_sprint_created_event_type_present(self):
         assert "sprint_created" in _record_event_types(), (
-            "server.py missing db.record_event call with type='sprint_created'"
-        )
-
-    def test_sprint_run_event_type_present(self):
-        assert "sprint_run" in _record_event_types(), (
-            "server.py missing db.record_event call with type='sprint_run'"
-        )
-
-    def test_sprint_cancelled_event_type_present(self):
-        assert "sprint_cancelled" in _record_event_types(), (
-            "server.py missing db.record_event call with type='sprint_cancelled'"
+            "dashboard missing _emit_dashboard_event call with type='sprint_created'"
         )
 
     def test_ticket_moved_event_type_present(self):
         assert "ticket_moved" in _record_event_types(), (
-            "server.py missing db.record_event call with type='ticket_moved'"
+            "dashboard missing _emit_dashboard_event call with type='ticket_moved'"
         )
 
     def test_bulk_created_event_type_present(self):
         assert "bulk_created" in _record_event_types(), (
-            "server.py missing db.record_event call with type='bulk_created'"
+            "dashboard missing _emit_dashboard_event call with type='bulk_created'"
         )
 
     def test_label_added_event_type_present(self):
         assert "label_added" in _record_event_types(), (
-            "server.py missing db.record_event call with type='label_added'"
+            "dashboard missing _emit_dashboard_event call with type='label_added'"
         )
 
     def test_label_removed_event_type_present(self):
         assert "label_removed" in _record_event_types(), (
-            "server.py missing db.record_event call with type='label_removed'"
+            "dashboard missing _emit_dashboard_event call with type='label_removed'"
         )
 
     def test_source_dashboard_appears_in_calls(self):
-        """_emit_dashboard_event is called in server.py (implies source='dashboard')."""
-        assert _ALL_EMIT_CALLS, (
-            "_emit_dashboard_event() is never called in server.py"
+        """_emit_dashboard_event is called somewhere in the dashboard codebase."""
+        assert _ALL_DASHBOARD_EMIT_CALLS, (
+            "_emit_dashboard_event() is never called in server.py or any router"
         )
-        # Also verify the helper itself passes source='dashboard' to db.record_event
-        assert "source=\"dashboard\"" in _SERVER_SRC or "source='dashboard'" in _SERVER_SRC, (
-            "No source='dashboard' literal found in server.py"
-        )
+        assert (
+            "source=\"dashboard\"" in _DASHBOARD_COMBINED_SRC
+            or "source='dashboard'" in _DASHBOARD_COMBINED_SRC
+        ), "No source='dashboard' literal found in dashboard codebase"
 
     def test_action_id_uses_uuid4(self):
         """Server source contains uuid.uuid4() for action_id generation."""
@@ -158,8 +163,11 @@ class TestStaticEventTypesPresent:
         )
 
     def test_bulk_created_call_near_post_task(self):
-        """bulk_created _emit_dashboard_event call exists near bulk_post_selected."""
-        tree = ast.parse(_SERVER_SRC)
+        """bulk_created _emit_dashboard_event call exists near bulk_post_selected in bulk_tickets.py."""
+        bulk_tickets_py = _ROUTERS_DIR / "bulk_tickets.py"
+        assert bulk_tickets_py.exists(), "routers/bulk_tickets.py not found"
+        bulk_src = bulk_tickets_py.read_text()
+        tree = ast.parse(bulk_src)
         bulk_post_lineno = None
         bulk_post_end = None
         for node in ast.walk(tree):
@@ -169,13 +177,14 @@ class TestStaticEventTypesPresent:
                     bulk_post_end = getattr(node, "end_lineno", node.lineno + 200)
                     break
 
-        assert bulk_post_lineno is not None, "bulk_post_selected function not found in server.py"
+        assert bulk_post_lineno is not None, "bulk_post_selected function not found in bulk_tickets.py"
 
+        bulk_emit_calls = _find_emit_calls(bulk_src, "_emit_dashboard_event")
         bulk_created_lines = [
-            c["lineno"] for c in _ALL_EMIT_CALLS
+            c["lineno"] for c in bulk_emit_calls
             if c["kwargs"].get("type") == "bulk_created"
         ]
-        assert bulk_created_lines, "No _emit_dashboard_event(type='bulk_created') call found"
+        assert bulk_created_lines, "No _emit_dashboard_event(type='bulk_created') call found in bulk_tickets.py"
 
         in_range = any(bulk_post_lineno <= ln <= bulk_post_end + 50 for ln in bulk_created_lines)
         assert in_range, (
@@ -355,194 +364,10 @@ class TestSprintCreatedEvent:
         assert calls[0]["type"] == "sprint_created"
 
 
-# ── AC-5: sprint_run ──────────────────────────────────────────────────────────
-
-class TestSprintRunEvent:
-    """AC-5: POST /api/sprint-run emits sprint_run event."""
-
-    def test_sprint_run_event_emitted(self, server_module):
-        srv, calls, tmp_path = server_module
-        from fastapi.testclient import TestClient
-
-        fake_manager = tmp_path / "sprint_manager.py"
-        fake_manager.write_text("")
-        fake_log = tmp_path / "sprint.log"
-
-        with (
-            patch("server.SPRINT_MANAGER_PATH", fake_manager),
-            patch("server.SPRINT_LOG_PATH", fake_log),
-            patch("server.subprocess") as mock_subproc,
-        ):
-            mock_subproc.Popen = MagicMock()
-            mock_subproc.CalledProcessError = __import__("subprocess").CalledProcessError
-            client = TestClient(srv.app)
-            resp = client.post(
-                "/api/sprint-run",
-                json={"label": "sprint-99", "goal": "Test goal"},
-            )
-
-        assert resp.status_code == 200
-        sprint_run_events = [c for c in calls if c["type"] == "sprint_run"]
-        assert len(sprint_run_events) == 1
-
-    def test_sprint_run_event_has_sprint_id(self, server_module):
-        srv, calls, tmp_path = server_module
-        from fastapi.testclient import TestClient
-
-        fake_manager = tmp_path / "sprint_manager.py"
-        fake_manager.write_text("")
-        fake_log = tmp_path / "sprint.log"
-
-        with (
-            patch("server.SPRINT_MANAGER_PATH", fake_manager),
-            patch("server.SPRINT_LOG_PATH", fake_log),
-            patch("server.subprocess") as mock_subproc,
-        ):
-            mock_subproc.Popen = MagicMock()
-            mock_subproc.CalledProcessError = __import__("subprocess").CalledProcessError
-            client = TestClient(srv.app)
-            resp = client.post(
-                "/api/sprint-run",
-                json={"label": "sprint-99", "goal": "Test goal"},
-            )
-
-        assert resp.status_code == 200
-        ev = next(c for c in calls if c["type"] == "sprint_run")
-        assert ev["detail"].get("sprint_id") == "sprint-99"
-
-    def test_sprint_run_source_is_dashboard(self, server_module):
-        srv, calls, tmp_path = server_module
-        from fastapi.testclient import TestClient
-
-        fake_manager = tmp_path / "sprint_manager.py"
-        fake_manager.write_text("")
-        fake_log = tmp_path / "sprint.log"
-
-        with (
-            patch("server.SPRINT_MANAGER_PATH", fake_manager),
-            patch("server.SPRINT_LOG_PATH", fake_log),
-            patch("server.subprocess") as mock_subproc,
-        ):
-            mock_subproc.Popen = MagicMock()
-            mock_subproc.CalledProcessError = __import__("subprocess").CalledProcessError
-            client = TestClient(srv.app)
-            resp = client.post(
-                "/api/sprint-run",
-                json={"label": "sprint-99", "goal": "Test goal"},
-            )
-
-        assert resp.status_code == 200
-        ev = next(c for c in calls if c["type"] == "sprint_run")
-        assert ev["source"] == "dashboard"
-        assert ev["action_id"] is not None
-        uuid.UUID(ev["action_id"])
-
-    def test_sprint_run_only_one_event(self, server_module):
-        """AC-9: exactly one top-level event for sprint run."""
-        srv, calls, tmp_path = server_module
-        from fastapi.testclient import TestClient
-
-        fake_manager = tmp_path / "sprint_manager.py"
-        fake_manager.write_text("")
-        fake_log = tmp_path / "sprint.log"
-
-        with (
-            patch("server.SPRINT_MANAGER_PATH", fake_manager),
-            patch("server.SPRINT_LOG_PATH", fake_log),
-            patch("server.subprocess") as mock_subproc,
-        ):
-            mock_subproc.Popen = MagicMock()
-            mock_subproc.CalledProcessError = __import__("subprocess").CalledProcessError
-            client = TestClient(srv.app)
-            client.post("/api/sprint-run", json={"label": "sprint-99", "goal": "Test goal"})
-
-        assert len(calls) == 1
-        assert calls[0]["type"] == "sprint_run"
-
-
-# ── AC-6: sprint_cancelled ────────────────────────────────────────────────────
-
-class TestSprintCancelledEvent:
-    """AC-6: DELETE /api/sprints/run/{sprint_label} emits sprint_cancelled event."""
-
-    def test_sprint_cancelled_event_emitted(self, server_module, tmp_path):
-        srv, calls, _ = server_module
-        from fastapi.testclient import TestClient
-
-        proj = "owner/testrepo"
-        project_root = tmp_path / "testrepo"
-        sprints_dir = project_root / ".commander" / "sprints"
-        sprints_dir.mkdir(parents=True)
-        pid_file = sprints_dir / "sprint-5-pid"
-        pid_file.write_text("99999")  # Non-existent PID — SIGTERM will fail silently
-
-        with (
-            patch("server._project_root_path", return_value=project_root),
-            patch("server._plan_json_set_state", return_value=None),
-            patch("server._sprint_json_read", return_value={}),
-            patch("server._sprint_json_write", return_value=None),
-            patch("server.os.kill", side_effect=ProcessLookupError),
-        ):
-            client = TestClient(srv.app)
-            resp = client.delete(f"/api/sprints/run/sprint-5?project={proj}")
-
-        assert resp.status_code == 200
-        cancelled_events = [c for c in calls if c["type"] == "sprint_cancelled"]
-        assert len(cancelled_events) == 1
-
-    def test_sprint_cancelled_has_sprint_id(self, server_module, tmp_path):
-        srv, calls, _ = server_module
-        from fastapi.testclient import TestClient
-
-        proj = "owner/testrepo"
-        project_root = tmp_path / "testrepo"
-        sprints_dir = project_root / ".commander" / "sprints"
-        sprints_dir.mkdir(parents=True)
-        (sprints_dir / "sprint-5-pid").write_text("99999")
-
-        with (
-            patch("server._project_root_path", return_value=project_root),
-            patch("server._plan_json_set_state", return_value=None),
-            patch("server._sprint_json_read", return_value={}),
-            patch("server._sprint_json_write", return_value=None),
-            patch("server.os.kill", side_effect=ProcessLookupError),
-        ):
-            client = TestClient(srv.app)
-            resp = client.delete(f"/api/sprints/run/sprint-5?project={proj}")
-
-        assert resp.status_code == 200
-        ev = next(c for c in calls if c["type"] == "sprint_cancelled")
-        assert ev["detail"].get("sprint_id") == "sprint-5"
-        assert ev["source"] == "dashboard"
-        assert ev["action_id"] is not None
-        uuid.UUID(ev["action_id"])
-
-    def test_sprint_cancelled_only_one_event(self, server_module, tmp_path):
-        """AC-9: exactly one top-level event for sprint cancel."""
-        srv, calls, _ = server_module
-        from fastapi.testclient import TestClient
-
-        proj = "owner/testrepo"
-        project_root = tmp_path / "testrepo"
-        sprints_dir = project_root / ".commander" / "sprints"
-        sprints_dir.mkdir(parents=True)
-        (sprints_dir / "sprint-5-pid").write_text("99999")
-
-        with (
-            patch("server._project_root_path", return_value=project_root),
-            patch("server._plan_json_set_state", return_value=None),
-            patch("server._sprint_json_read", return_value={}),
-            patch("server._sprint_json_write", return_value=None),
-            patch("server.os.kill", side_effect=ProcessLookupError),
-        ):
-            client = TestClient(srv.app)
-            client.delete(f"/api/sprints/run/sprint-5?project={proj}")
-
-        assert len(calls) == 1
-        assert calls[0]["type"] == "sprint_cancelled"
-
-
 # ── AC-2 / AC-3 / AC-7: ticket_moved + label events ─────────────────────────
+# Note: AC-5 (TestSprintRunEvent) and AC-6 (TestSprintCancelledEvent) removed
+# in issue #2250 — they tested POST /api/sprints/run and DELETE /api/sprints/run/{label}
+# which were deleted with sprint_run.py.
 
 class TestTicketMovedEvent:
     """AC-2: ticket_moved event when ticket moved via /api/sprint-planning/assign."""
@@ -765,31 +590,5 @@ class TestAddSprintLabelEvent:
         assert ev["actor"]
 
 
-# ── AC-10: action_id uniqueness across calls ──────────────────────────────────
-
-class TestActionIdUniqueness:
-    """AC-10: action_ids are unique per action (different UUIDs each call)."""
-
-    def test_two_sprint_runs_get_different_action_ids(self, server_module):
-        srv, calls, tmp_path = server_module
-        from fastapi.testclient import TestClient
-
-        fake_manager = tmp_path / "sprint_manager.py"
-        fake_manager.write_text("")
-        fake_log = tmp_path / "sprint.log"
-
-        with (
-            patch("server.SPRINT_MANAGER_PATH", fake_manager),
-            patch("server.SPRINT_LOG_PATH", fake_log),
-            patch("server.subprocess") as mock_subproc,
-        ):
-            mock_subproc.Popen = MagicMock()
-            mock_subproc.CalledProcessError = __import__("subprocess").CalledProcessError
-            client = TestClient(srv.app)
-            client.post("/api/sprint-run", json={"label": "sprint-1", "goal": "G1"})
-            client.post("/api/sprint-run", json={"label": "sprint-2", "goal": "G2"})
-
-        sprint_run_events = [c for c in calls if c["type"] == "sprint_run"]
-        assert len(sprint_run_events) == 2
-        ids = [e["action_id"] for e in sprint_run_events]
-        assert ids[0] != ids[1], f"Both sprint_run actions got the same action_id: {ids[0]!r}"
+# AC-10: TestActionIdUniqueness removed in issue #2250 — it tested action_id
+# uniqueness across sprint runs, which was in the deleted sprint_run.py.

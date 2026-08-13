@@ -241,7 +241,6 @@ from routers import (  # noqa: E402
     estimates_router,
     finish_card_router,
     finish_progress_router,
-    home_milestone_router,
     issues_router,
     log_search_router,
     logs_router,
@@ -329,7 +328,6 @@ app.include_router(system_router)
 app.include_router(system_misc_router)
 app.include_router(tickets_router)
 app.include_router(timeline_router)
-app.include_router(home_milestone_router)
 app.include_router(project_branches_router)
 app.include_router(bulk_tickets_router)
 app.include_router(llm_provider_router)

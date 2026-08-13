@@ -274,107 +274,6 @@ async def _timeout_loop() -> None:
             pass  # never crash the background task
 
 
-def _sweep_orphan_pid_files() -> None:
-    """Scan all projects' PID files and remove orphans.
-
-    A PID file is orphaned when:
-    - The process no longer exists (ProcessLookupError from os.kill(pid, 0))
-    - The process exists but its argv doesn't contain sprint_manager.py followed
-      by the expected sprint label (PID reuse by an unrelated process)
-
-    Live sprint_manager.py processes for the correct label are left untouched.
-    """
-    sweep_start = time.monotonic()
-    scanned = 0
-    cleaned = 0
-
-    def _remove_orphan(pid_file: Path, pid: int | None, reason: str) -> None:
-        nonlocal cleaned
-        _slog.event(
-            "orphan_pid_detected",
-            project="dashboard",
-            event="orphan_pid_detected",
-            pid=pid,
-            file_path=str(pid_file),
-            reason=reason,
-        )
-        try:
-            pid_file.unlink()
-        except OSError:
-            pass
-        cleaned += 1
-        _server()._orphans_removed_total += 1
-
-    try:
-        projects = projects_module.load_projects()
-    except Exception as exc:
-        logger.warning("[startup-sweep] could not load projects: %s", exc)
-        elapsed_ms = (time.monotonic() - sweep_start) * 1000
-        print(f"[startup-sweep] scanned {scanned} PID files, cleaned {cleaned} orphans in {elapsed_ms:.1f}ms")
-        return
-
-    for proj in projects:
-        try:
-            project_root = _project_root_path(proj["repo"])
-            sprints_dir = _commander_dir(project_root) / "sprints"
-            if not sprints_dir.exists():
-                continue
-            for pid_file in sprints_dir.glob("*-pid"):
-                scanned += 1
-                sprint_label = pid_file.name.removesuffix("-pid")  # e.g. "sprint-9"
-                try:
-                    pid = int(pid_file.read_text(encoding="utf-8").strip())
-                except (ValueError, OSError) as exc:
-                    logger.warning("[startup-sweep] malformed PID file %s: %s", pid_file, exc)
-                    _remove_orphan(pid_file, None, "unreadable")
-                    continue
-
-                # Check if the process exists.
-                try:
-                    os.kill(pid, 0)
-                except ProcessLookupError:
-                    _remove_orphan(pid_file, pid, "process_not_found")
-                    continue
-                except PermissionError as exc:
-                    # Process exists but we can't signal it (different user).
-                    logger.warning("[startup-sweep] permission denied checking pid %s in %s: %s", pid, pid_file, exc)
-                    continue
-                except OSError:
-                    continue
-
-                # Process is alive — check its argv to guard against PID reuse.
-                if _psutil is None:
-                    # psutil not installed — skip argv check, leave PID file.
-                    continue
-                try:
-                    proc_info = _psutil.Process(pid)
-                    argv = proc_info.cmdline()
-                except Exception:
-                    # Process already gone or permission error — skip argv check.
-                    continue
-
-                # argv must contain "sprint_manager.py" followed by sprint_label.
-                try:
-                    sm_idx = next(
-                        i for i, arg in enumerate(argv) if "sprint_manager.py" in arg
-                    )
-                    label_present = (
-                        len(argv) > sm_idx + 1 and argv[sm_idx + 1] == sprint_label
-                    )
-                except StopIteration:
-                    label_present = False
-
-                if not label_present:
-                    _remove_orphan(pid_file, pid, "pid_reuse")
-        except Exception as exc:
-            logger.warning("[startup-sweep] error scanning project %s: %s", proj.get("repo"), exc)
-
-    elapsed_ms = (time.monotonic() - sweep_start) * 1000
-    print(f"[startup-sweep] scanned {scanned} PID files, cleaned {cleaned} orphans in {elapsed_ms:.1f}ms")
-
-    # Reconcile any plan.json files left in state=running with no alive PID (issue #507)
-    _sweep_plan_json_states(projects)
-
 
 def _sweep_plan_json_states(projects: list) -> None:
     """Three-condition gate before settling running plan.json to needs_rework (issue #1089).
@@ -925,11 +824,12 @@ def _sweep_orphan_db_running_rows(max_age_minutes: int = 30) -> list[str]:
 
 
 async def _periodic_orphan_sweep_loop() -> None:
-    """Sweep orphan PID files every 5 minutes while the dashboard is running."""
+    """Sweep stale running plan.json and DB states every 5 minutes."""
     while True:
         await asyncio.sleep(300)
         try:
-            _sweep_orphan_pid_files()
+            projects = projects_module.load_projects()
+            _sweep_plan_json_states(projects)
         except Exception as exc:
             print(f"[periodic-sweep] unexpected error: {exc}")
         try:
@@ -2100,11 +2000,6 @@ def _finished_sprint_summaries(repo_name: str | None) -> dict[str, dict]:
     return result
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
-SPRINT_MANAGER_PATH = _REPO_ROOT / "services" / "sprint_manager" / "sprint_manager.py"
-SPRINT_LOG_PATH = Path(__file__).parent / "sprints" / "sprint_run.log"
-# Read once; default covers both dashboard banner and ntfy push notifications.
-# sprint_manager validates the value — no validation added here.
-_ALERT_MODES = os.environ.get("COMMANDER_ALERT_MODES", "dashboard-banner,ntfy")
 
 _SPRINT_LABEL_RE_ALL = SPRINT_LABEL_RE
 
@@ -2322,23 +2217,6 @@ def _ensure_sprint_yaml(project_root: Path, repo: str) -> Optional[Path]:
         return path
     except OSError:
         return None
-
-
-def _sprint_manager_argv(sprint_label: str, repo: str, project_root: Path) -> list[str]:
-    """Build sprint_manager CLI argv with repo + config so dispatch is project-scoped."""
-    argv = [
-        sys.executable,
-        str(SPRINT_MANAGER_PATH),
-        sprint_label,
-        "--alert-mode",
-        _ALERT_MODES,
-        "--repo",
-        repo,
-    ]
-    cfg = _ensure_sprint_yaml(project_root, repo)
-    if cfg is not None:
-        argv.extend(["--config", str(cfg)])
-    return argv
 
 
 def _main_clone_path(project_root: Path) -> Path:

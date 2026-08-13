@@ -104,7 +104,6 @@ from startup import (  # noqa: E402
     _restore_sprint_statuses_on_startup,
     _status_md_sync_loop,
     _sweep_orphan_db_running_rows,
-    _sweep_orphan_pid_files,
     _validate_github_repos,
     _warn_nonconforming_sprint_labels,
 )
@@ -185,7 +184,6 @@ async def lifespan(app: FastAPI):
         pass
     _check_gh_auth()
     _validate_github_repos()
-    _sweep_orphan_pid_files()
     _sweep_orphan_db_running_rows()
     _restore_sprint_statuses_on_startup()
     _warn_nonconforming_sprint_labels()
@@ -275,7 +273,6 @@ from routers import (  # noqa: E402
     sprint_nav_router,
     sprint_planning_router,
     sprint_preflight_router,
-    sprint_run_router,
     sprint_summaries_router,
     sprints_router,
     status_router,
@@ -325,7 +322,6 @@ app.include_router(sprint_live_router)
 app.include_router(sprint_nav_router)
 app.include_router(sprint_planning_router)
 app.include_router(sprint_preflight_router)
-app.include_router(sprint_run_router)
 app.include_router(sprint_summaries_router)
 app.include_router(sprints_router)
 app.include_router(status_router)

@@ -91,28 +91,14 @@ Per-project clone environment paths (prd, uat, coder, tester). Cascade-deletes w
 Index: `ix_project_environments_project_id` on `project_id`.
 Unique constraint: `(project_id, env)`.
 
-### project_todos (issue #843)
+### project_todos (issue #843 — removed in Sprint 1024.1, #2255)
 
-A lightweight, durable per-project to-do list that lives outside the ticket
-backlog — a simple scratchpad scoped to each project. Deliberately **not**
-ticket-like: no labels, assignees, or due dates. Portable column types
-(Integer / Text / Boolean, ISO-8601 string timestamps) so the table applies
-cleanly on SQLite as well as Postgres, matching `agent_runs`. When Neon is
-disabled the dashboard serves todos from a local JSON store
-(`.commander/project_todos_store.json`) via `services/sprint_manager/todo_repo.py`.
-
-| Column | Type | Description |
-|---|---|---|
-| `id` | integer PK | Auto-increment |
-| `project` | text NOT NULL | Owning project slug; every query is scoped by this |
-| `text` | text NOT NULL | Free-text todo body |
-| `done` | boolean NOT NULL | Completion flag; defaults to `false` |
-| `position` | integer NOT NULL | Sort key; the list is always returned ascending by `position` |
-| `created_at` | text NOT NULL | ISO-8601 UTC creation timestamp |
-| `updated_at` | text NOT NULL | ISO-8601 UTC last-modified timestamp |
-| `promoted_issue_number` | integer NULL | Reserved for a future planning bridge; never read, written, or exposed by the #843 API |
-
-Index: `ix_project_todos_project_position` on `(project, position)`.
+The Project To-Dos feature was removed in favour of a hand-maintained
+`docs/todo.md`. The `ProjectTodo` ORM model, the `todo_repo.py` /
+`todo_attachment_repo.py` stores, and the local JSON fallback
+(`.commander/project_todos_store.json`) are gone, and the `/api/projects/{project}/todos*`
+endpoints no longer exist. The historical migration
+(`k1l2m3n4o5p6`) is retained below; no live path reads or writes the table.
 
 ## Migrations
 
@@ -633,59 +619,35 @@ network calls. `preview-dag` reads this rolling summary to set its
 ### Daily Brief (issues #839–#842)
 
 A per-project and home-roll-up "what happened / what's next" brief, assembled
-from local sprint, ticket, and `agent_runs` data — zero GitHub API calls. Three
-layers, each its own router module mounted under the `sprints` router (no route
-lands in `server.py`, COMMANDER_GATE_MONOLITH, issue #761):
+from local sprint, ticket, and `agent_runs` data — zero GitHub API calls. The
+assembly is pure structured, kept LLM-free (issue #839, `brief_service.py`), and
+mounted under the `sprints` router (no route lands in `server.py`,
+COMMANDER_GATE_MONOLITH, issue #761). An optional `date=YYYY-MM-DD` query param
+selects the window; default is today.
 
-- **Assembly** (issue #839, `brief_service.py`) — pure structured assembly, kept
-  LLM-free. An optional `date=YYYY-MM-DD` query param selects the window; default
-  is today.
-- **Summary** (issue #840, `brief_summary.py`) — a cached Haiku narrative over the
-  assembled brief. Always falls back to a deterministic templated string, so the
-  endpoints never 5xx. `regenerate` clears the cache and re-invokes the model.
-- **Daily artifact** (issue #841, `brief_artifact.py`) — the full daily brief
-  persisted per `(project, date)` so it is generated once and served instantly
-  thereafter. The current day is lazily generated on first load; past dates are
-  served from the store with a clear empty state when none was stored (never a
-  recompute, never a 5xx). `regenerate` rebuilds, re-stores, and advances the
-  timestamp.
+> **Removed in Sprint 1024.1 (#2257):** the cached Haiku **Summary** layer
+> (`brief_summary.py`) and the persisted **Daily artifact** layer
+> (`brief_artifact.py`) — along with their `.../brief/summary[/regenerate]` and
+> `.../brief/daily[/regenerate]` endpoints and the daily-report launchd job — are
+> gone. Only the two structured-assembly endpoints below remain. The
+> `brief_summaries` cache table is orphaned (kept to avoid a schema migration,
+> never written). The `brief_artifacts` table survives because the Dev Report
+> (`/api/dev-report`) still persists its `dev_report` scope there.
 
-The home page (issue #842, `static/home.html`) renders the home roll-up plus a
-block per tracked project from these endpoints.
+The home page renders the Dev Report view (`/api/dev-report`) rather than the
+brief roll-up.
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/projects/{slug}/brief` | Assembled structured brief for one project (optional `date`) |
 | `GET` | `/api/brief` | Assembled home roll-up across all tracked projects (optional `date`) |
-| `GET` | `/api/projects/{slug}/brief/summary` | Cached (or freshly generated) LLM summary for a project brief |
-| `POST` | `/api/projects/{slug}/brief/summary/regenerate` | Clear the stored project summary and re-invoke the model |
-| `GET` | `/api/brief/summary` | Cached (or freshly generated) one-line home recap |
-| `POST` | `/api/brief/summary/regenerate` | Clear the stored home recap and re-invoke the model |
-| `GET` | `/api/projects/{slug}/brief/daily` | Stored (or lazily generated) daily brief artifact for a project |
-| `POST` | `/api/projects/{slug}/brief/daily/regenerate` | Rebuild and re-store the project daily brief, advancing the timestamp |
-| `GET` | `/api/brief/daily` | Stored (or lazily generated) daily home roll-up artifact. Each entry in `brief.projects` is enriched (issue #1778) with `repo`, `name`, `icon`, `color`, `briefSummary`, and `milestone` so the home page renders in one request instead of 1+N |
-| `POST` | `/api/brief/daily/regenerate` | Rebuild and re-store the home daily roll-up, advancing the timestamp |
 
-### Project To-Dos (issue #843)
+### Project To-Dos (issue #843 — removed in Sprint 1024.1, #2255)
 
-A lightweight, durable per-project to-do list backed by `project_todos` (Neon,
-with a local JSON fallback when Neon is disabled). All routes are project-scoped:
-a todo is only ever read, mutated, or deleted through its own project's path, so
-one project's todos are never visible to another. The reserved
-`promoted_issue_number` column is never read, written, or exposed. The routes
-ride on the already-mounted `sprints` router so no route lands in `server.py`
-(COMMANDER_GATE_MONOLITH, issue #761).
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/projects/{project}/todos` | List all todos (active and done) for the project, ascending by `position` |
-| `POST` | `/api/projects/{project}/todos` | Create a todo from body `{text}`; `done` defaults to `false`, `position` appends to end. Returns 201 with the new todo |
-| `PATCH` | `/api/projects/{project}/todos/{todo_id}` | Update `done`, `text`, and/or `position` (body `{done?, text?, position?}`) — independently or together. 404 if the todo does not belong to the project |
-| `DELETE` | `/api/projects/{project}/todos/{todo_id}` | Delete the todo; 204 on success, 404 if it does not belong to the project |
-| `GET` | `/api/todos?projects=a,b,c` | Batch fetch (issue #1778): comma-separated slugs → slug-keyed `{slug: Todo[]}` map so the home page loads all projects' todos in one request. Unknown slugs are included with an empty list. Duplicate slugs are silently collapsed and requesting more than `MAX_BATCH_SLUGS=50` unique slugs returns HTTP 400 (issue #1797). Declared on a separate `batch_router` so the full `/api/todos` path is used without inheriting the `/api/projects` prefix |
-
-The todo object shape is `{id, project, text, done, position, created_at, updated_at}` —
-no ticket-like fields (labels, assignees, due dates) and no `promoted_issue_number`.
+The Project To-Dos feature — the `/api/projects/{project}/todos*` CRUD, the
+`/api/todos` batch endpoint, attachments, the `project_todos` store, and the
+panel UI — was removed in favour of a hand-maintained `docs/todo.md`. None of
+these routes exist any longer.
 
 ### Sprint label collision audit (issues #1461, #1464, #1465)
 

@@ -43,6 +43,7 @@ reject, lint, report.
 - `lint_ticket_spec.py` — validate issue body against the canonical template; `--issue N [--repo owner/repo]`
 - `post_test_report.py` [GH] — post structured test report as issue comment; `--issue N --report-file PATH [--gate GATE] [--gate-output PATH]` (Tester-only)
 - `log_decision.py` — append a dated ADR entry to docs/decisions/; `--slug SLUG [--context TEXT] [--decision TEXT] [--consequences TEXT] [--implemented-by STR]`
+- `retry_ticket.py` [GH] — reset a failed ticket from needs-rework back to backlog, clear failure sidecar, print /coder + /tester invocations; `--issue N [--repo owner/repo] [--dry-run]`
 
 ## Sprint Lifecycle
 

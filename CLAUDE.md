@@ -251,6 +251,7 @@ To migrate an existing flat project to nested:
 - `scripts/migrate_project_layout.py` — migrate flat project to nested layout
 - `scripts/migrate_add_uat.py` — add UAT clone to an existing project
 - `scripts/resync_issues_mirror.py` — force full GitHub → SQLite issues-mirror resync (manual repair when mirror is stale)
+- `scripts/retry_ticket.py` — reset a failed ticket (needs-rework → backlog), clear failure sidecar, print `/coder` + `/tester` invocations; `--issue N [--repo owner/repo] [--dry-run]`
 
 ## Issue Estimator
 

@@ -39,6 +39,10 @@ import {
 import { loadCommanderFeatures } from "./shell/features.js";
 import { parseUrl } from "./shell/url-parser.js";
 import {
+  buildProjectSwitcherOptions,
+  navigateToProject,
+} from "./shell/project-switcher.js";
+import {
   visibilityInterval,
   installVisibilityGuard,
 } from "./shell/visibility.js";
@@ -98,6 +102,8 @@ root.switchTab = switchTab;
 root.toggleStabDropdown = toggleStabDropdown;
 root.closeAllStabDropdowns = closeAllStabDropdowns;
 root.parseUrl = parseUrl;
+root.buildProjectSwitcherOptions = buildProjectSwitcherOptions;
+root.navigateToProject = navigateToProject;
 root.loadCommanderFeatures = loadCommanderFeatures;
 root.visibilityInterval = visibilityInterval;
 root.snavNavStatusFetch = snavNavStatusFetch;
@@ -106,6 +112,8 @@ globalThis.switchTab = switchTab;
 globalThis.toggleStabDropdown = toggleStabDropdown;
 globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
 globalThis.parseUrl = parseUrl;
+globalThis.buildProjectSwitcherOptions = buildProjectSwitcherOptions;
+globalThis.navigateToProject = navigateToProject;
 globalThis.loadCommanderFeatures = loadCommanderFeatures;
 globalThis.visibilityInterval = visibilityInterval;
 globalThis.snavNavStatusFetch = snavNavStatusFetch;

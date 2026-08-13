@@ -229,7 +229,6 @@ from routers import (  # noqa: E402
     agent_guide_router,
     api_volume_router,
     docs_router,
-    changelog_router,
     estimate_jobs_router,
     activity_router,
     analytics_router,
@@ -241,7 +240,6 @@ from routers import (  # noqa: E402
     estimates_router,
     finish_card_router,
     finish_progress_router,
-    home_milestone_router,
     issues_router,
     log_search_router,
     logs_router,
@@ -329,7 +327,6 @@ app.include_router(system_router)
 app.include_router(system_misc_router)
 app.include_router(tickets_router)
 app.include_router(timeline_router)
-app.include_router(home_milestone_router)
 app.include_router(project_branches_router)
 app.include_router(bulk_tickets_router)
 app.include_router(llm_provider_router)
@@ -337,7 +334,6 @@ app.include_router(running_router)
 app.include_router(dev_report_router)
 app.include_router(docs_router)
 app.include_router(agent_guide_router)
-app.include_router(changelog_router)
 app.include_router(estimate_jobs_router)
 app.include_router(failures_router)
 app.include_router(brain_router)

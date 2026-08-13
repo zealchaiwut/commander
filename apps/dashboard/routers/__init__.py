@@ -12,7 +12,6 @@ from .logs import router as logs_router
 from .backup import router as backup_router
 from .doctor import router as doctor_router
 from .finish_progress import router as finish_progress_router
-from .home_milestone import router as home_milestone_router
 from .log_search import router as log_search_router
 from .maintenance import router as maintenance_router
 from .milestones import router as milestones_router
@@ -54,7 +53,6 @@ from .running import router as running_router
 from .api_volume import router as api_volume_router
 from .docs import router as docs_router
 from .agent_guide import router as agent_guide_router
-from .changelog import router as changelog_router
 from .estimate_jobs import router as estimate_jobs_router
 from .dev_report import router as dev_report_router
 from .failures import router as failures_router
@@ -69,7 +67,6 @@ __all__ = [
     "backup_router",
     "doctor_router",
     "finish_progress_router",
-    "home_milestone_router",
     "log_search_router",
     "maintenance_router",
     "milestones_router",
@@ -110,7 +107,6 @@ __all__ = [
     "api_volume_router",
     "docs_router",
     "agent_guide_router",
-    "changelog_router",
     "estimate_jobs_router",
     "dev_report_router",
     "failures_router",

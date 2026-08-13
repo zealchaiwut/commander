@@ -18,7 +18,6 @@ import config
 
 from . import brief
 from . import sprints_service
-from . import todos
 from .board_cache import invalidate_board
 
 router = APIRouter(tags=["sprints"])
@@ -28,15 +27,6 @@ router = APIRouter(tags=["sprints"])
 # router declares full paths and carries no prefix, so include_router mounts
 # them unchanged.
 router.include_router(brief.router)
-
-# Per-project to-do list endpoints (issue #843) ride on this already-mounted
-# router for the same reason — todos carries its own ``/api/projects`` prefix,
-# so include_router mounts the routes unchanged without growing server.py.
-router.include_router(todos.router)
-
-# Batch todos endpoint (issue #1778 AC3) — separate router so the full path
-# /api/todos is declared without inheriting the /api/projects prefix.
-router.include_router(todos.batch_router)
 
 class SprintOrderBody(BaseModel):
     order: list[str]

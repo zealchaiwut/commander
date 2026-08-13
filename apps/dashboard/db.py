@@ -377,19 +377,6 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS ix_project_events_action "
             "ON project_events (action_id)"
         )
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS docs_freshness_warnings (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                repo         TEXT NOT NULL,
-                doc_path     TEXT NOT NULL,
-                trigger_ref  TEXT NOT NULL,
-                trigger_type TEXT NOT NULL DEFAULT 'push',
-                trigger_url  TEXT,
-                flagged_at   TEXT NOT NULL,
-                is_cleared   INTEGER NOT NULL DEFAULT 0,
-                cleared_at   TEXT
-            )
-        """)
         _create_ticket_status_table(conn)
         _create_issues_table(conn)
         _create_milestones_table(conn)
@@ -603,8 +590,11 @@ def get_mirrored_milestone(repo: str, number: int) -> dict | None:
 # deterministic templated fallback is recomputed on the fly so a transient model
 # failure never poisons the cache.
 
+# ORPHANED (#2257): brief_summary.py was deleted; these helpers and the
+# brief_summaries table are no longer written to. Kept to avoid a schema
+# migration — existing rows remain in the DB but nothing reads or writes them.
 def _create_brief_summaries_table(conn: sqlite3.Connection) -> None:
-    """Create the brief_summaries cache table (issue #840)."""
+    """Create the brief_summaries cache table (issue #840 — orphaned #2257)."""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS brief_summaries (
             scope      TEXT NOT NULL,
@@ -3231,79 +3221,6 @@ def get_token_usage_by_agent_model(window_start_utc: str | None = None) -> list[
                ORDER BY total_tokens DESC""",
             params,
         ).fetchall()
-    return [dict(r) for r in rows]
-
-
-# ── Docs freshness warnings ───────────────────────────────────────────────────
-
-def upsert_docs_warning(
-    repo: str,
-    doc_path: str,
-    trigger_ref: str,
-    trigger_type: str,
-    trigger_url: str | None = None,
-) -> int:
-    """Insert or re-open a docs freshness warning. Returns the row id."""
-    now = utc_now()
-    with get_conn() as conn:
-        # Check if an active (non-cleared) warning already exists for this repo+doc.
-        existing = conn.execute(
-            "SELECT id FROM docs_freshness_warnings WHERE repo=? AND doc_path=? AND is_cleared=0",
-            (repo, doc_path),
-        ).fetchone()
-        if existing:
-            conn.execute(
-                "UPDATE docs_freshness_warnings SET trigger_ref=?, trigger_type=?, trigger_url=?, flagged_at=? WHERE id=?",
-                (trigger_ref, trigger_type, trigger_url, now, existing["id"]),
-            )
-            conn.commit()
-            return existing["id"]
-        cur = conn.execute(
-            """INSERT INTO docs_freshness_warnings
-               (repo, doc_path, trigger_ref, trigger_type, trigger_url, flagged_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (repo, doc_path, trigger_ref, trigger_type, trigger_url, now),
-        )
-        conn.commit()
-        return cur.lastrowid
-
-
-def clear_docs_warning(repo: str, doc_path: str) -> int:
-    """Clear all active warnings for repo+doc_path. Returns count cleared."""
-    now = utc_now()
-    with get_conn() as conn:
-        cur = conn.execute(
-            "UPDATE docs_freshness_warnings SET is_cleared=1, cleared_at=? WHERE repo=? AND doc_path=? AND is_cleared=0",
-            (now, repo, doc_path),
-        )
-        conn.commit()
-        return cur.rowcount
-
-
-def clear_docs_warning_by_id(warning_id: int) -> bool:
-    """Clear a single warning by id. Returns True if found."""
-    now = utc_now()
-    with get_conn() as conn:
-        cur = conn.execute(
-            "UPDATE docs_freshness_warnings SET is_cleared=1, cleared_at=? WHERE id=? AND is_cleared=0",
-            (now, warning_id),
-        )
-        conn.commit()
-        return cur.rowcount > 0
-
-
-def get_active_docs_warnings(repo: str | None = None) -> list[dict]:
-    """Return all non-cleared docs freshness warnings, optionally filtered by repo."""
-    with get_conn() as conn:
-        if repo:
-            rows = conn.execute(
-                "SELECT * FROM docs_freshness_warnings WHERE is_cleared=0 AND repo=? ORDER BY flagged_at DESC",
-                (repo,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM docs_freshness_warnings WHERE is_cleared=0 ORDER BY flagged_at DESC"
-            ).fetchall()
     return [dict(r) for r in rows]
 
 

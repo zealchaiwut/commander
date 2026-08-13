@@ -1,12 +1,11 @@
 """Neon engine/session plumbing — shared by a runtime path and an export-only one (issue #1695).
 
-apps/dashboard/{settings_repo,todo_repo}.py import this module for the
-settings/todo KV fallback when Neon is enabled (COMMANDER_DISABLE_NEON=0) —
-that IS a legitimate runtime dependency; do not treat this whole module as
-export-only. The sprint/project mirror path (sprint_repo.py,
-sync_projects_to_neon.py) also depends on it but has no runtime caller of
-its own — see those modules' docstrings and
-docs/architecture/1_state-and-source-of-truth.md §1.4.
+apps/dashboard/settings_repo.py imports this module for the settings KV
+fallback when Neon is enabled (COMMANDER_DISABLE_NEON=0) — that IS a
+legitimate runtime dependency; do not treat this whole module as export-only.
+The sprint/project mirror path (sprint_repo.py, sync_projects_to_neon.py)
+also depends on it but has no runtime caller of its own — see those modules'
+docstrings and docs/architecture/1_state-and-source-of-truth.md §1.4.
 """
 import os
 from sqlalchemy import create_engine, Engine

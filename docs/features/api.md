@@ -126,14 +126,6 @@ Called by the Claude Code hooks in `hooks/`.
 | `GET` | `/api/running` | Running-sprint snapshot for a project (`?project=`), mirror/DB only |
 | `GET` | `/api/brief` | Home rollup brief across all projects |
 | `GET` | `/api/projects/{slug}/brief` | Deterministic per-project brief (DB-only, no LLM) |
-| `GET` | `/api/brief/summary` | Home brief one-line recap (cached/generated) |
-| `POST` | `/api/brief/summary/regenerate` | Regenerate the home brief recap |
-| `GET` | `/api/projects/{slug}/brief/summary` | Per-project brief recap (cached/generated) |
-| `POST` | `/api/projects/{slug}/brief/summary/regenerate` | Regenerate a project's brief recap |
-| `GET` | `/api/brief/daily` | Home daily artifact |
-| `POST` | `/api/brief/daily/regenerate` | Regenerate the home daily artifact |
-| `GET` | `/api/projects/{slug}/brief/daily` | Per-project daily artifact |
-| `POST` | `/api/projects/{slug}/brief/daily/regenerate` | Regenerate a project's daily artifact |
 | `GET` | `/api/dev-report` | Per-project dev report: shipped, stale, waiting, and run-ready sprints |
 
 ---
@@ -385,12 +377,8 @@ Read-only, so no bearer token is required even when `COMMANDER_API_TOKEN` is set
 | `GET` | `/api/agent-guide` | Canonical agent operate guide as `{content, version}`; `version` is a 16-hex SHA-256 fingerprint |
 | `GET` | `/api/projects/{slug}/docs` | List allowed `.md` files in the project's clone root as `[{path, size, mtime}]`. Nested layout resolves the clone root in `uat`→`main`→`prd` order, preferring the develop-tracking `uat` clone so docs reflect the most current (unmerged) state (issue #2052) |
 | `GET` | `/api/projects/{slug}/docs/{path}` | Fetch one doc's content as `{path, content}` |
-| `GET` | `/api/projects/{slug}/changelog` | Changelog entries from `docs/changelog/{uat,prd}/`, newest-first; filter with `?env=uat|prd&limit=N` |
 | `GET` | `/api/projects/{slug}/docs/scaffold/check` | Check for missing standard docs files |
 | `POST` | `/api/projects/{slug}/docs/scaffold/apply` | Create missing standard docs files from template |
-| `POST` | `/api/docs-freshness/check` | Trigger a docs-freshness check |
-| `GET` | `/api/docs-freshness/warnings` | List open docs-freshness warnings |
-| `DELETE` | `/api/docs-freshness/warnings/{warning_id}` | Dismiss a docs-freshness warning |
 
 ---
 
@@ -768,34 +756,18 @@ An unknown `project=` raises `404`.
 > endpoints (`/api/roadmap/*`, `/api/projects/{project}/advisor/*`,
 > `/api/advisor/tick`) no longer exist.
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/milestones` | List milestones across projects |
-| `GET` | `/api/projects/{slug}/milestones` | List a project's GitHub milestones |
-| `POST` | `/api/projects/{slug}/milestones` | Create a milestone |
-| `PATCH` | `/api/projects/{slug}/milestones/{number}` | Edit a milestone |
-| `DELETE` | `/api/projects/{slug}/milestones/{number}` | Delete a milestone |
-| `GET` | `/api/projects/{slug}/issues` | Issues from the local mirror, with milestone field |
-| `GET` | `/api/home/milestone` | Active-milestone progress indicator payload (home cards / project header) |
+> The per-project milestone CRUD, the `/api/projects/{slug}/issues` mirror
+> endpoint, and the home/project milestone-progress indicator
+> (`/api/home/milestone`) were removed in Sprint 1024.1 (#2259) — only the
+> cross-project selector list below remains.
 
----
-
-## To-Dos
-
-Per-project scratchpad, outside the ticket backlog. Persists to Neon when
-configured, local JSON otherwise. Every route is project-scoped.
+> The To-Dos feature (`/api/projects/{project}/todos*` and `/api/todos`) was
+> removed in Sprint 1024.1 (#2255) in favour of a hand-maintained
+> `docs/todo.md` — those endpoints no longer exist.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/projects/{project}/todos` | List a project's to-dos |
-| `POST` | `/api/projects/{project}/todos` | Create a to-do |
-| `PATCH` | `/api/projects/{project}/todos/{todo_id}` | Update a to-do |
-| `DELETE` | `/api/projects/{project}/todos/{todo_id}` | Delete a to-do |
-| `DELETE` | `/api/projects/{project}/todos/done` | Clear completed to-dos |
-| `POST` | `/api/projects/{project}/todos/{todo_id}/attachments` | Attach a file to a to-do |
-| `GET` | `/api/projects/{project}/todos/{todo_id}/attachments/{filename}` | Fetch an attachment |
-| `DELETE` | `/api/projects/{project}/todos/{todo_id}/attachments/{filename}` | Delete an attachment |
-| `GET` | `/api/todos` | Batch-fetch to-dos for multiple project slugs in one request. `?projects=` comma-separated, max 50 slugs |
+| `GET` | `/api/milestones` | List milestones across projects (selector) |
 
 ---
 

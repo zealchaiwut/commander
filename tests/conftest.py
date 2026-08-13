@@ -178,15 +178,6 @@ def _isolate_settings_repo(tmp_path, monkeypatch):
     monkeypatch.setattr(settings_repo, "_fallback_store_path", lambda: store)
 
 
-@pytest.fixture(autouse=True)
-def _isolate_todo_repo(tmp_path, monkeypatch):
-    """Redirect todo_repo fallback store to tmp_path; prevents production store writes (issue #2231)."""
-    import services.sprint_manager.todo_repo as _todo_repo
-
-    store = tmp_path / "project_todos_store.json"
-    monkeypatch.setattr(_todo_repo, "_fallback_store_path", lambda: store)
-
-
 # ── GitHub production-write guard (AC3, issue #2074) ─────────────────────────
 
 _PROD_REPO = "zealchaiwut/commander"

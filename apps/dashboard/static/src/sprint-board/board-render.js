@@ -1737,6 +1737,13 @@ export function _smgmtCardHtml(
     ? `<span class="smgmt-stale-no-tickets-notice" title="No open tickets remain on this sprint"><i class="ti ti-alert-circle"></i> stale — no tickets</span>`
     : "";
 
+  // Pre-dispatch guidance note (issue #2310): visible only on draft sprints that
+  // have never been run and are not yet finished. The run button was removed in
+  // the shrink milestone — dispatch now happens in a Claude Code session.
+  const dispatchNoteHtml = (!isRunning && !hasLedgerRun && !finished)
+    ? `<div class="smgmt-dispatch-note"><i class="ti ti-terminal-2" aria-hidden="true"></i> Dispatch is a Claude Code session — run <code>/coder</code> then <code>/tester</code> per ticket, in dependency order.</div>`
+    : "";
+
   return `
     <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}">
       ${runningStripeHtml}
@@ -1795,6 +1802,7 @@ export function _smgmtCardHtml(
         if (!_ss) return "";
         return `<div class="sc-status-line"><i class="ti ti-clock sc-status-icon" aria-hidden="true"></i><span>${escHtml(_ss)}</span></div>`;
       })()}
+      ${dispatchNoteHtml}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
       ${summaryHtml}

@@ -79,7 +79,7 @@ def test_bulk_tickets_file_exists():
     """AC4: The bulk_tickets.py source file must still be present (not deleted)."""
     bulk_tickets = DASHBOARD_DIR / "routers" / "bulk_tickets.py"
     assert bulk_tickets.exists(), (
-        f"routers/bulk_tickets.py was deleted. The Bulk Create UI must be retained (issue #2260 scope excludes it)."
+        "routers/bulk_tickets.py was deleted. The Bulk Create UI must be retained (issue #2260 scope excludes it)."
     )
 
 

@@ -371,22 +371,17 @@ def _assert_db_not_in_repo() -> None:
 _SPRINT_JSON_RE = re.compile(r"^sprint-\d[\w.-]*(?:-plan)?\.json$")
 
 
-def _find_production_sprints_dir() -> Path:
+def _find_production_sprints_dir(start: "Path | None" = None) -> Path:
     """Locate the real .commander/sprints/ directory that the live dashboard uses.
 
-    Supports two layouts:
-    - Nested (worktree inside .commander/runtime/...): walk up from _REPO_ROOT to
-      find the first ancestor directory named ".commander"; its sprints/ subdir is
-      the production directory.
-    - Flat (project root == repo root): the production dir is _REPO_ROOT/.commander/sprints.
+    Uses discover_commander_dir (the same resolver the sprint_manager write path
+    uses) so the watched directory matches the actual write target in both flat
+    and nested clone layouts.  The optional *start* parameter overrides _REPO_ROOT
+    and is used by tests to simulate specific directory layouts.
     """
-    current = _REPO_ROOT.resolve()
-    while current.parent != current:
-        current = current.parent
-        if current.name == ".commander":
-            return current / "sprints"
-    # Flat layout: .commander lives inside the repo root.
-    return _REPO_ROOT / ".commander" / "sprints"
+    from services.sprint_manager.commander_paths import discover_commander_dir
+
+    return discover_commander_dir(start or _REPO_ROOT) / "sprints"
 
 
 # The real .commander/sprints/ directory where production sprint JSON lives.

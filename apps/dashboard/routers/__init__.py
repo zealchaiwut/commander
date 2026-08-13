@@ -12,12 +12,10 @@ from .logs import router as logs_router
 from .backup import router as backup_router
 from .doctor import router as doctor_router
 from .finish_progress import router as finish_progress_router
-from .home_milestone import router as home_milestone_router
 from .log_search import router as log_search_router
 from .maintenance import router as maintenance_router
 from .milestones import router as milestones_router
 from .runs import router as runs_router
-from .scheduler import router as scheduler_router
 from .signoff import router as signoff_router
 from .sprint_history import router as sprint_history_router
 from .sprints import router as sprints_router
@@ -33,7 +31,6 @@ from .sprint_preflight import router as sprint_preflight_router
 from .sprint_summaries import router as sprint_summaries_router
 from .system_misc import router as system_misc_router
 from .sprint_finish import router as sprint_finish_router
-from .sprint_run import router as sprint_run_router
 from .bulk_tickets import router as bulk_tickets_router
 # Routers extracted from server.py in issue #1267
 from .sprint_nav import router as sprint_nav_router
@@ -48,17 +45,14 @@ from .estimates import router as estimates_router
 from .calibration import router as calibration_router
 from .metrics import router as metrics_router
 from .finish_card import router as finish_card_router
-from .deploy import router as deploy_router
 from .mis_sizing import router as mis_sizing_router
 from .xl_suggestions import router as xl_suggestions_router
 from .sprint_collisions import router as sprint_collisions_router
-from .resolve_conflict import router as resolve_conflict_router
 from .llm_provider import router as llm_provider_router
 from .running import router as running_router
 from .api_volume import router as api_volume_router
 from .docs import router as docs_router
 from .agent_guide import router as agent_guide_router
-from .changelog import router as changelog_router
 from .estimate_jobs import router as estimate_jobs_router
 from .dev_report import router as dev_report_router
 from .failures import router as failures_router
@@ -73,12 +67,10 @@ __all__ = [
     "backup_router",
     "doctor_router",
     "finish_progress_router",
-    "home_milestone_router",
     "log_search_router",
     "maintenance_router",
     "milestones_router",
     "runs_router",
-    "scheduler_router",
     "signoff_router",
     "sprint_history_router",
     "sprints_router",
@@ -94,7 +86,6 @@ __all__ = [
     "sprint_summaries_router",
     "system_misc_router",
     "sprint_finish_router",
-    "sprint_run_router",
     "bulk_tickets_router",
     "sprint_nav_router",
     "issues_router",
@@ -108,17 +99,14 @@ __all__ = [
     "calibration_router",
     "metrics_router",
     "finish_card_router",
-    "deploy_router",
     "mis_sizing_router",
     "xl_suggestions_router",
     "sprint_collisions_router",
-    "resolve_conflict_router",
     "llm_provider_router",
     "running_router",
     "api_volume_router",
     "docs_router",
     "agent_guide_router",
-    "changelog_router",
     "estimate_jobs_router",
     "dev_report_router",
     "failures_router",

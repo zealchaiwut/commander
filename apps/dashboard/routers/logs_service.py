@@ -194,6 +194,9 @@ def receive_agent_event(event: AgentEvent, request_id: Optional[str] = None) -> 
                 detail={"role": role, "issue_num": issue_num, "working_dir": event.working_dir},
                 action_id=session_id,
             )
+            # Manual-run recorder: open agent_runs row for hook-driven sessions (issue #2246)
+            if issue_num is not None and role is not None:
+                db.record_manual_run_open(session_id, issue_num, role, project, sprint_label)
         if event.status in ("done", "timed_out", "error") or event.event_type == "agent_stop":
             _seen_agent_sessions.discard(session_id)
             finished_detail: dict = {"status": event.status, "role": role, "issue_num": issue_num}
@@ -208,6 +211,8 @@ def receive_agent_event(event: AgentEvent, request_id: Optional[str] = None) -> 
                 detail=finished_detail,
                 action_id=session_id,
             )
+            # Manual-run recorder: close the open agent_runs row (issue #2246)
+            db.record_manual_run_close(session_id)
 
     db.upsert_agent(session_id, event.working_dir, event.status, event.tool_name, event.name)
     db.add_event(session_id, event.event_type, event.model_dump())

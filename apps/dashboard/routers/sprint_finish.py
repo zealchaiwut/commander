@@ -52,6 +52,85 @@ def _server():
     return server
 
 
+def write_sprint_summary(state, elapsed_secs, **kwargs):
+    """Thin deferred shim so tests can patch 'routers.sprint_finish.write_sprint_summary'."""
+    from services.sprint_manager.summary import write_sprint_summary as _impl  # noqa: PLC0415
+    return _impl(state, elapsed_secs, **kwargs)
+
+
+def _generate_finish_summary(
+    srv,
+    project_root: Path,
+    sprint_label: str,
+    repo: str,
+    sprint_issues: list[dict],
+) -> Optional[str]:
+    """Generate a sprint summary after a successful Finish and return its GitHub issue URL.
+
+    Loads the existing state file when available (produced by a prior autonomous run)
+    so the summary content is identical to what the orchestrator would have generated.
+    Falls back to a minimal SprintState built from the GitHub issue list when no
+    state file exists (manual-run sprints that never had an autonomous orchestrator run).
+
+    Best-effort: any exception is swallowed so summary failure never aborts the Finish.
+    """
+    try:
+        from services.sprint_manager.state import SprintState, IssueState  # noqa: PLC0415
+        from routers.sprint_artifact_service import load_state_file  # noqa: PLC0415
+
+        sprints_dir = project_root / ".commander" / "sprints"
+        state_dict = load_state_file(sprints_dir, sprint_label)
+
+        if state_dict:
+            state = SprintState.from_dict(state_dict)
+        else:
+            import re as _re  # noqa: PLC0415
+            _m = _re.match(r"^sprint-(\d+)", sprint_label)
+            sprint_num = int(_m.group(1)) if _m else None
+            row = srv.db.get_sprint(sprint_label, project=repo) or {}
+            start_ts = row.get("started_at", "")
+            issues: list[IssueState] = []
+            for iss in sprint_issues:
+                label_names = {lbl["name"] for lbl in iss.get("labels", [])}
+                if _NON_WORK_LABELS_FINISH & label_names:
+                    continue
+                is_done = "UAT" in label_names
+                issues.append(IssueState(
+                    number=iss["number"],
+                    title=iss.get("title", ""),
+                    status="done" if is_done else "skipped",
+                    skip_reason=None if is_done else "not reached UAT before sprint finish",
+                ))
+            state = SprintState(
+                sprint_label=sprint_label,
+                sprint_number=sprint_num,
+                project=repo,
+                issues=issues,
+                start_timestamp=start_ts,
+            )
+
+        elapsed_secs = float(state.wall_clock_secs or 0.0)
+        if not elapsed_secs:
+            row = srv.db.get_sprint(sprint_label, project=repo) or {}
+            if row.get("started_at") and row.get("ended_at"):
+                try:
+                    _s = datetime.fromisoformat(str(row["started_at"]).replace("Z", "+00:00"))
+                    _e = datetime.fromisoformat(str(row["ended_at"]).replace("Z", "+00:00"))
+                    elapsed_secs = max(0.0, (_e - _s).total_seconds())
+                except (ValueError, TypeError):
+                    pass
+
+        write_sprint_summary(
+            state,
+            elapsed_secs,
+            end_reason="complete",
+            repo_name=repo,
+        )
+        return state.summary_issue_url
+    except Exception:
+        return None
+
+
 def _finish_rework_tickets(srv, sprint_issues: list[dict]) -> list[dict]:
     """Work tickets that have NOT reached UAT — shared by finish-preview and the
     finish POST guard (issue #1696) so "what would be closed unfinished" is
@@ -494,6 +573,16 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
         except Exception:
             pass
 
+    # 4. Generate sprint summary artifact (base sprint only; child finishes are intermediate)
+    summary_issue_url: Optional[str] = None
+    if not is_child:
+        try:
+            summary_issue_url = _generate_finish_summary(
+                srv, project_root, base_label, repo, sprint_issues
+            )
+        except Exception:
+            pass
+
     # Invalidate caches so board refreshes
     srv.github_client.invalidate("open_issues_body:")
     srv.github_client.invalidate("open_issues:")
@@ -515,7 +604,7 @@ async def finish_sprint(owner: str, repo_name: str, label: str, body: FinishSpri
         target=base_label,
         detail={
             "sprint_id": base_label,
-            "summary_issue_url": srv._read_sprint_summary_url(project_root, base_label, repo),
+            "summary_issue_url": summary_issue_url,
         },
         action_id=str(uuid.uuid4()),
     )
@@ -1070,44 +1159,7 @@ def complete_sprint_step(owner: str, repo_name: str, label: str, body: CompleteS
     }
 
 
-@router.get(
-    "/api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status",
-    deprecated=True,
-    description="Deprecated: use GET /api/sprints/{sprint_label}/conflict-status?project= instead (issue #2065).",
-)
-def get_sprint_conflict_status(owner: str, repo_name: str, label: str):
-    """Return the merge-conflict-blocked state for a sprint (issue #1898).
-
-    Autonomous callers (Hermes loop) poll this to discover which sprints are
-    parked on a human-needed merge conflict so they can skip and continue with
-    other sprints instead of hanging.
-
-    Response:
-      200 {label, blocked: false}                         — no conflict block
-      200 {label, blocked: true, code, files, at}        — blocked on conflict
-    """
-    srv = _server()
-    if not srv._SPRINT_LABEL_RE.match(label):
-        raise HTTPException(400, detail=f"Invalid sprint label: {label!r}")
-
-    repo = f"{owner}/{repo_name}"
-    project_root = srv._project_root_path(repo)
-
-    blocked_info = srv._sprint_get_conflict_blocked(project_root, label)
-    if blocked_info:
-        return {
-            "label": label,
-            "blocked": True,
-            "code": "merge_conflict_needs_human",
-            "files": blocked_info.get("files", []),
-            "at": blocked_info.get("at"),
-        }
-    return {"label": label, "blocked": False}
-
-
 # ── Canonical flat routes (issue #2065) ──────────────────────────────────────
-# These are the primary addresses. The nested /api/projects/…/sprints/… paths
-# above are kept as deprecated aliases so existing callers continue to work.
 # project= must be in 'owner/repo' format (e.g. zealchaiwut/commander).
 
 @router.get("/api/sprints/{sprint_label}/finish-preview")
@@ -1143,10 +1195,3 @@ def complete_sprint_step_flat(sprint_label: str, project: str, body: CompleteSte
     """Canonical: POST /api/sprints/{sprint_label}/complete-step?project=owner/repo"""
     owner, repo_name = split_project(project)
     return complete_sprint_step(owner, repo_name, sprint_label, body)
-
-
-@router.get("/api/sprints/{sprint_label}/conflict-status")
-def get_sprint_conflict_status_flat(sprint_label: str, project: str):
-    """Canonical: GET /api/sprints/{sprint_label}/conflict-status?project=owner/repo"""
-    owner, repo_name = split_project(project)
-    return get_sprint_conflict_status(owner, repo_name, sprint_label)

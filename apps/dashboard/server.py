@@ -104,7 +104,6 @@ from startup import (  # noqa: E402
     _restore_sprint_statuses_on_startup,
     _status_md_sync_loop,
     _sweep_orphan_db_running_rows,
-    _sweep_orphan_pid_files,
     _validate_github_repos,
     _warn_nonconforming_sprint_labels,
 )
@@ -185,7 +184,6 @@ async def lifespan(app: FastAPI):
         pass
     _check_gh_auth()
     _validate_github_repos()
-    _sweep_orphan_pid_files()
     _sweep_orphan_db_running_rows()
     _restore_sprint_statuses_on_startup()
     _warn_nonconforming_sprint_labels()
@@ -231,20 +229,17 @@ from routers import (  # noqa: E402
     agent_guide_router,
     api_volume_router,
     docs_router,
-    changelog_router,
     estimate_jobs_router,
     activity_router,
     analytics_router,
     backup_router,
     bulk_tickets_router,
     calibration_router,
-    deploy_router,
     doctor_router,
     environments_router,
     estimates_router,
     finish_card_router,
     finish_progress_router,
-    home_milestone_router,
     issues_router,
     log_search_router,
     logs_router,
@@ -254,7 +249,6 @@ from routers import (  # noqa: E402
     mis_sizing_router,
     xl_suggestions_router,
     sprint_collisions_router,
-    resolve_conflict_router,
     llm_provider_router,
     running_router,
     dev_report_router,
@@ -277,7 +271,6 @@ from routers import (  # noqa: E402
     sprint_nav_router,
     sprint_planning_router,
     sprint_preflight_router,
-    sprint_run_router,
     sprint_summaries_router,
     sprints_router,
     status_router,
@@ -297,7 +290,6 @@ app.include_router(activity_router)
 app.include_router(analytics_router)
 app.include_router(backup_router)
 app.include_router(calibration_router)
-app.include_router(deploy_router)
 app.include_router(doctor_router)
 app.include_router(environments_router)
 app.include_router(estimates_router)
@@ -328,7 +320,6 @@ app.include_router(sprint_live_router)
 app.include_router(sprint_nav_router)
 app.include_router(sprint_planning_router)
 app.include_router(sprint_preflight_router)
-app.include_router(sprint_run_router)
 app.include_router(sprint_summaries_router)
 app.include_router(sprints_router)
 app.include_router(status_router)
@@ -336,16 +327,13 @@ app.include_router(system_router)
 app.include_router(system_misc_router)
 app.include_router(tickets_router)
 app.include_router(timeline_router)
-app.include_router(home_milestone_router)
 app.include_router(project_branches_router)
 app.include_router(bulk_tickets_router)
-app.include_router(resolve_conflict_router)
 app.include_router(llm_provider_router)
 app.include_router(running_router)
 app.include_router(dev_report_router)
 app.include_router(docs_router)
 app.include_router(agent_guide_router)
-app.include_router(changelog_router)
 app.include_router(estimate_jobs_router)
 app.include_router(failures_router)
 app.include_router(brain_router)

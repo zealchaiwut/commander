@@ -148,6 +148,12 @@ async def project_slug_status(slug: str):
     return RedirectResponse(url=f"/project/{slug}/failures", status_code=302)
 
 
+@router.get("/report")
+async def report_page():
+    """Serve the standalone Dev Report page (issue #2290)."""
+    return _serve_html(_STATIC_DIR / "report.html")
+
+
 @router.get("/project/{slug}/{tab}")
 async def project_slug_tab(slug: str, tab: str):
     """Serve the project chrome page for valid tabs; redirect invalid tabs to sprint-mgmt."""

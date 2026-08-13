@@ -335,38 +335,7 @@ class TestAgentRunsLogPath:
         assert row[0] is None  # defaults to NULL
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# AC4 — Run Browser frontend exists and renders correctly
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestRunBrowserFrontend:
-    """AC4: run browser HTML file exists and has expected structure."""
-
-    def test_run_browser_html_exists(self):
-        assert (STATIC_DIR / "run_browser.html").exists(), "run_browser.html missing"
-
-    def test_run_browser_has_sprint_list_section(self):
-        html = (STATIC_DIR / "run_browser.html").read_text(encoding="utf-8")
-        # Must have sprint-level view
-        assert "sprint" in html.lower()
-
-    def test_run_browser_has_ticket_section(self):
-        html = (STATIC_DIR / "run_browser.html").read_text(encoding="utf-8")
-        # Must show ticket/issue list
-        assert any(kw in html.lower() for kw in ("ticket", "issue"))
-
-    def test_run_browser_has_log_pane(self):
-        html = (STATIC_DIR / "run_browser.html").read_text(encoding="utf-8")
-        assert any(kw in html.lower() for kw in ("log-pane", "log_pane", "logPane", "log pane", "log-content"))
-
-    def test_run_browser_served_by_router(self, tmp_path):
-        """/run-browser endpoint returns HTML page."""
-        db = _make_test_db(tmp_path)
-        client = _get_router_client(db)
-        resp = client.get("/run-browser")
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers.get("content-type", "")
-
+# AC4 — run_browser.html removed in issue #2243; tests deleted with it.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AC5 — Failed runs sort before passing runs
@@ -413,21 +382,7 @@ class TestFailedRunsSortFirst:
         assert sprint["total_count"] == 2
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# AC6 — Log pane reuses log-colorize.js
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestLogColorizeReuse:
-    """AC6: run browser HTML includes log-colorize.js."""
-
-    def test_run_browser_includes_colorize_script(self):
-        html = (STATIC_DIR / "run_browser.html").read_text(encoding="utf-8")
-        assert "log-colorize.js" in html, "run_browser.html must include log-colorize.js"
-
-    def test_run_browser_calls_colorize_function(self):
-        html = (STATIC_DIR / "run_browser.html").read_text(encoding="utf-8")
-        assert "colorizeLogLine" in html, "run_browser.html must call colorizeLogLine()"
-
+# AC6 — run_browser.html removed in issue #2243; tests deleted with it.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AC7 — Paging works on a 5 MB log without full memory load
@@ -493,88 +448,8 @@ class TestLogPaging:
             "runs_service.py must seek from end of file for tail"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# AC8 — ntfy click-through URL deep-links into Run Browser
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestNtfyDeepLink:
-    """AC8: watchdog ntfy alert includes a Click header pointing to the Run Browser."""
-
-    def test_alert_ntfy_sends_click_header(self, monkeypatch):
-        """_alert_ntfy includes a Click header with DASHBOARD_URL/run-browser?sprint=..."""
-        monkeypatch.setenv("NTFY_TOPIC_URL", "https://ntfy.sh/test-topic")
-        monkeypatch.setenv("DASHBOARD_URL", "http://100.1.2.3:8000")
-
-        import importlib
-        if "sprint_manager" in sys.modules:
-            del sys.modules["sprint_manager"]
-        sm = importlib.import_module("sprint_manager")
-
-        captured_headers = {}
-        def fake_urlopen(req, timeout=None):
-            captured_headers.update(req.headers)
-            resp = MagicMock()
-            return resp
-
-        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-        sm._alert_ntfy("Sprint failed", "body text", category="failure",
-                        sprint_label="sprint-59")
-
-        # Should have a Click header with run-browser deep-link
-        click_val = captured_headers.get("Click") or captured_headers.get("click")
-        assert click_val is not None, "ntfy alert missing Click header"
-        assert "run-browser" in click_val or "runs" in click_val
-        assert "sprint-59" in click_val
-
-    def test_alert_ntfy_click_header_omitted_without_dashboard_url(self, monkeypatch):
-        """Click header is omitted gracefully when DASHBOARD_URL is not set."""
-        monkeypatch.setenv("NTFY_TOPIC_URL", "https://ntfy.sh/test-topic")
-        monkeypatch.delenv("DASHBOARD_URL", raising=False)
-
-        import importlib
-        if "sprint_manager" in sys.modules:
-            del sys.modules["sprint_manager"]
-        sm = importlib.import_module("sprint_manager")
-
-        captured_headers = {}
-        def fake_urlopen(req, timeout=None):
-            captured_headers.update(req.headers)
-            return MagicMock()
-
-        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-        # Should not raise even without DASHBOARD_URL
-        sm._alert_ntfy("Sprint failed", "body", category="failure",
-                        sprint_label="sprint-59")
-        # If Click is present without DASHBOARD_URL it's ok (empty), if absent also ok
-        # The key is it didn't crash
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# AC9 — ≤ 3 taps on phone viewport (≤ 390 px)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestMobileViewport:
-    """AC9: run browser is usable on ≤ 390 px with ≤ 3 taps from alert."""
-
-    def test_viewport_meta_tag_present(self):
-        html = (STATIC_DIR / "run_browser.html").read_text(encoding="utf-8")
-        assert 'name="viewport"' in html, "Missing viewport meta tag"
-        assert "width=device-width" in html
-
-    def test_sprint_link_navigates_to_tickets_on_tap(self):
-        """Sprint rows must have a tap target for ticket drill-down (≤ 3 taps AC)."""
-        html = (STATIC_DIR / "run_browser.html").read_text(encoding="utf-8")
-        # Sprint rows should be clickable
-        assert any(kw in html for kw in ("onclick", "href", "click")), \
-            "Sprint rows need click handlers for 3-tap navigation"
-
-    def test_no_horizontal_overflow_styles(self):
-        """Page should not force horizontal scroll on narrow viewport."""
-        html = (STATIC_DIR / "run_browser.html").read_text(encoding="utf-8")
-        # max-width or overflow-x hidden signals mobile awareness
-        assert any(kw in html for kw in ("max-width", "overflow-x")), \
-            "Missing mobile responsive styles"
-
+# AC8 — ntfy Click header removed in issue #2243; tests deleted with it.
+# AC9 — run_browser.html removed in issue #2243; tests deleted with it.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AC10 — Zero GitHub API calls on this surface

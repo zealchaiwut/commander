@@ -6,12 +6,18 @@
  * concern modules also runs their side effects; ./state.js seeds modal/drag
  * state on `window`.
  *
- * Concerns: board render · drag/drop · run-controls · finish modal · rerun modal
- * · bulk-complete modal · plan-next · scheduled-run.
+ * Concerns: board render · drag/drop · run-controls · finish modal
+ * · bulk-complete modal · plan-next.
  */
 
 import './state.js';
 
+import {
+  _smgmtStaleEstimateHtml, _smgmtLoadPlanningInsights,
+} from './planning-insights.js';
+import {
+  _smgmtEstVsActualSectionHtml, _smgmtToggleEstVsActual, _smgmtLoadEstVsActual,
+} from './est-vs-actual.js';
 import {
   _sHealthBuildHtml, _sHealthStripRender, sprintHealthStripInit,
 } from './health-strip.js';
@@ -19,20 +25,13 @@ import {
   smgmtPlanNextSprint, _smgmtLoadPendingSignoff,
 } from './plan-next.js';
 import {
-  _smgmtSchedToggleHtml, smgmtToggleRunOnSchedule, _smgmtHydrateSchedToggles,
-} from './scheduled-run.js';
-import {
   _histNeedsActionCount, _histLoadLedger, _histPrefetchLedger, _histScanStale, _histCleanupStale,
   _histToggleCard, _histToggleGroup, _histToggleFold, _histFocusLabel, _histStateChip,
-  _histRenderLedger, _histRerunSprint, _histToggleAgentTime, _histToggleMetrics, _histClearStaleLabels,
+  _histRenderLedger, _histToggleAgentTime, _histToggleMetrics, _histClearStaleLabels,
   _histResetLedgerCache, _histToggleShowClosed, _histForceRefresh, _histSetTtlMin,
   _histBulkSignOff, _histIsLoading,
 } from './history.js';
 
-import {
-  _rrOpen, _rrClose, _rrCatClass, _rrUpdateState, _rrSelectAll,
-  smgmtRerunSprint, _rrConfirm,
-} from './rerun-modal.js';
 import {
   _fsOpen, _fsClose, _fsCatClass, _fsSelectAll,
   smgmtFinishSprint, _fsConfirm, _fsRetry, finishSprintAndWait,
@@ -44,6 +43,8 @@ import {
 import {
   smgmtReconcileSprint, _recApply, _recClose,
 } from './reconcile-modal.js';
+// Dispatch controls removed (issue #2251). run-controls.js is now a stub
+// that forwards to preflight-warnings.js for the real warning functions.
 import {
   smgmtRunBlockedToast, smgmtRunSprint, smgmtCancelSprint,
   smgmtApproveSprint, smgmtRejectSprint,
@@ -58,6 +59,7 @@ import {
   _pfStepperInit, _pfStepState, _pfStepperAnimate, _pfStepperSummary,
   smgmtKickoffRun, smgmtKickoffRetry,
 } from './run-controls.js';
+import { smgmtOpenPreflightWarnings } from './preflight-warnings.js';
 import {
   _smgmtBoardLock, _smgmtBoardUnlock, _smgmtBoardProgress,
   _smgmtBoardLog, _smgmtBoardFinish, _smgmtBoardHalt,
@@ -68,7 +70,7 @@ import {
   _smgmtFetchMissingOutcomes, _smgmtLoadEstimates, _smgmtLoadConflicts,
   _smgmtLoadDepOrder, _smgmtLoadGoals, _smgmtOutcomeBandHtml,
   _smgmtOutcomeTicketListHtml, _smgmtLoadFinishCards, _smgmtRenderFinishCard,
-  _smgmtFinishCardInnerHtml, _smgmtCardHtml, _smgmtRunningCardHtml,
+  _smgmtFinishCardInnerHtml, _smgmtCardHtml, _smgmtCardActionBtnHtml, _smgmtRunningCardHtml,
   _smgmtRunningBoardBannerHtml, _smgmtBoardBannerPatch, _smgmtRunningLevelText,
   _smgmtRollupText, _smgmtTicketSize, _smgmtTicketHasEstimate, _smgmtUpdateColRollup, _smgmtTicketRowHtml,
   _smgmtRenderBacklog, _smgmtBacklogTicketHtml,
@@ -82,15 +84,6 @@ import {
   // Clean-up-empty pure helper (issue #2089)
   _smgmtComputeLeadingEmpty,
 } from './board-render.js';
-
-// Re-run modal (issue #512)
-globalThis._rrOpen = _rrOpen;
-globalThis._rrClose = _rrClose;
-globalThis._rrCatClass = _rrCatClass;
-globalThis._rrUpdateState = _rrUpdateState;
-globalThis._rrSelectAll = _rrSelectAll;
-globalThis.smgmtRerunSprint = smgmtRerunSprint;
-globalThis._rrConfirm = _rrConfirm;
 
 // Finish modal (issue #367)
 globalThis._fsOpen = _fsOpen;
@@ -115,7 +108,10 @@ globalThis.smgmtReconcileSprint = smgmtReconcileSprint;
 globalThis._recApply = _recApply;
 globalThis._recClose = _recClose;
 
-// Run controls + preflight modal (issue #448)
+// Preflight warnings — read-only view (issue #2251)
+globalThis.smgmtOpenPreflightWarnings = smgmtOpenPreflightWarnings;
+
+// Run controls stubs (issue #2251 — dispatch removed; stubs keep project.html wiring intact)
 globalThis.smgmtRunBlockedToast = smgmtRunBlockedToast;
 globalThis.smgmtRunSprint = smgmtRunSprint;
 globalThis.smgmtCancelSprint = smgmtCancelSprint;
@@ -183,6 +179,7 @@ globalThis._smgmtLoadFinishCards = _smgmtLoadFinishCards;
 globalThis._smgmtRenderFinishCard = _smgmtRenderFinishCard;
 globalThis._smgmtFinishCardInnerHtml = _smgmtFinishCardInnerHtml;
 globalThis._smgmtCardHtml = _smgmtCardHtml;
+globalThis._smgmtCardActionBtnHtml = _smgmtCardActionBtnHtml;
 globalThis._smgmtRunningCardHtml = _smgmtRunningCardHtml;
 globalThis._smgmtRunningBoardBannerHtml = _smgmtRunningBoardBannerHtml;
 globalThis._smgmtBoardBannerPatch = _smgmtBoardBannerPatch;
@@ -210,11 +207,6 @@ globalThis.smgmtAddToDraft = smgmtAddToDraft;
 globalThis._boardSseOnInvalidated = _boardSseOnInvalidated;
 globalThis._boardSseOnVisible = _boardSseOnVisible;
 
-// Run-on-schedule toggle (issue #863)
-globalThis._smgmtSchedToggleHtml = _smgmtSchedToggleHtml;
-globalThis.smgmtToggleRunOnSchedule = smgmtToggleRunOnSchedule;
-globalThis._smgmtHydrateSchedToggles = _smgmtHydrateSchedToggles;
-
 // Plan next sprint + pending-sign-off decoration (issue #861)
 globalThis.smgmtPlanNextSprint = smgmtPlanNextSprint;
 globalThis._smgmtLoadPendingSignoff = _smgmtLoadPendingSignoff;
@@ -231,7 +223,6 @@ globalThis._histToggleFold = _histToggleFold;
 globalThis._histFocusLabel = _histFocusLabel;
 globalThis._histStateChip = _histStateChip;
 globalThis._histRenderLedger = _histRenderLedger;
-globalThis._histRerunSprint = _histRerunSprint;
 globalThis._histToggleAgentTime = _histToggleAgentTime;
 globalThis._histToggleMetrics = _histToggleMetrics;
 globalThis._histResetLedgerCache = _histResetLedgerCache;
@@ -249,3 +240,12 @@ globalThis.sprintHealthStripInit = sprintHealthStripInit;
 
 // Clean-up-empty pure helper (issue #2089)
 globalThis._smgmtComputeLeadingEmpty = _smgmtComputeLeadingEmpty;
+
+// Planning insights — inline stale-estimate warnings (issue #2264 AC1)
+globalThis._smgmtStaleEstimateHtml = _smgmtStaleEstimateHtml;
+globalThis._smgmtLoadPlanningInsights = _smgmtLoadPlanningInsights;
+
+// Estimate-vs-actual — inline section for finished sprints (issue #2264 AC3)
+globalThis._smgmtEstVsActualSectionHtml = _smgmtEstVsActualSectionHtml;
+globalThis._smgmtToggleEstVsActual = _smgmtToggleEstVsActual;
+globalThis._smgmtLoadEstVsActual = _smgmtLoadEstVsActual;

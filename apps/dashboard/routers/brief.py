@@ -7,29 +7,24 @@ sections; the home endpoint rolls up across all projects.
 The route handlers are thin; all assembly lives in ``brief_service``. This
 router is mounted onto an already-wired router (``sprints``) so no route is
 added to ``server.py`` (COMMANDER_GATE_MONOLITH, issue #761).
+
+brief_summary.py, brief_artifact.py, brief_invalidation.py and the related
+summary/artifact endpoints were deleted in issue #2257 — the LLM caching and
+daily-report job are gone; lookout's situation.md is the replacement digest.
 """
 from __future__ import annotations
 
 import logging
 from typing import Optional
 
-import config
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 
-import projects as _projects_module
-from . import brief_artifact
 from . import brief_service
-from . import brief_summary
 
 _log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["brief"])
-
-
-def _require_brief_enabled() -> None:
-    if config.brief_disabled():
-        raise HTTPException(404, detail="Brief is disabled")
 
 
 # ── response models ──────────────────────────────────────────────────────────
@@ -154,40 +149,6 @@ class HomeBrief(BaseModel):
     suggested_next: list[SuggestedNextItem] = []
 
 
-class ProjectSummary(BaseModel):
-    project: Optional[str] = None
-    date: str
-    summary: str
-    source: str  # "model" | "fallback"
-
-
-class HomeSummary(BaseModel):
-    date: str
-    summary: str
-    source: str  # "model" | "fallback"
-
-
-class DailyArtifact(BaseModel):
-    """A stored daily brief artifact (issue #841).
-
-    ``available`` is ``False`` for a date with no stored brief, in which case
-    ``brief``/``summary``/``generated_at`` are null and ``message`` carries the
-    empty-state text (never an error).
-    """
-    scope: Optional[str] = None
-    project: Optional[str] = None
-    date: str
-    available: bool
-    covering_since: Optional[str] = None
-    window_start: Optional[str] = None
-    window_end: Optional[str] = None
-    generated_at: Optional[str] = None
-    summary: Optional[str] = None
-    summary_source: Optional[str] = None
-    brief: Optional[dict] = None
-    message: Optional[str] = None
-
-
 # ── routes ───────────────────────────────────────────────────────────────────
 
 @router.get("/api/projects/{slug}/brief", response_model=ProjectBrief)
@@ -200,130 +161,3 @@ def get_project_brief(slug: str, date: Optional[str] = None):
 def get_home_brief(date: Optional[str] = None):
     """Assemble the home roll-up across all tracked projects."""
     return brief_service.build_home_brief(date=date)
-
-
-# ── LLM summary (issue #840) ─────────────────────────────────────────────────
-# Kept separate from the structured-brief routes above so brief assembly stays
-# LLM-free (#839 AC5). The summary path generates+caches a Haiku narrative and
-# always falls back to a deterministic templated string (never 5xx — AC6).
-
-@router.get(
-    "/api/projects/{slug}/brief/summary",
-    response_model=ProjectSummary,
-)
-def get_project_brief_summary(slug: str, date: Optional[str] = None):
-    """Return the cached (or freshly generated) summary for a project brief."""
-    _require_brief_enabled()
-    return brief_summary.get_or_create_project_summary(slug, date=date)
-
-
-@router.post("/api/projects/{slug}/brief/summary/regenerate",
-             response_model=ProjectSummary)
-def regenerate_project_brief_summary(slug: str, date: Optional[str] = None):
-    """Clear the stored summary and re-invoke the model (Regenerate, AC4)."""
-    _require_brief_enabled()
-    return brief_summary.get_or_create_project_summary(
-        slug, date=date, force=True)
-
-
-@router.get("/api/brief/summary", response_model=HomeSummary)
-def get_home_brief_summary(date: Optional[str] = None):
-    """Return the cached (or freshly generated) one-line home recap (AC7)."""
-    _require_brief_enabled()
-    return brief_summary.get_or_create_home_summary(date=date)
-
-
-@router.post("/api/brief/summary/regenerate", response_model=HomeSummary)
-def regenerate_home_brief_summary(date: Optional[str] = None):
-    """Clear the stored home recap and re-invoke the model (Regenerate)."""
-    _require_brief_enabled()
-    return brief_summary.get_or_create_home_summary(date=date, force=True)
-
-
-# ── daily artifact store (issue #841) ────────────────────────────────────────
-# Persist the full daily brief per (project, date) so it is generated once and
-# served instantly thereafter. The current day is lazily generated on first
-# load; past dates are served from the store, with a clear empty
-# state when none was ever stored (never a recompute, never a 5xx).
-
-@router.get("/api/projects/{slug}/brief/daily", response_model=DailyArtifact)
-def get_project_daily_brief(slug: str, date: Optional[str] = None):
-    """Return the stored (or lazily generated) daily brief for a project."""
-    return brief_artifact.get_or_create_project_artifact(slug, date=date)
-
-
-@router.post("/api/projects/{slug}/brief/daily/regenerate",
-             response_model=DailyArtifact)
-def regenerate_project_daily_brief(slug: str, date: Optional[str] = None):
-    """Rebuild and re-store the daily brief, advancing the timestamp (AC7)."""
-    return brief_artifact.get_or_create_project_artifact(
-        slug, date=date, force=True)
-
-
-def _enrich_home_artifact(artifact: dict) -> None:
-    """Embed per-project metadata into the home artifact's project entries.
-
-    Adds ``repo``, ``name``, ``icon``, ``color``, and ``briefSummary`` to each
-    entry in ``artifact["brief"]["projects"]`` so the home page can render with
-    one HTTP request instead of 1+N (issue #1778 AC2).
-    """
-    brief = artifact.get("brief")
-    if not brief:
-        return
-    date = artifact.get("date")
-    try:
-        all_projects = _projects_module.load_projects()
-    except Exception:
-        _log.warning(
-            "_enrich_home_artifact: load_projects failed; falling back to []",
-            exc_info=True,
-        )
-        all_projects = []
-    proj_by_slug: dict = {
-        p["repo"].split("/")[-1]: p
-        for p in all_projects
-        if p.get("repo")
-    }
-    for p in (brief.get("projects") or []):
-        slug = p.get("project") or ""
-        cfg = proj_by_slug.get(slug, {})
-        repo = cfg.get("repo", "")
-        p["repo"] = repo
-        p["name"] = cfg.get("name", slug)
-        p["icon"] = cfg.get("icon", "ti-folder")
-        p["color"] = cfg.get("color", "gray")
-        if config.brief_disabled():
-            p["briefSummary"] = ""
-        else:
-            try:
-                summary = brief_summary.get_or_create_project_summary(
-                    slug, date=date)
-                p["briefSummary"] = (summary or {}).get("summary", "")
-            except Exception:
-                _log.warning(
-                    "_enrich_home_artifact: "
-                    "get_or_create_project_summary failed for %s; "
-                    "falling back to empty summary",
-                    slug,
-                    exc_info=True,
-                )
-                p["briefSummary"] = ""
-
-
-@router.get("/api/brief/daily", response_model=DailyArtifact)
-def get_home_daily_brief(date: Optional[str] = None):
-    """Return the home roll-up artifact enriched with per-project metadata.
-
-    Embeds ``briefSummary``, ``repo``, ``name``, ``icon``, and ``color`` so the
-    home page needs only this one call (issue #1778 AC2).
-    """
-    artifact = brief_artifact.get_or_create_home_artifact(date=date)
-    if artifact.get("available"):
-        _enrich_home_artifact(artifact)
-    return artifact
-
-
-@router.post("/api/brief/daily/regenerate", response_model=DailyArtifact)
-def regenerate_home_daily_brief(date: Optional[str] = None):
-    """Rebuild and re-store the daily home roll-up, advancing the timestamp."""
-    return brief_artifact.get_or_create_home_artifact(date=date, force=True)

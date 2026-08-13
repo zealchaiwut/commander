@@ -13,7 +13,7 @@
  */
 
 /* eslint-disable no-unused-vars */
-/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtMiniRailRestoreCached, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtDagDataCache, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveCacheRepo, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtNextChildLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtPrimaryRunningLabel, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowMenuOpen, _smgmtRunningViewUpdate, _smgmtSchedDepHtml, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketToSprint, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtSchedToggleHtml, _smgmtHydrateSchedToggles, _smgmtSelectedIssues, _smgmtRowClickSelect, _smgmtUpdateSelectionUI, escHtml, sprintLabelDisplay, colorizeLogLine,
+/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtMiniRailRestoreCached, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtDagDataCache, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveCacheRepo, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtNextChildLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtPrimaryRunningLabel, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowMenuOpen, _smgmtRunningViewUpdate, _smgmtSchedDepHtml, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketToSprint, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtSelectedIssues, _smgmtRowClickSelect, _smgmtUpdateSelectionUI, _smgmtLoadPlanningInsights, _smgmtLoadEstVsActual, _smgmtToggleEstVsActual, escHtml, sprintLabelDisplay, colorizeLogLine,
    _smgmtAnySprintRunning:writable, _smgmtOrderedLabels:writable, _smgmtRunningLabels:writable,
    sprintHealthStripInit */
 /* eslint-enable no-unused-vars */
@@ -373,11 +373,6 @@ export async function loadSprintMgmt(silent, optimisticRunningLabel) {
 
     const data = _smgmtAggToRenderData(agg);
     _smgmtRender(data);
-
-    // Hydrate Run-on-schedule toggles for approved cards (issue #863).
-    if (typeof _smgmtHydrateSchedToggles === "function") {
-      _smgmtHydrateSchedToggles(repo);
-    }
 
     // Start (or restart) live polling if there are running sprints
     _smgmtLivePollRestart();
@@ -836,6 +831,16 @@ export function _smgmtRender(data) {
     _smgmtMiniRailRestoreCached(orderedLabels, bySprint);
   }
   _smgmtLoadMiniRail(orderedLabels, bySprint);
+
+  // Inject stale-estimate warnings inline for planning sprints (issue #2264 AC1).
+  if (typeof _smgmtLoadPlanningInsights === "function") {
+    _smgmtLoadPlanningInsights(orderedLabels);
+  }
+
+  // Inject estimate-vs-actual section for finished sprints (issue #2264 AC3).
+  if (typeof _smgmtLoadEstVsActual === "function") {
+    _smgmtLoadEstVsActual(orderedLabels);
+  }
 
   // Update cleanup button visibility (issue #457)
   _smgmtUpdateCleanupBtn(data);
@@ -1464,6 +1469,53 @@ export function _smgmtFinishCardInnerHtml(cardData, branchData, repo) {
 /** Finished pipeline labels — only these block Run Sprint (mirrors sprint_manager._is_dispatchable). */
 const _NON_DISPATCHABLE_LABELS = new Set(["UAT", "UAT-approved", "released"]);
 
+/**
+ * Build the action button HTML for a sprint card.
+ * Extracted from _smgmtCardHtml (issue #2251) so status rendering and action
+ * computation are separate concerns. Dispatch controls have been removed from
+ * the card; this function preserves the original logic for reference and future
+ * re-enablement without requiring a re-implementation.
+ *
+ * @param {string} label - Sprint label (e.g. "sprint-100")
+ * @param {object} opts
+ */
+export function _smgmtCardActionBtnHtml(label, {
+  isRunning, isLinger, isHasRework, isPostRun,
+  rerunInto, rerunChildDisplay, canRun, tickets,
+} = {}) {
+  if (isRunning) {
+    return `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
+                  <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
+  }
+  if (isLinger) {
+    return `<span class="smgmt-linger-note">Finished — snapshot kept 1h</span>`;
+  }
+  if (isHasRework && rerunInto && (tickets || []).length === 0) {
+    const _rrDisabled = _smgmtAnySprintRunning ? "disabled" : "";
+    const _rrTitle = _smgmtAnySprintRunning
+      ? 'title="Cannot run: another sprint is currently running."'
+      : "";
+    return `<button class="smgmt-run-btn" ${_rrDisabled} ${_rrTitle}
+                  onclick="smgmtRunSprint('${escHtml(rerunInto)}')">
+                  <i class="ti ti-player-play"></i> Run → ${escHtml(rerunChildDisplay || '')}</button>`;
+  }
+  if (isHasRework || isPostRun) return "";
+  if (_smgmtSignoffState(label) === "pending") return _smgmtSignoffActionsHtml(label);
+  if (_smgmtAnySprintRunning) {
+    return `<button class="smgmt-run-btn smgmt-run-btn--blocked"
+                  title="Another sprint is running"
+                  onclick="smgmtRunBlockedToast()">
+                  <i class="ti ti-player-play"></i> Run Sprint</button>`;
+  }
+  const runDisabled = !canRun ? "disabled" : "";
+  const runTitle = !canRun
+    ? 'title="No dispatchable tickets — remaining items are already SIT/UAT or in progress"'
+    : "";
+  return `<button class="smgmt-run-btn" ${runDisabled} ${runTitle}
+                  onclick="smgmtRunSprint('${escHtml(label)}')">
+                  <i class="ti ti-player-play"></i> Run Sprint</button>`;
+}
+
 function _smgmtHasDispatchableTickets(tickets) {
   return tickets.some((t) => {
     const names = (t.labels || []).map((l) => l.name);
@@ -1539,71 +1591,15 @@ export function _smgmtCardHtml(
     (finished && !isRunning && !isHasRework && !planBlocksPostRun);
   const showRunningChrome = isRunningView && !isAwaitingMerge;
   const isPostRun = !isRunningView && !planBlocksPostRun && hasLedgerRun;
-  // Run is only for first attempts: post-run labels (incl. has-rework) re-run
-  // into a child sub-sprint instead (P0 — no same-label re-dispatch).
-  const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
-
-  // Re-run Sprint button: child sprint for fully completed/stopped runs (not has_rework)
-  const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-  const rerunTitle = _smgmtAnySprintRunning
-    ? 'title="Cannot re-run: another sprint is currently running."'
-    : "";
-  const childLabel = _smgmtNextChildLabel(label);
-  const childDisplay = sprintLabelDisplay(childLabel).replace("Sprint ", "");
-  const rerunBtn = `<button class="smgmt-run-btn smgmt-run-btn--rerun" ${rerunDisabled} ${rerunTitle}
-                    onclick="smgmtRerunSprint('${escHtml(label)}')">
-                    <i class="ti ti-refresh"></i> Re-run → ${escHtml(childDisplay)}</button>`;
-
-  const rerunInto = (_smgmtData?.sprint_rerun_into || {})[label];
-  const rerunChildDisplay = rerunInto
-    ? sprintLabelDisplay(rerunInto).replace("Sprint ", "")
-    : "";
-
-  // Planning cards: Run Sprint. Running cards: Cancel. Any post-run card
-  // (completed or has-rework): Re-run → child sub-sprint. Same-label
-  // re-dispatch is blocked server-side (sprint-lifecycle redesign P0) — a
-  // label whose run ended is terminal, so has-rework cards must route to the
-  // re-run flow even when tickets are still on the column.
-  let actionBtn;
-  if (isRunning) {
-    actionBtn = `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
-                  <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
-  } else if (isLinger && isHasRework) {
-    // A rework finish lingers too, but the operator needs to re-run it NOW — don't
-    // make them wait out the 1h snapshot window before the rerun button appears.
-    actionBtn = rerunBtn;
-  } else if (isLinger) {
-    actionBtn = `<span class="smgmt-linger-note">Finished — snapshot kept 1h</span>`;
-  } else if (isHasRework && rerunInto && tickets.length === 0) {
-    // Tickets moved to a child re-run — run the child, not the empty parent label.
-    actionBtn = `<button class="smgmt-run-btn" ${rerunDisabled} ${rerunTitle}
-                  onclick="smgmtRunSprint('${escHtml(rerunInto)}')">
-                  <i class="ti ti-player-play"></i> Run → ${escHtml(rerunChildDisplay)}</button>`;
-  } else if (isHasRework || isPostRun) {
-    actionBtn = rerunBtn;
-  } else if (_smgmtSignoffState(label) === "pending") {
-    actionBtn = _smgmtSignoffActionsHtml(label);
-  } else if (_smgmtAnySprintRunning) {
-    actionBtn = `<button class="smgmt-run-btn smgmt-run-btn--blocked"
-                  title="Another sprint is running"
-                  onclick="smgmtRunBlockedToast()">
-                  <i class="ti ti-player-play"></i> Run Sprint</button>`;
-  } else {
-    // Approved / planning card — the only state where the sprint is ready to be
-    // dispatched. The Run-on-schedule toggle is rendered here and nowhere else,
-    // so it is hidden on running / post-run / linger cards (issue #863, AC2).
-    const runDisabled = !canRun ? "disabled" : "";
-    const runTitle = !canRun
-      ? 'title="No dispatchable tickets — remaining items are already SIT/UAT or in progress"'
-      : "";
-    const schedToggle =
-      typeof _smgmtSchedToggleHtml === "function"
-        ? _smgmtSchedToggleHtml(label)
-        : "";
-    actionBtn = `<button class="smgmt-run-btn" ${runDisabled} ${runTitle}
-                  onclick="smgmtRunSprint('${label}')">
-                  <i class="ti ti-player-play"></i> Run Sprint</button>${schedToggle}`;
-  }
+  // Dispatch controls removed (issue #2251). Action button logic is preserved
+  // in _smgmtCardActionBtnHtml() for reference; preflight warnings are still
+  // accessible via the Preflight button on planning-state cards.
+  const actionBtn = (!isRunning && !isLinger && !isHasRework && !isPostRun && !finished)
+    ? `<button class="smgmt-preflight-warnings-btn" type="button"
+              title="View preflight warnings for this sprint"
+              onclick="smgmtOpenPreflightWarnings('${escHtml(label)}')">
+         <i class="ti ti-alert-circle"></i> Preflight</button>`
+    : '';
 
   const isOutcomeCompleted =
     isReadyToMerge || isHasRework || outcomeState === "completed";
@@ -1714,7 +1710,9 @@ export function _smgmtCardHtml(
     <div class="cap" id="smgmt-cap-${escHtml(label)}"></div>
     <div class="smgmt-sprint-goal-text" id="smgmt-goal-${escHtml(label)}" style="display:none"></div>
   </div>
-  <div class="sc-preview-slot" id="sc-preview-${escHtml(label)}"></div>`;
+  <div class="sc-preview-slot" id="sc-preview-${escHtml(label)}"></div>
+  <div class="pi-stale-slot" id="pi-stale-${escHtml(label)}"></div>
+  <div class="pi-ev-slot" id="pi-ev-${escHtml(label)}"></div>`;
 
   // Run-stats / dispatch-log forensics live in History only (sprint-lifecycle.md P4).
   const logHtml = "";
@@ -1725,12 +1723,8 @@ export function _smgmtCardHtml(
       ? '<span class="sc-draft-badge">DRAFT</span>'
       : "";
   const signoffBadge = _smgmtSignoffBadgeHtml(label);
-  const blockedHint =
-    _smgmtSignoffState(label) === "pending"
-      ? '<span class="sc-blocked-hint smgmt-blocked-hint--signoff">Approve the plan to run</span>'
-      : _smgmtAnySprintRunning && !isPostRun && !isRunningView
-        ? `<span class="sc-blocked-hint">blocked: ${_smgmtRunningBlockerShort()} running</span>`
-        : "";
+  // Dispatch hints removed with dispatch controls (issue #2251).
+  const blockedHint = "";
   const parentLineage =
     parent && !isFreshRerun
       ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">← from ${escHtml(sprintLabelDisplay(parent))}</span>`
@@ -2155,8 +2149,7 @@ export function _smgmtRunningCardHtml(label, n, tickets) {
         </div>
         <div class="smgmt-sprint-header-right">
           <span class="smgmt-sprint-meta" id="smgmt-elapsed-${escHtml(label)}">${timeSpentSec > 0 ? `elapsed ${_fmtRunningTime(timeSpentSec)}` : ""}</span>
-          <button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
-            <i class="ti ti-player-stop"></i> Cancel sprint</button>
+          <!-- Cancel sprint button removed (issue #2251) -->
         </div>
       </div>
       <div class="smgmt-outcome-band" id="smgmt-running-stats-${escHtml(label)}">
@@ -2821,16 +2814,9 @@ export function _smgmtAncestorRowHtml(label, outcome, childLabel) {
     ticketsHtml = statsHtml + listHtml;
   }
 
-  const rerunDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-  const rerunTitle = _smgmtAnySprintRunning
-    ? 'title="Cannot re-run: another sprint is currently running."'
-    : "";
   const actionsHtml =
     mergeState === "needs_merge"
       ? `<div class="slp-ancestor-actions">
-          <button class="smgmt-run-btn smgmt-run-btn--rerun" ${rerunDisabled} ${rerunTitle}
-                  onclick="event.stopPropagation();smgmtRerunSprint('${safeLabel}')">
-            <i class="ti ti-refresh"></i> Re-run</button>
           <button class="smgmt-finish-btn sc-merge-link"
                   onclick="event.stopPropagation();smgmtFinishSprint('${safeLabel}')">
             <i class="ti ti-flag-check"></i> Merge Sprint</button>

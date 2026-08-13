@@ -724,6 +724,38 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
     return payload
 
 
+@router.get("/api/manual/live")
+def get_manual_live_snapshot(project: Optional[str] = None):
+    """Return active manual (non-sprint) agent sessions (issue #2247).
+
+    Queries agent_runs for rows where sprint_label IS NULL and finished_at IS NULL.
+    These are sessions started outside a sprint run (manual Claude Code invocations).
+
+    Returns
+    -------
+    {"sessions": [{"id": N, "issue_number": N, "agent": "...", "project": "...",
+                   "session_id": "...", "started_at": "...", "log_path": "..."}, ...]}
+    """
+    with db.get_conn() as conn:
+        db._create_agent_runs_table(conn)
+        if project:
+            rows = conn.execute(
+                "SELECT id, issue_number, agent, project, session_id, started_at, log_path "
+                "FROM agent_runs "
+                "WHERE sprint_label IS NULL AND finished_at IS NULL AND project = ? "
+                "ORDER BY started_at DESC",
+                (project,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, issue_number, agent, project, session_id, started_at, log_path "
+                "FROM agent_runs "
+                "WHERE sprint_label IS NULL AND finished_at IS NULL "
+                "ORDER BY started_at DESC",
+            ).fetchall()
+    return {"sessions": [dict(r) for r in rows]}
+
+
 _SNAPSHOT_EVERY_N = 10  # emit snapshot every N half-second ticks (~5 s)
 
 

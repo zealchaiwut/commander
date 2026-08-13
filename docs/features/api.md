@@ -126,14 +126,6 @@ Called by the Claude Code hooks in `hooks/`.
 | `GET` | `/api/running` | Running-sprint snapshot for a project (`?project=`), mirror/DB only |
 | `GET` | `/api/brief` | Home rollup brief across all projects |
 | `GET` | `/api/projects/{slug}/brief` | Deterministic per-project brief (DB-only, no LLM) |
-| `GET` | `/api/brief/summary` | Home brief one-line recap (cached/generated) |
-| `POST` | `/api/brief/summary/regenerate` | Regenerate the home brief recap |
-| `GET` | `/api/projects/{slug}/brief/summary` | Per-project brief recap (cached/generated) |
-| `POST` | `/api/projects/{slug}/brief/summary/regenerate` | Regenerate a project's brief recap |
-| `GET` | `/api/brief/daily` | Home daily artifact |
-| `POST` | `/api/brief/daily/regenerate` | Regenerate the home daily artifact |
-| `GET` | `/api/projects/{slug}/brief/daily` | Per-project daily artifact |
-| `POST` | `/api/projects/{slug}/brief/daily/regenerate` | Regenerate a project's daily artifact |
 | `GET` | `/api/dev-report` | Per-project dev report: shipped, stale, waiting, and run-ready sprints |
 
 ---
@@ -158,94 +150,98 @@ Serves a structured view of each project's current status and pending work.
 
 **Response: `200 OK`**
 
+The endpoint shares the same assembly path (`export_hermes_report.build_contract`)
+as the Nightly Hermes exporter below, so the payload shape is identical to that
+contract. As of issue #1979 the `fixed`, `age_days`, and `cost`/`cost_source`
+fields are populated for real (previously hardcoded to empty/`None`), and the
+top-level `completed`/`needs_review`/`dead_letter` summary arrays are included.
+`fixed` is derived by diffing this run's blocked-issue set against the previous
+run's, which the service persists under the `dev_report_state` brief-artifacts
+scope.
+
 ```json
 {
   "for_date": "2026-07-17",
-  "window_start": "2026-07-16T06:00:00",
-  "window_end": "2026-07-17T06:00:00",
-  "cost": null,
+  "generated_at": "2026-07-17T15:32:45Z",
+  "window_start": "2026-07-16T18:45:00Z",
+  "window_end": "2026-07-17T18:45:00Z",
   "projects": [
     {
       "project": "commander",
+      "repo": "zealchaiwut/commander",
       "name": "Commander",
+      "icon": "ti-folder",
+      "color": "gray",
       "status": "idle",
       "in_progress": null,
-      "up_next": null,
       "shipped": [
-        {
-          "label": "sprint-119",
-          "goal": "Finalize dev report UI",
-          "done": 5,
-          "pr_number": 1234
-        }
+        {"issue_number": 305, "title": "Lock sprint card"}
       ],
-      "fixed": [],
+      "fixed": [
+        {"issue_number": 1200, "title": "Fix auth token leak"}
+      ],
       "stale": [
         {
           "kind": "blocked",
-          "issue_number": 1200,
-          "title": "Fix auth token leak",
+          "issue_number": 1201,
+          "title": "Flaky SSE reconnect",
           "age_days": 4.5
         }
       ],
       "waiting": [
-        {
-          "label": "sprint-120",
-          "ticket_count": 2,
-          "estimated_hours": 6.5
-        }
+        {"issue_number": 307, "title": "Review UAT"}
       ],
       "counts": {
         "shipped": 1,
-        "fixed": 0,
+        "in_progress": 0,
+        "blocked": 0,
+        "waiting": 1,
         "stale": 1,
-        "waiting": 1
+        "fixed": 1
       }
     }
-  ]
+  ],
+  "cost": "$1.23",
+  "cost_source": "price_map",
+  "completed": ["Commander: 1 shipped"],
+  "needs_review": ["Commander: 1 awaiting sign-off"],
+  "dead_letter": ["Commander: 1 stale blocked"]
 }
 ```
 
 **Response fields:**
 
 - `for_date` (string): The brief date (YYYY-MM-DD, in Bangkok timezone).
-- `window_start` (string): ISO-8601 start of the 24-hour brief window (Bangkok midnight).
+- `generated_at` (string): ISO-8601 timestamp when the artifact was assembled.
+- `window_start` (string): ISO-8601 start of the 24-hour brief window.
 - `window_end` (string): ISO-8601 end of the 24-hour brief window.
-- `cost` (string | null): Optional cost estimate (not currently populated).
 - `projects` (array): Per-project summaries.
+- `cost` (string): Cost estimate for the window (e.g. `"$1.23"`). Populated since #1979.
+- `cost_source` (string): Where the cost figure came from (e.g. `"price_map"`).
+- `completed` (array of string): Human-readable one-line summaries of shipped work per project.
+- `needs_review` (array of string): One-line summaries of work awaiting sign-off per project.
+- `dead_letter` (array of string): One-line summaries of stale/blocked work per project.
 
 **Projects array fields:**
 
 - `project` (string): Project slug (repo name).
+- `repo` (string): Full `owner/repo`.
 - `name` (string): Human-friendly project name.
+- `icon` / `color` (string): Display hints from project config.
 - `status` (string): One of `"idle"`, `"running"`, `"blocked"`.
 - `in_progress` (object | null): Currently running sprint, if any.
-  - `sprint_label` (string | null): Sprint label (e.g., `"sprint-120"`).
-  - `started_at` (string | null): ISO-8601 start timestamp (null in current implementation).
-- `up_next` (object | null): Next backlog sprint ready to queue, if any.
-  - `label` (string | null): Sprint label.
-  - `ticket_count` (integer): Number of tickets in the sprint.
-  - `ready` (boolean): Whether all preflight checks pass.
-- `shipped` (array): Recently completed sprints with merged PRs.
-  - `label` (string | null): Sprint label.
-  - `goal` (string): Sprint goal from issue.
-  - `done` (integer): Number of completed tickets.
-  - `pr_number` (integer | null): GitHub PR number for the sprint's develop → master merge.
-- `fixed` (array): Issues that were previously blocked but are now resolved (empty in current implementation).
-- `stale` (array): Issues stuck in blocked/rework state beyond configured thresholds.
-  - `kind` (string): One of `"blocked"`, `"rework"`, `"failed"`, etc.
-  - `issue_number` (integer | null): GitHub issue number.
-  - `title` (string): Issue title.
-  - `age_days` (float | null): Days since last update.
-- `waiting` (array): Sprints in `ready_to_merge` state waiting for sign-off.
-  - `label` (string | null): Sprint label.
-  - `ticket_count` (integer): Number of tickets awaiting sign-off.
-  - `estimated_hours` (float): Summed estimated hours for tickets.
-- `counts` (object): Summary counts.
-  - `shipped` (integer): Count of shipped sprints.
-  - `fixed` (integer): Count of fixed issues.
-  - `stale` (integer): Count of stale issues.
-  - `waiting` (integer): Count of waiting sprints.
+  - `sprint_label` (string): Sprint label (e.g., `"sprint-120"`).
+  - `started_at` (string | null): ISO-8601 start timestamp.
+- `shipped` (array): Issues labelled done/uat this window — `{issue_number, title}`.
+- `fixed` (array): Issues that were blocked on the previous run but are no longer blocked now — `{issue_number, title}`. Populated since #1979.
+- `stale` (array): Items stuck beyond configured thresholds.
+  - `kind` (string): One of `"blocked"`, `"waiting_signoff"`, `"backlog"`.
+  - `issue_number` (integer): GitHub issue number (for `"blocked"` kind).
+  - `sprint_label` (string): Sprint label (for `"waiting_signoff"` / `"backlog"` kinds).
+  - `title` (string): Issue title (blocked kind).
+  - `age_days` (float): Days since last update, rounded to 1 dp. Populated since #1979.
+- `waiting` (array): Open issues awaiting sign-off — `{issue_number, title}`.
+- `counts` (object): Summary counts — `shipped`, `in_progress`, `blocked`, `waiting`, `stale`, `fixed`.
 
 **Response: `404 Not Found`**
 
@@ -381,12 +377,8 @@ Read-only, so no bearer token is required even when `COMMANDER_API_TOKEN` is set
 | `GET` | `/api/agent-guide` | Canonical agent operate guide as `{content, version}`; `version` is a 16-hex SHA-256 fingerprint |
 | `GET` | `/api/projects/{slug}/docs` | List allowed `.md` files in the project's clone root as `[{path, size, mtime}]`. Nested layout resolves the clone root in `uat`→`main`→`prd` order, preferring the develop-tracking `uat` clone so docs reflect the most current (unmerged) state (issue #2052) |
 | `GET` | `/api/projects/{slug}/docs/{path}` | Fetch one doc's content as `{path, content}` |
-| `GET` | `/api/projects/{slug}/changelog` | Changelog entries from `docs/changelog/{uat,prd}/`, newest-first; filter with `?env=uat|prd&limit=N` |
 | `GET` | `/api/projects/{slug}/docs/scaffold/check` | Check for missing standard docs files |
 | `POST` | `/api/projects/{slug}/docs/scaffold/apply` | Create missing standard docs files from template |
-| `POST` | `/api/docs-freshness/check` | Trigger a docs-freshness check |
-| `GET` | `/api/docs-freshness/warnings` | List open docs-freshness warnings |
-| `DELETE` | `/api/docs-freshness/warnings/{warning_id}` | Dismiss a docs-freshness warning |
 
 ---
 
@@ -438,7 +430,6 @@ Read-only, so no bearer token is required even when `COMMANDER_API_TOKEN` is set
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/sprints/run` | Start the sprint manager for a sprint label |
-| `POST` | `/api/sprint-run` | Legacy single-body variant that spawns `sprint_manager.py` directly (`{label, goal, budget}`); prefer `/api/sprints/run` above for new integrations |
 | `DELETE` | `/api/sprints/run/{sprint_label}` | Kill a running sprint |
 | `GET` | `/api/sprints/running-all` | All currently-running sprints across projects |
 | `GET` | `/api/sprints/{sprint_label}/branch-status` | Branch status for a sprint's tickets |
@@ -474,12 +465,10 @@ Read-only, so no bearer token is required even when `COMMANDER_API_TOKEN` is set
 - `migrate_from` — ticket numbers to migrate in from a prior sprint.
 - `llm_provider` — per-run override (`"anthropic"` or `"ica"`); omit to use
   the global setting.
-- `callback_url` — optional webhook fired on sprint terminal state. Must be
-  an `http`/`https` URL (internal/loopback/metadata targets are rejected).
-  **When `COMMANDER_API_TOKEN` is configured, setting a non-empty
-  `callback_url` requires `Authorization: Bearer <token>`** on this call —
-  a caller without the token cannot register a webhook, even though
-  `callback_url`-less runs are unrestricted.
+- `callback_url` — accepted and validated as an `http`/`https` URL, but
+  **no longer acted upon**. The sprint-terminal-state webhook was removed in
+  Sprint 1022.3 (#2242, along with its SSRF screening and bearer-token auth);
+  the field is retained for request-shape compatibility only and fires nothing.
 
 ### `POST /api/sprints/{sprint_label}/rerun` body
 
@@ -579,13 +568,12 @@ canonical, bare slug accepted).
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/sprints/{sprint_label}/finish-preview?project=` | Preview what "finish sprint" would do |
-| `POST` | `/api/sprints/{sprint_label}/finish?project=` | Finish a sprint (merge, close, summarize). Returns `409 {code: "merge_failed", message, merge_errors}` and closes **nothing** when the branch merge fails or is a silent no-op — issues are never closed and the sprint is never marked completed unless the merge actually landed (issue #2086) |
+| `POST` | `/api/sprints/{sprint_label}/finish?project=` | Finish a sprint (merge, close, summarize). Returns `409 {code: "merge_failed", message, merge_errors}` and closes **nothing** when the branch merge fails or is a silent no-op — issues are never closed and the sprint is never marked completed unless the merge actually landed (issue #2086). On a successful base-sprint (non-child) finish it also generates the sprint-summary artifact via `_generate_finish_summary` and surfaces its URL in the finish event's `summary_issue_url`, replacing the deleted orchestrator's summary step (issue #2248). Best-effort — summary failure never aborts the finish. *(Known regression as of Sprint 1023: #2249 removed `services/sprint_manager/state.py`, which `_generate_finish_summary` imports, so summary generation currently no-ops; pending a follow-up fix.)* |
 | `POST` | `/api/sprints/{sprint_label}/finish-bg?project=` | Start finish-sprint as a background job; returns `{started, job_key}` |
 | `GET` | `/api/sprints/{sprint_label}/finish-stream?project=` | SSE stream of finish-sprint progress; resends current snapshot on reconnect |
 | `GET` | `/api/sprints/{sprint_label}/bulk-complete-preview?project=` | Dry-run preview of bulk-complete. Returns `400` when the sprint has no child sprints (bulk-complete requires a parent sprint with at least one child) instead of a misleading `200` empty preview (issue #2160). Each `members[].merged` flag distinguishes a properly-merged-then-pruned branch from one deleted without merging: a branch absent from GitHub is reported `merged` only when a merged PR into its parent branch exists (issue #2086) |
 | `POST` | `/api/sprints/{sprint_label}/bulk-complete?project=` | Bulk-complete all eligible tickets in a sprint |
 | `POST` | `/api/sprints/{sprint_label}/complete-step?project=` | Complete a single step of the finish flow. When the immediate parent branch was merged and pruned, the step now walks up the sprint lineage to retarget the next surviving ancestor branch (or `develop`) instead of silently no-op'ing and stranding the child's commits. The lineage walk-up is guarded against a self-referential or excessively deep ancestry chain: if it revisits a label or exceeds 50 hops it aborts with `409` (`Sprint lineage is self-referential or too deep …`) rather than looping forever (issue #2172). Every parent-label lookup in the walk is project-scoped, so a child sprint's merge parent is resolved from the target project's own sprint config even when multiple projects share the dashboard (issue #2170). Refuses a base-sprint complete-step with `409` while any child sprint still has a live branch — running (`Child sprint … is still running`) or with unmerged commits (`… has unmerged commits …`) — and skips closing tickets that belong to such unmerged children (issue #1934) |
-| `GET` | `/api/sprints/{sprint_label}/conflict-status?project=` | Merge-conflict status for a sprint's branches |
 | `GET` | `/api/sprints/{label}/reconcile-preview` | Dry-run: GitHub-vs-DB diff + post-sprint checks for one sprint. No writes; requires `?project=`. Unknown `project=` → `404` (issue #2069). Response now also carries `outcome_mismatch` (bool) and `outcome_derived_state` (the terminal state re-derived from stored `issues_json` ticket outcomes): a sprint stored `ready_to_merge` whose ticket outcomes show a failure/dead-letter is flagged for downgrade to `needs_rework` even when no GitHub needs-rework label exists (issue #2167) |
 | `POST` | `/api/sprints/{label}/reconcile` | Apply reconcile for one sprint: correct DB lifecycle + local state from GitHub truth. Never writes to GitHub. Unknown `project=` → `404` (issue #2069). In addition to the GitHub-label signal, an additive ticket-outcome check downgrades a stale `ready_to_merge` → `needs_rework` when stored `issues_json` outcomes contain a failure the GitHub-label check misses; it never upgrades `needs_rework` → `ready_to_merge` (issue #2167) |
 
@@ -593,8 +581,7 @@ canonical, bare slug accepted).
 The old `/api/projects/{owner}/{repo_name}/sprints/{label}/…` addresses still
 work and are flagged `deprecated: true` in the OpenAPI schema. Prefer the flat
 routes above. Deprecated paths: `finish-preview`, `finish`, `finish-bg`,
-`finish-stream`, `bulk-complete-preview`, `bulk-complete`, `complete-step`,
-`conflict-status`.
+`finish-stream`, `bulk-complete-preview`, `bulk-complete`, `complete-step`.
 
 All flat finish/complete routes resolve `project=` through the central
 `project_resolver.split_project` helper, so a bare slug (e.g. `commander`) is
@@ -621,11 +608,8 @@ An unknown `project=` raises `404`.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/sprints/{sprint_label}/preflight` | Full preflight health check before dispatch |
+| `GET` | `/api/sprints/{sprint_label}/preflight` | Full preflight health check before dispatch. Cycle, file-overlap conflict, and dependency-order data are returned inline in this aggregate response (issue #2234). Also returns `dor_mode` and inline `readiness` (`ready` / `not_ready` with per-ticket `missing` reasons); when `dor_mode == "block"` and any work ticket is `not_ready`, `ok` is `false` (Definition of Ready gate, issue #2262) |
 | `POST` | `/api/sprints/{sprint_label}/preflight-fix` | Auto-fix a preflight issue |
-| `GET` | `/api/sprints/{sprint_label}/cycle-check` | Detect dependency cycles in the sprint DAG |
-| `GET` | `/api/sprints/{sprint_label}/conflicts` | Detect file-overlap conflicts between tickets |
-| `GET` | `/api/sprints/{sprint_label}/dep-order` | Resolved dependency execution order |
 | `GET` | `/api/sprints/{sprint_label}/preview-dag` | Preview the ticket dependency DAG |
 | `GET` | `/api/sprints/{sprint_label}/dag-order-preview` | Preview DAG-resolved execution order |
 
@@ -708,12 +692,12 @@ An unknown `project=` raises `404`.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/runs` | List past sprints + tickets from `agent_runs`, for the Run Browser |
-| `GET` | `/runs/{sprint}/{issue}/{agent}/log` | Paginated log content for one run |
-| `GET` | `/runs/{sprint}/{issue}/{agent}/log/tail` | Last N KB of a run's log |
+| `GET` | `/runs` | List past sprints + tickets from `agent_runs`, for the Run Browser. Manual (non-sprint) sessions — `agent_runs.sprint_label IS NULL` — are grouped under the sprint key `"null"` so the UI can still build valid log URLs (issue #2247) |
+| `GET` | `/runs/{sprint}/{issue}/{agent}/log` | Paginated log content for one run. Pass `sprint=null` to resolve a manual session's log (`sprint_label IS NULL`) (issue #2247) |
+| `GET` | `/runs/{sprint}/{issue}/{agent}/log/tail` | Last N KB of a run's log. Pass `sprint=null` for a manual session (issue #2247) |
+| `GET` | `/api/manual/live` | Active manual (non-sprint) agent sessions — `agent_runs` rows where `sprint_label IS NULL AND finished_at IS NULL`. Optional `project` query param scopes to one repo. Returns `{"sessions": [{"id", "issue_number", "agent", "project", "session_id", "started_at", "log_path"}, ...]}` (issue #2247) |
 | `GET` | `/api/logs/runs/{sprint_label}/ticket-stats` | Per-ticket stats for a sprint's runs |
 | `GET` | `/api/logs/runs/{sprint_label}/ica-cost` | ICA (claude-proxy) cost breakdown for a sprint's runs |
-| `GET` | `/run-browser` | Serves the Run Browser HTML page (ntfy deep-link target) |
 | `GET` | `/logs/tail` | Tail arbitrary log output |
 | `GET` | `/api/logs/search` | Cross-run log search using ripgrep with DB-indexed pre-filtering |
 
@@ -750,7 +734,6 @@ An unknown `project=` raises `404`.
 | `POST` | `/api/projects/{slug}/environments/{env}/restart` | Restart an environment's server |
 | `POST` | `/api/projects/{slug}/environments/{env}/stop` | Stop an environment's server |
 | `POST` | `/api/projects/{slug}/environments/{env}/start` | Start an environment's server |
-| `POST` | `/api/deploy/promote` | Promote `develop` to `master` via PR |
 | `GET` | `/api/deploy/overview` | Cross-project deploy overview |
 | `GET` | `/api/fs/list` | Browse the local filesystem (for path pickers) |
 | `GET` | `/api/projects/notes` | Read project notes |
@@ -760,11 +743,10 @@ An unknown `project=` raises `404`.
 | `GET` | `/api/settings/sync/status` | Settings-sync status vs. the shared source |
 | `POST` | `/api/settings/sync/diff` | Preview a settings-sync diff |
 | `POST` | `/api/settings/sync/commit` | Commit a settings-sync change |
-| `GET` | `/api/scheduler/config` | Overnight scheduler config |
-| `PUT` | `/api/scheduler/config` | Update overnight scheduler config |
-| `GET` | `/api/scheduler/sprints` | Sprints queued in the overnight scheduler |
-| `PUT` | `/api/scheduler/sprints` | Update the overnight scheduler's sprint queue |
-| `POST` | `/api/scheduler/tick` | Trigger a scheduler tick (`202`) |
+
+> The overnight sprint scheduler was removed in Sprint 1022.2 (#2238) — those
+> endpoints (`/api/scheduler/config`, `/api/scheduler/sprints`,
+> `/api/scheduler/tick`) and the `/run-browser` HTML page (#2243) no longer exist.
 
 ---
 
@@ -774,38 +756,22 @@ An unknown `project=` raises `404`.
 > endpoints (`/api/roadmap/*`, `/api/projects/{project}/advisor/*`,
 > `/api/advisor/tick`) no longer exist.
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/milestones` | List milestones across projects |
-| `GET` | `/api/projects/{slug}/milestones` | List a project's GitHub milestones |
-| `POST` | `/api/projects/{slug}/milestones` | Create a milestone |
-| `PATCH` | `/api/projects/{slug}/milestones/{number}` | Edit a milestone |
-| `DELETE` | `/api/projects/{slug}/milestones/{number}` | Delete a milestone |
-| `GET` | `/api/projects/{slug}/issues` | Issues from the local mirror, with milestone field |
-| `GET` | `/api/home/milestone` | Active-milestone progress indicator payload (home cards / project header) |
+> The per-project milestone CRUD, the `/api/projects/{slug}/issues` mirror
+> endpoint, and the home/project milestone-progress indicator
+> (`/api/home/milestone`) were removed in Sprint 1024.1 (#2259) — only the
+> cross-project selector list below remains.
 
----
-
-## To-Dos
-
-Per-project scratchpad, outside the ticket backlog. Persists to Neon when
-configured, local JSON otherwise. Every route is project-scoped.
+> The To-Dos feature (`/api/projects/{project}/todos*` and `/api/todos`) was
+> removed in Sprint 1024.1 (#2255) in favour of a hand-maintained
+> `docs/todo.md` — those endpoints no longer exist.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/projects/{project}/todos` | List a project's to-dos |
-| `POST` | `/api/projects/{project}/todos` | Create a to-do |
-| `PATCH` | `/api/projects/{project}/todos/{todo_id}` | Update a to-do |
-| `DELETE` | `/api/projects/{project}/todos/{todo_id}` | Delete a to-do |
-| `DELETE` | `/api/projects/{project}/todos/done` | Clear completed to-dos |
-| `POST` | `/api/projects/{project}/todos/{todo_id}/attachments` | Attach a file to a to-do |
-| `GET` | `/api/projects/{project}/todos/{todo_id}/attachments/{filename}` | Fetch an attachment |
-| `DELETE` | `/api/projects/{project}/todos/{todo_id}/attachments/{filename}` | Delete an attachment |
-| `GET` | `/api/todos` | Batch-fetch to-dos for multiple project slugs in one request. `?projects=` comma-separated, max 50 slugs |
+| `GET` | `/api/milestones` | List milestones across projects (selector) |
 
 ---
 
-## Branches & Conflict Resolution
+## Branches
 
 | Method | Path | Description |
 |---|---|---|
@@ -813,8 +779,12 @@ configured, local JSON otherwise. Every route is project-scoped.
 | `DELETE` | `/api/projects/{owner}/{repo}/branches/{branch}` | Delete a single stale branch (protected branches like `develop`/`master` refused) |
 | `GET` | `/scan-stale-branches` | List `feature/<N>-*` remote branches, map each to a sprint, flag merged. `?repo=&target=` |
 | `POST` | `/cleanup-stale-branches` | Dry-run, then (on confirm) delete only merged branches; never unmerged |
-| `POST` | `/api/projects/{owner}/{repo_name}/resolve-branch-conflict` | Start AI-powered branch conflict resolution; returns `{started, job_key}` |
-| `GET` | `/api/projects/{owner}/{repo_name}/resolve-conflict-stream/{job_key_path}` | SSE stream of conflict-resolution progress |
+
+> The AI branch-conflict resolution endpoints
+> (`POST /api/projects/{owner}/{repo_name}/resolve-branch-conflict` and its
+> `resolve-conflict-stream` SSE) were removed in Sprint 1022.3 (#2240) — no
+> longer exist. The Finish wizard now surfaces a merge conflict for manual
+> resolution instead of driving an LLM resolve.
 
 ---
 

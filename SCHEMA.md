@@ -91,28 +91,14 @@ Per-project clone environment paths (prd, uat, coder, tester). Cascade-deletes w
 Index: `ix_project_environments_project_id` on `project_id`.
 Unique constraint: `(project_id, env)`.
 
-### project_todos (issue #843)
+### project_todos (issue #843 — removed in Sprint 1024.1, #2255)
 
-A lightweight, durable per-project to-do list that lives outside the ticket
-backlog — a simple scratchpad scoped to each project. Deliberately **not**
-ticket-like: no labels, assignees, or due dates. Portable column types
-(Integer / Text / Boolean, ISO-8601 string timestamps) so the table applies
-cleanly on SQLite as well as Postgres, matching `agent_runs`. When Neon is
-disabled the dashboard serves todos from a local JSON store
-(`.commander/project_todos_store.json`) via `services/sprint_manager/todo_repo.py`.
-
-| Column | Type | Description |
-|---|---|---|
-| `id` | integer PK | Auto-increment |
-| `project` | text NOT NULL | Owning project slug; every query is scoped by this |
-| `text` | text NOT NULL | Free-text todo body |
-| `done` | boolean NOT NULL | Completion flag; defaults to `false` |
-| `position` | integer NOT NULL | Sort key; the list is always returned ascending by `position` |
-| `created_at` | text NOT NULL | ISO-8601 UTC creation timestamp |
-| `updated_at` | text NOT NULL | ISO-8601 UTC last-modified timestamp |
-| `promoted_issue_number` | integer NULL | Reserved for a future planning bridge; never read, written, or exposed by the #843 API |
-
-Index: `ix_project_todos_project_position` on `(project, position)`.
+The Project To-Dos feature was removed in favour of a hand-maintained
+`docs/todo.md`. The `ProjectTodo` ORM model, the `todo_repo.py` /
+`todo_attachment_repo.py` stores, and the local JSON fallback
+(`.commander/project_todos_store.json`) are gone, and the `/api/projects/{project}/todos*`
+endpoints no longer exist. The historical migration
+(`k1l2m3n4o5p6`) is retained below; no live path reads or writes the table.
 
 ## Migrations
 
@@ -240,7 +226,7 @@ wall-clock span and lost per-agent resolution. Created identically on SQLite
 |---|---|---|
 | `id` | integer PK | Auto-increment |
 | `issue_number` | integer NOT NULL | GitHub issue number |
-| `sprint_label` | text NOT NULL | Sprint label, e.g. `sprint-59` |
+| `sprint_label` | text | Sprint label, e.g. `sprint-59`; **nullable** — `NULL` for manual (non-sprint) hook-driven sessions (issue #2246). Pre-#2246 DBs created this `NOT NULL`; `_maybe_make_sprint_label_nullable` recreates the table to drop the constraint |
 | `agent` | text NOT NULL | Agent role (`coder`, `tester`, `documenter`, `reviewer`, `estimator`) |
 | `started_at` | text NOT NULL | ISO 8601 dispatch timestamp |
 | `finished_at` | text | ISO 8601 finish timestamp; nullable while running |
@@ -255,11 +241,20 @@ wall-clock span and lost per-agent resolution. Created identically on SQLite
 | `attempt_kind` | text | Dispatch type: `initial`, `redispatch`, `continuation`; nullable (issue #787) |
 | `log_path` | text | Absolute path to the issue log file for this run; nullable (issue #783) |
 | `provider` | text | LLM provider identifier for this run (e.g. `ICA`); set from the role's `CCPROXY_PROFILE` at dispatch; nullable (issue #1673) |
+| `session_id` | text | Hook-driven session key for manual runs; used to pair `record_manual_run_open` / `record_manual_run_close`; nullable (issue #2246) |
 
 Indexes: `(issue_number, agent)`, `(sprint_label)`.
 
+**Manual-run rows (issue #2246).** As of issue #2246 rows are also written for
+hook-driven Claude Code sessions run *outside* a sprint: `record_manual_run_open`
+inserts a row (with `sprint_label = NULL` and a `session_id`) on the first
+tool_use of a session, and `record_manual_run_close` finalizes it on agent_stop.
+`agent_runs_for_sprint` folds these NULL-sprint runs back into a sprint's history
+by joining the issues mirror on the sprint label (issue #2247), and
+`GET /api/manual/live` exposes the currently-open ones.
+
 The `provider` column drives the **`caching: reduced`** indicator on the live
-board (`project.html`) and run browser (`run_browser.html`): when an agent run's
+board (`project.html`): when an agent run's
 provider is `ICA`, the proxy strips prompt-caching headers (full context is
 re-sent each turn), so a yellow badge flags the higher token cost. It surfaces in
 the live snapshot as `coder_provider` and in `/api/runs` as `provider`.
@@ -457,13 +452,12 @@ Per-environment deploy/restart for the `prd` and `uat` environments. Each enviro
 
 > The Deploy tab is scoped to the active project only (issue #768). Deploy cards also surface and inline-edit the run folder + port (issue #769), show a live capped log tail after deploy/restart/start (issue #770), and expose Start/Stop controls with a run-state badge alongside Deploy/Restart (issue #771). Headless `gh` auth for the launchd dashboard is wired via `GH_TOKEN` in the launchd plist + agent `.env` (issue #772).
 
-### Run Browser (issue #783)
+### Run data APIs (issue #783)
 
-Forensic log viewer for all past sprint runs. All data served from local SQLite + disk log files — zero GitHub API calls.
+Forensic per-run log data for all past sprint runs. All data served from local SQLite + disk log files — zero GitHub API calls. (The standalone `/run-browser` HTML viewer page was removed in Sprint 1022.2, #2243; the data endpoints below remain.)
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/run-browser` | Serve the Run Browser HTML page; accepts `?sprint=<label>` deep-link query param |
 | `GET` | `/runs` | List all past sprints with tickets and per-agent run metadata from `agent_runs` table |
 | `GET` | `/runs/{sprint}/{issue}/{agent}/log` | Paginated log content. Query params: `page` (1-based), `limit` (lines per page, default 200) |
 | `GET` | `/runs/{sprint}/{issue}/{agent}/log/tail` | Last N KB of a log file. Query param: `kb` (default 10) |
@@ -625,59 +619,35 @@ network calls. `preview-dag` reads this rolling summary to set its
 ### Daily Brief (issues #839–#842)
 
 A per-project and home-roll-up "what happened / what's next" brief, assembled
-from local sprint, ticket, and `agent_runs` data — zero GitHub API calls. Three
-layers, each its own router module mounted under the `sprints` router (no route
-lands in `server.py`, COMMANDER_GATE_MONOLITH, issue #761):
+from local sprint, ticket, and `agent_runs` data — zero GitHub API calls. The
+assembly is pure structured, kept LLM-free (issue #839, `brief_service.py`), and
+mounted under the `sprints` router (no route lands in `server.py`,
+COMMANDER_GATE_MONOLITH, issue #761). An optional `date=YYYY-MM-DD` query param
+selects the window; default is today.
 
-- **Assembly** (issue #839, `brief_service.py`) — pure structured assembly, kept
-  LLM-free. An optional `date=YYYY-MM-DD` query param selects the window; default
-  is today.
-- **Summary** (issue #840, `brief_summary.py`) — a cached Haiku narrative over the
-  assembled brief. Always falls back to a deterministic templated string, so the
-  endpoints never 5xx. `regenerate` clears the cache and re-invokes the model.
-- **Daily artifact** (issue #841, `brief_artifact.py`) — the full daily brief
-  persisted per `(project, date)` so it is generated once and served instantly
-  thereafter. The current day is lazily generated on first load; past dates are
-  served from the store with a clear empty state when none was stored (never a
-  recompute, never a 5xx). `regenerate` rebuilds, re-stores, and advances the
-  timestamp.
+> **Removed in Sprint 1024.1 (#2257):** the cached Haiku **Summary** layer
+> (`brief_summary.py`) and the persisted **Daily artifact** layer
+> (`brief_artifact.py`) — along with their `.../brief/summary[/regenerate]` and
+> `.../brief/daily[/regenerate]` endpoints and the daily-report launchd job — are
+> gone. Only the two structured-assembly endpoints below remain. The
+> `brief_summaries` cache table is orphaned (kept to avoid a schema migration,
+> never written). The `brief_artifacts` table survives because the Dev Report
+> (`/api/dev-report`) still persists its `dev_report` scope there.
 
-The home page (issue #842, `static/home.html`) renders the home roll-up plus a
-block per tracked project from these endpoints.
+The home page renders the Dev Report view (`/api/dev-report`) rather than the
+brief roll-up.
 
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/projects/{slug}/brief` | Assembled structured brief for one project (optional `date`) |
 | `GET` | `/api/brief` | Assembled home roll-up across all tracked projects (optional `date`) |
-| `GET` | `/api/projects/{slug}/brief/summary` | Cached (or freshly generated) LLM summary for a project brief |
-| `POST` | `/api/projects/{slug}/brief/summary/regenerate` | Clear the stored project summary and re-invoke the model |
-| `GET` | `/api/brief/summary` | Cached (or freshly generated) one-line home recap |
-| `POST` | `/api/brief/summary/regenerate` | Clear the stored home recap and re-invoke the model |
-| `GET` | `/api/projects/{slug}/brief/daily` | Stored (or lazily generated) daily brief artifact for a project |
-| `POST` | `/api/projects/{slug}/brief/daily/regenerate` | Rebuild and re-store the project daily brief, advancing the timestamp |
-| `GET` | `/api/brief/daily` | Stored (or lazily generated) daily home roll-up artifact. Each entry in `brief.projects` is enriched (issue #1778) with `repo`, `name`, `icon`, `color`, `briefSummary`, and `milestone` so the home page renders in one request instead of 1+N |
-| `POST` | `/api/brief/daily/regenerate` | Rebuild and re-store the home daily roll-up, advancing the timestamp |
 
-### Project To-Dos (issue #843)
+### Project To-Dos (issue #843 — removed in Sprint 1024.1, #2255)
 
-A lightweight, durable per-project to-do list backed by `project_todos` (Neon,
-with a local JSON fallback when Neon is disabled). All routes are project-scoped:
-a todo is only ever read, mutated, or deleted through its own project's path, so
-one project's todos are never visible to another. The reserved
-`promoted_issue_number` column is never read, written, or exposed. The routes
-ride on the already-mounted `sprints` router so no route lands in `server.py`
-(COMMANDER_GATE_MONOLITH, issue #761).
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/projects/{project}/todos` | List all todos (active and done) for the project, ascending by `position` |
-| `POST` | `/api/projects/{project}/todos` | Create a todo from body `{text}`; `done` defaults to `false`, `position` appends to end. Returns 201 with the new todo |
-| `PATCH` | `/api/projects/{project}/todos/{todo_id}` | Update `done`, `text`, and/or `position` (body `{done?, text?, position?}`) — independently or together. 404 if the todo does not belong to the project |
-| `DELETE` | `/api/projects/{project}/todos/{todo_id}` | Delete the todo; 204 on success, 404 if it does not belong to the project |
-| `GET` | `/api/todos?projects=a,b,c` | Batch fetch (issue #1778): comma-separated slugs → slug-keyed `{slug: Todo[]}` map so the home page loads all projects' todos in one request. Unknown slugs are included with an empty list. Duplicate slugs are silently collapsed and requesting more than `MAX_BATCH_SLUGS=50` unique slugs returns HTTP 400 (issue #1797). Declared on a separate `batch_router` so the full `/api/todos` path is used without inheriting the `/api/projects` prefix |
-
-The todo object shape is `{id, project, text, done, position, created_at, updated_at}` —
-no ticket-like fields (labels, assignees, due dates) and no `promoted_issue_number`.
+The Project To-Dos feature — the `/api/projects/{project}/todos*` CRUD, the
+`/api/todos` batch endpoint, attachments, the `project_todos` store, and the
+panel UI — was removed in favour of a hand-maintained `docs/todo.md`. None of
+these routes exist any longer.
 
 ### Sprint label collision audit (issues #1461, #1464, #1465)
 
@@ -748,6 +718,12 @@ Non-blocking estimator runs backed by FastAPI `BackgroundTasks`. Jobs are persis
 
 ### Sprint-finished webhook — optional callback_url on sprint run (issue #1865)
 
+> **Removed in Sprint 1022.3 (#2242).** The sprint-finished webhook was deleted
+> along with `routers/sprint_webhook_service.py`. The `callback_url` field on
+> `SprintMgmtRunBody` is still accepted and validated as an `http`/`https` URL,
+> but it fires nothing; the bearer-token auth (`check_callback_url_auth`) and
+> SSRF screening are gone. The behavior below is retained for historical reference.
+
 The managed sprint-run body (`SprintMgmtRunBody`, `routers/sprint_run_service.py`) accepts an optional `callback_url` (validated as a non-empty `http`/`https` URL; 422 otherwise). When present, a daemon monitor thread (`start_callback_monitor` → `_monitor_worker` in `routers/sprint_webhook_service.py`) waits for the sprint subprocess to exit and best-effort `POST`s an outcome document to the URL. Killing a running sprint (`kill_sprint`) also fires the webhook with `outcome:"killed"`. The `callback_url` is persisted into `plan.json` so a kill after restart can still fire it.
 
 Payload shape: as of issue #1945 the webhook and the on-disk report share a single builder (`build_commander_report`), so both emit the richer shape documented under **File-based sprint outcome report** below (`build_webhook_payload` now delegates to it). The pre-#1945 flat shape (`project`, `sprint_label`, `outcome`, `duration_sec`, `tickets`, `summary_url`) is no longer emitted.
@@ -755,6 +731,13 @@ Payload shape: as of issue #1945 the webhook and the on-disk report share a sing
 **Auth interplay (AC5):** when `COMMANDER_API_TOKEN` is set, a request that supplies `callback_url` must itself carry the bearer token, else the run is rejected with `403` (`check_callback_url_auth`). Webhook delivery is best-effort — failures are logged, never raised.
 
 ### File-based sprint outcome report — commander_report.latest.json (issue #1945)
+
+> **Automatic writer removed in Sprint 1022.3 (#2242).** The monitor-thread
+> writer (`start_report_monitor` / `write_commander_report` / `build_commander_report`,
+> in the deleted `routers/sprint_webhook_service.py`) no longer runs at sprint
+> terminal state. The `commander_report.latest.json` artifact is now produced on
+> demand by `scripts/export_hermes_report.py` (and `GET /api/dev-report`) rather
+> than written automatically. The mechanism below is retained for historical reference.
 
 At every sprint terminal state (normal finish, `kill_sprint`, or error) a daemon monitor thread (`start_report_monitor` → `_report_monitor_worker` in `routers/sprint_webhook_service.py`) waits for the sprint subprocess to exit and writes a JSON snapshot **atomically** (write-to-temp + `rename`) to `COMMANDER_REPORT_PATH` (env var, default `/var/run/commander/commander_report.latest.json`; documented in `.env.example`). This is unconditional — it runs regardless of whether `callback_url` is configured — so external pollers (Hermes) always have a consistent artifact even when webhook delivery fails. If the target's parent directory does not exist, `write_commander_report` logs a clear error and returns without crashing the run (a previous file is left untouched).
 
@@ -793,18 +776,7 @@ At sprint finish `sprint_manager.py` calls `generate_code_state_snapshot` (`serv
 
 ### Sprint merge-conflict status — auto-resolve + human-needed signal (issue #1898)
 
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/api/sprints/{sprint_label}/conflict-status?project=` | Reports whether a sprint's step-merge is parked on a human-needed merge conflict. Always HTTP 200 (400 on a malformed `label`). Autonomous callers (the Hermes loop) poll it to skip a blocked sprint instead of hanging. Canonical flat route (issue #2065). |
-| `GET` | `/api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status` | **Deprecated** nested alias of the flat route above (issue #2065); still works, flagged `deprecated: true` in the OpenAPI schema. |
-
-Response:
-
-```
-200 {"label": "sprint-N", "blocked": false}
-200 {"label": "sprint-N", "blocked": true, "code": "merge_conflict_needs_human",
-     "files": [...], "at": "<iso>"}
-```
+> **Endpoints removed in Sprint 1021 (#2234).** The `GET /api/sprints/{sprint_label}/conflict-status?project=` route and its deprecated nested alias `GET /api/projects/{owner}/{repo_name}/sprints/{label}/conflict-status` had zero callers and were deleted. The underlying auto-resolve / human-needed conflict state is still written during the merge flow (below); it is simply no longer exposed over HTTP.
 
 **Auto-resolve path.** When a sprint branch is synced into `develop` before merge (`_prepare_sprint_branch_for_develop_merge` in `startup.py`), conflicts are triaged by file: `docs/**.md` files resolve via the existing doc-merge path, and **append-only** conflicts in `SCHEMA.md` / any `models.py` (`_is_union_merge_safe_path`) resolve via `git merge-file --union`. A conflict region is only treated as append-only when its diff3 base section is empty (`_has_overlapping_conflict_in_diff3`); any overlapping edit to existing lines is **not** auto-resolved. Anything else is a needs-human conflict.
 

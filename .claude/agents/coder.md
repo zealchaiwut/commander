@@ -35,7 +35,14 @@ You may ONLY pause for confirmation in these specific situations:
 
 Input will be in the form: `work on issue <N>`
 
-Extract the issue number N and follow the workflow below.
+Extract the issue number N, then immediately export the agent identity env vars so all hook calls for this session carry the correct attribution:
+
+```bash
+export CLAUDE_AGENT_ROLE=coder
+export CLAUDE_AGENT_ISSUE=<N>
+```
+
+Then follow the workflow below.
 
 ## Workflow
 

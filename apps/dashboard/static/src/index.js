@@ -9,7 +9,6 @@
  * Follow-on tickets extract additional self-contained blocks into static/src/
  * and import them here.
  */
-import { evlGroupEventsByRun } from "./activity-grouping.js";
 import {
   colorizeLogLine,
   escapeLogHtml,
@@ -39,6 +38,10 @@ import {
 } from "./shell/tabs.js";
 import { loadCommanderFeatures } from "./shell/features.js";
 import { parseUrl } from "./shell/url-parser.js";
+import {
+  buildProjectSwitcherOptions,
+  navigateToProject,
+} from "./shell/project-switcher.js";
 import {
   visibilityInterval,
   installVisibilityGuard,
@@ -99,6 +102,8 @@ root.switchTab = switchTab;
 root.toggleStabDropdown = toggleStabDropdown;
 root.closeAllStabDropdowns = closeAllStabDropdowns;
 root.parseUrl = parseUrl;
+root.buildProjectSwitcherOptions = buildProjectSwitcherOptions;
+root.navigateToProject = navigateToProject;
 root.loadCommanderFeatures = loadCommanderFeatures;
 root.visibilityInterval = visibilityInterval;
 root.snavNavStatusFetch = snavNavStatusFetch;
@@ -107,6 +112,8 @@ globalThis.switchTab = switchTab;
 globalThis.toggleStabDropdown = toggleStabDropdown;
 globalThis.closeAllStabDropdowns = closeAllStabDropdowns;
 globalThis.parseUrl = parseUrl;
+globalThis.buildProjectSwitcherOptions = buildProjectSwitcherOptions;
+globalThis.navigateToProject = navigateToProject;
 globalThis.loadCommanderFeatures = loadCommanderFeatures;
 globalThis.visibilityInterval = visibilityInterval;
 globalThis.snavNavStatusFetch = snavNavStatusFetch;
@@ -154,42 +161,6 @@ root.stopGhAuthPoll = stopGhAuthPoll;
 globalThis.GH_AUTH_POLL_INTERVAL_MS = GH_AUTH_POLL_INTERVAL_MS;
 globalThis.startGhAuthPoll = startGhAuthPoll;
 globalThis.stopGhAuthPoll = stopGhAuthPoll;
-
-// Activity feed run-grouping helper (issue #1853)
-root.evlGroupEventsByRun = evlGroupEventsByRun;
-globalThis.evlGroupEventsByRun = evlGroupEventsByRun;
-
-// Logs error badge helpers (issue #1857)
-import {
-  logsReadLastVisit,
-  logsWriteLastVisit,
-  evlIsErrorEvent,
-  logsCountNewErrors,
-  buildEvlFetchUrl,
-} from "./logs-error-badge.js";
-root.logsReadLastVisit = logsReadLastVisit;
-root.logsWriteLastVisit = logsWriteLastVisit;
-root.evlIsErrorEvent = evlIsErrorEvent;
-root.logsCountNewErrors = logsCountNewErrors;
-root.buildEvlFetchUrl = buildEvlFetchUrl;
-globalThis.logsReadLastVisit = logsReadLastVisit;
-globalThis.logsWriteLastVisit = logsWriteLastVisit;
-globalThis.evlIsErrorEvent = evlIsErrorEvent;
-globalThis.logsCountNewErrors = logsCountNewErrors;
-globalThis.buildEvlFetchUrl = buildEvlFetchUrl;
-
-// Logs view control helpers (issue #1858)
-import {
-  shouldAutoLoadRaw,
-  pickAutoSprintLabel,
-  logsToolbarVisibility,
-} from "./logs-view-controls.js";
-root.shouldAutoLoadRaw = shouldAutoLoadRaw;
-root.pickAutoSprintLabel = pickAutoSprintLabel;
-root.logsToolbarVisibility = logsToolbarVisibility;
-globalThis.shouldAutoLoadRaw = shouldAutoLoadRaw;
-globalThis.pickAutoSprintLabel = pickAutoSprintLabel;
-globalThis.logsToolbarVisibility = logsToolbarVisibility;
 
 // Failures inbox tab (issue #2020)
 import {

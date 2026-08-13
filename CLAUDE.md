@@ -134,6 +134,10 @@ behavior — **source-regex checks do not count as AC coverage.**
 
 **Why:** the #982 SSE autofix regression (results never surfacing) shipped through a green suite of regex checks. A real frame-through-parser test would have failed immediately. (Issue #1746)
 
+**Sanctioned exceptions (issue #2181):** The following test files use source-structure checks because no environment-free behavioral alternative exists — this is explicitly approved and must NOT be re-flagged by future reviewers:
+
+- `tests/test_2158__fbox_mobile_rule_deduplicated.py` — CSS deduplication invariant ("the `.fbox-table` column-hide rule appears exactly once across all `@media (max-width: 600px)` blocks"). Asserting this via computed styles requires a full browser engine; jsdom does not evaluate `@media` queries. The behavioral consequence (column hidden at ≤600px) is covered separately by `tests/frontend/failures-mobile-cols-2073.test.mjs`. A parallel Node.js structural test (`tests/frontend/css-dedup-fbox-2158.test.mjs`) performs the same checks and also asserts the `display: none` property value.
+
 ### Keep lint/export refactors in their own ticket (issue #1588)
 
 Lint-only or testability-only refactors — adding/removing `export` keywords,
@@ -183,9 +187,6 @@ docs/
   todo.md            sprint history (documentor-owned AUTO region) + hand TODO
   milestones/        active milestone tracking (one .md per initiative)
   features/          one .md per subsystem
-  bulk-create/       saved bulk-create prompts (YYYY-MM-DD-N-<topic>.md; N =
-                     sequence within the day so batches file in order; BKK
-                     dates; never edit a file whose batch already ran)
   changelog/         dated per-sprint entries (uat/ and prd/)
 ```
 

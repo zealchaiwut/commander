@@ -27,6 +27,18 @@ MATCH_WINDOW_SECS = 300    # ±5 min window for action_id matching
 _SUPPORTED_TYPES = {"IssuesEvent", "CreateEvent", "PullRequestEvent"}
 
 
+def _handle_disk_io(exc: Exception, db_module) -> None:
+    """Lazy-import shim extracted from the issues-sync loop (issue #2173).
+
+    Calls db_module.handle_runtime_disk_io_error(exc). When db_module is None
+    (test injection path), imports the real `db` module first.
+    """
+    _db = db_module
+    if _db is None:
+        import db as _db  # type: ignore[assignment]  # noqa: PLC0415
+    _db.handle_runtime_disk_io_error(exc)
+
+
 def _get_gh_token() -> str:
     r = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, check=True)
     return r.stdout.strip()
@@ -645,10 +657,7 @@ async def run_issues_sync_loop(
                 # Disk I/O error means DB corruption — run integrity_check, log
                 # CRITICAL with restore hint, and abort the loop so the server
                 # does not 500-loop indefinitely (issue #2012).
-                _db = db_module
-                if _db is None:
-                    import db as _db  # type: ignore[assignment]  # noqa: PLC0415
-                _db.handle_runtime_disk_io_error(exc)  # no-op for non-disk-IO; raises for disk-IO
+                _handle_disk_io(exc, db_module)  # no-op for non-disk-IO; raises for disk-IO
                 logger.warning("issues mirror sync error for %s: %s", repo, exc)
             # Milestones mirror (issue #877): kept fresh on the same sweep so the
             # GET milestones endpoint serves from the local DB at zero quota.
@@ -656,10 +665,7 @@ async def run_issues_sync_loop(
                 import github_milestones
                 github_milestones.sync_milestones_mirror(repo, db_module=db_module)
             except Exception as exc:
-                _db = db_module
-                if _db is None:
-                    import db as _db  # type: ignore[assignment]  # noqa: PLC0415
-                _db.handle_runtime_disk_io_error(exc)  # abort on disk I/O (issue #2012)
+                _handle_disk_io(exc, db_module)  # abort on disk I/O (issue #2012)
                 logger.warning("milestones mirror sync error for %s: %s", repo, exc)
             # Open-set reconcile (#756): periodic safety net that closes mirror
             # rows the incremental poll missed closing — runs every Nth sweep so
@@ -668,10 +674,7 @@ async def run_issues_sync_loop(
                 try:
                     reconcile_closed_issues(repo, db_module=db_module)
                 except Exception as exc:
-                    _db = db_module
-                    if _db is None:
-                        import db as _db  # type: ignore[assignment]  # noqa: PLC0415
-                    _db.handle_runtime_disk_io_error(exc)  # abort on disk I/O (issue #2012)
+                    _handle_disk_io(exc, db_module)  # abort on disk I/O (issue #2012)
                     logger.warning("issues mirror reconcile error for %s: %s", repo, exc)
         count += 1
         if iterations is not None and count >= iterations:

@@ -243,19 +243,9 @@ class TestAC2NonICAProviderAbsent:
 # ── AC3: tooltip text present in the HTML templates ──────────────────────────
 
 class TestAC3TooltipText:
-    """The caching-unavailable tooltip text is present in the run_browser.html."""
+    """The caching-unavailable tooltip text is present in the HTML templates."""
 
-    def test_run_browser_html_contains_tooltip(self):
-        """AC3: run_browser.html has text about ICA proxy prompt caching unavailability."""
-        html_path = STATIC_DIR / "run_browser.html"
-        assert html_path.exists(), "run_browser.html must exist"
-        content = html_path.read_text(encoding="utf-8")
-        assert "ICA proxy" in content or "ica proxy" in content.lower(), (
-            "run_browser.html should mention 'ICA proxy' in tooltip/note text"
-        )
-        assert "caching" in content.lower(), (
-            "run_browser.html should mention caching in the indicator context"
-        )
+    # test_run_browser_html_contains_tooltip removed: run_browser.html deleted in #2243
 
     def test_project_html_contains_caching_reduced_badge(self):
         """AC3/AC5: project.html has the caching:reduced badge for the active run view."""

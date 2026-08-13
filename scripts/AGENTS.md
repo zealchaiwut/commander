@@ -53,7 +53,6 @@ review, health gating, and promotion.
 - `finish_feature.py` [GH] — merge feature branch to target branch after tests pass; `--issue N [--repo owner/repo] [--target-branch BRANCH]` (Tester-only)
 - `sprint_estimator.py` — estimate effort/risk for all backlog tickets in a sprint (Sonnet); `<sprint-label> [--repo owner/repo] [--config PATH]`
 - `sprint_review.py` — generate sprint review summary (Haiku); `--sprint-label LABEL [--repo owner/repo]`
-- `run_post_sprint.py` — run post-sprint write-back steps (documenter, review) for a manually-driven sprint; `--sprint-label LABEL [--repo owner/repo] [--dry-run] [--skip-documenter] [--skip-review]`
 - `sprint_planner.py` [GH] — conversational CLI to plan the next sprint; (interactive, auto-detects sprint number)
 - `sprint_init.py` — bootstrap a project for sprint_manager (.commander/sprint.yaml); `--repo owner/repo --repo-root PATH --coder-worktree PATH --tester-worktree PATH`
 - `run_suite_health_gate.py` — run full pytest suite health gate for a sprint; `--sprint-label LABEL [--sprints-dir PATH] [--timeout SECONDS]`
@@ -64,12 +63,10 @@ review, health gating, and promotion.
 
 Scripts that generate reports, snapshots, and digests from project state.
 
-- `generate_daily_report.py` — generate Commander daily summary report; `[--date YYYY-MM-DD] [--db-path PATH]`
 - `generate_status.py` [GH] — generate STATUS.md snapshot from GitHub issues/PRs; `[--repo owner/repo] [--out PATH]`
 - `sync_status_md.py` — regenerate STATUS.md and commit only when content changed; `[--repo owner/repo] [--out PATH] [--note TEXT]`
 - `generate_context_digest.py` [GH] — build context digest for new Claude Code sessions; `[--repo owner/repo] [--out PATH] [--decisions PATH]`
 - `generate_code_state.py` — generate docs/architecture/code-state.md for a sprint; `--sprint-label LABEL [--repo-root PATH] [--base-sha SHA] [--head-sha SHA]`
-- `check_docs_freshness.py` — check whether docs are stale relative to recent code changes; `[--base SHA] [--head SHA] [--repo owner/repo]`
 - `export_hermes_report.py` — export nightly dev-report JSON contract for Hermes; `[--dry-run] [--output PATH] [--db-path PATH]`
 
 ## Project Setup
@@ -86,7 +83,6 @@ Scripts for onboarding new projects and provisioning machines and services.
 - `setup_machine.sh` — one-time machine provisioning (deps, paths, dotfiles) — do not call from agent code
 - `setup_cline.sh` — install Cline CLI and verify coder worktree for sprint dispatch
 - `install_launchd.sh` — install Commander dashboard as macOS LaunchAgent on port 8000
-- `install_daily_report_launchd.sh` — install nightly daily-report LaunchAgent (fires at 23:55)
 - `install_shell_shortcuts.sh` — append Commander shell functions to ~/.commander.zsh
 - `install_agent_skills.sh` — install caveman + code-review-graph skills into all clones
 - `uninstall_launchd.sh` — unload and remove the Commander dashboard LaunchAgent
@@ -105,20 +101,12 @@ Scripts for repair, backfill, calibration, migration, cleanup, and diagnostics.
 - `doctor.py` — validate host readiness for a Commander sprint; `[--json]`
 - `resync_issues_mirror.py` [DB] — force full GitHub → SQLite issues-mirror resync; `[--yes|--force] [--repo OWNER/REPO]`; without --yes prints a dry-run summary and exits 1
 - `backfill_agent_runs_project.py` [DB] — attribute empty agent_runs.project rows; `(--dry-run|--apply) [--db PATH]`
-- `backfill_sprint_project.py` [DB] — attribute empty sprints.project rows; `(--dry-run|--apply) [--db PATH]`
 - `audit_sprint_collisions.py` — read-only audit for sprint label collisions across projects; `[--db PATH] [--runtime-dir PATH]`
-- `audit_sprint_terminal_state_drift.py` [DB] — one-time audit (and optional repair) for terminal state drift: stored state vs what `_any_failed` would derive from issues_json; `[--db PATH] [--project OWNER/REPO] [--apply]`
-- `repair_sprint_collisions.py` [DB] — surgical DB repair for cross-project sprint label collision; `(--dry-run|--apply)`
 - `repair_sprint_inbox_from_github.py` [DB] — fix stale sprint lifecycle rows vs GitHub truth; `--project PROJECT (--dry-run|--apply) [--limit N]`
 - `repair_sprint_lineage.py` [DB] — rebuild sprint lineage DB rows from GitHub truth; `(--dry-run|--apply) --project PROJECT [--db PATH]`
 - `clean_sprint_files.py` — archive stale per-sprint runtime files for finished sprints; `--project PROJECT [--dry-run]`
 - `collect_stray_estimates.py` — move stray estimate JSONs to canonical .commander/estimates/; `--project PROJECT [--dry-run]`
 - `check_neon_connection.py` [Neon] — pre-flight check for Neon database connection; `[--direct]`
-- `export_to_neon.py` [Neon] — one-shot export local SQLite data to Neon; `[--db-path PATH] [--dry-run]`
-- `migrate_sprints_to_neon.py` [Neon] — backfill .commander/sprints/*.json files into Neon; `[--project NAME] [--dry-run]`
-- `migrate_to_separate_dbs.py` [DB] — one-time copy of dashboard.db into commander.db (DB-split migration); `[--dry-run]`
-- `migrate_repo_structure.py` — restructure repo layout (dashboard/ → apps/dashboard/); `[--dry-run] [--yes]`
-- `rollback_repo_structure.sh` — undo the repo restructure migration (generated counterpart script)
 - `rebuild_calibration_cache.py` — rebuild estimator calibration cache from sprint history; `--project SLUG [--dry-run]`
 - `seed_calibration.py` — seed estimator calibration tiers from past sprint data; `--commander-dir PATH [--record SIZE:MINUTES] [--from-sprint LABEL]`
 - `seed_test_issues.py` [GH] — seed sandbox repo with mock issues for tester isolation; `--repo REPO [--wipe] [--append] [--dry-run]`
@@ -146,13 +134,10 @@ Scripts for repair, backfill, calibration, migration, cleanup, and diagnostics.
 - `update_ticket.py` [GH] — label transitions affect the sprint board live; incorrect transitions confuse sprint_manager.
 - `init_project.py` [GH] — creates directory structure and pushes initial commit; verify the target directory before running.
 - `release.py` [GH] — merges develop into main and pushes a tag; irreversible without force-push.
-- `repair_sprint_collisions.py` [DB] — hardcoded to the sprint-66 incident; do not run for other collisions.
 - `resync_issues_mirror.py` [DB] — makes real GitHub API calls for all registered repos; can exhaust rate limit.
 
 ## What NOT to Touch from Agent Code
 
 - `start_prd.sh` / `start_uat.sh` — production launch scripts; coordinate with the system owner.
-- `install_launchd.sh` / `install_daily_report_launchd.sh` — install system-level LaunchAgent services.
-- `com.commander.daily-report.plist` — launchd plist; changes affect the live unattended runner.
+- `install_launchd.sh` — installs the system-level Commander LaunchAgent service.
 - `setup_machine.sh` — one-time machine provisioning; do not call from agent code.
-- `rollback_repo_structure.sh` — destructive undo; only use after a failed `migrate_repo_structure.py`.

@@ -458,13 +458,14 @@
       flex-shrink: 0; font-size: var(--font-size-md); color: #fff;
     }
     .proj-header-name {
+      display: none;
       font-size: 22px; font-weight: var(--font-weight-bold); line-height: var(--line-height-tight);
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       min-width: 0;
     }
     .proj-mobile-switcher {
-      display: none;
-      max-width: min(52vw, 220px);
+      display: block;
+      max-width: min(52vw, 240px);
       font-size: 15px;
       font-weight: var(--font-weight-bold);
       color: var(--text);
@@ -473,6 +474,7 @@
       border-radius: var(--radius-sm);
       padding: 6px 28px 6px 10px;
       appearance: none;
+      cursor: pointer;
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
       background-repeat: no-repeat;
       background-position: right 8px center;
@@ -1665,8 +1667,6 @@
       /* Mobile scrolls on <body> (chrome is static here, not sticky). */
       body { height: auto; min-height: 100dvh; overflow: visible; }
       .sidebar { display: none; }
-      .proj-header-name { display: none; }
-      .proj-mobile-switcher { display: block; }
       .sub-tabs { position: static; }
       .main-area { overflow-y: visible; }
       .proj-header { position: static; }
@@ -3311,6 +3311,65 @@
       font-family: var(--mono); font-size: 11px; color: var(--text-sub);
       min-width: 60px; text-align: right; flex-shrink: 0;
     }
+    /* ── Planning insights: stale-estimate row (issue #2264 AC1) ── */
+    .pi-stale-slot:empty { display: none; }
+    .pi-stale-row {
+      display: flex; align-items: center; gap: 6px;
+      margin: 0 12px 8px; padding: 7px 10px;
+      background: var(--amber-bg, rgba(217,119,6,.08));
+      border: 1px solid rgba(217,119,6,.25); border-radius: 6px;
+      font-size: 12px; color: var(--amber, #b45309);
+    }
+    .pi-stale-icon { font-size: 13px; flex-shrink: 0; }
+    .pi-stale-label { font-weight: 600; }
+    .pi-stale-ids { font-family: var(--mono); color: var(--text-sub); }
+
+    /* ── Estimate-vs-actual section (issue #2264 AC3) ── */
+    .pi-ev-slot:empty { display: none; }
+    .pi-ev-section {
+      margin: 0 12px 8px;
+      border: 1px solid var(--border); border-radius: 6px;
+      overflow: hidden;
+    }
+    .pi-ev-toggle-btn {
+      display: flex; align-items: center; gap: 6px; width: 100%;
+      padding: 7px 10px; background: var(--surface-2); border: none;
+      cursor: pointer; font-size: 12px; color: var(--text-sub);
+      text-align: left;
+    }
+    .pi-ev-toggle-btn:hover { color: var(--text); background: var(--surface-3, var(--surface-2)); }
+    .pi-ev-chevron { margin-left: auto; transition: transform .15s; }
+    .pi-ev-content { padding: 0 10px 8px; }
+    .pi-ev-header-row {
+      display: grid;
+      grid-template-columns: 46px 1fr 64px 56px 52px 52px;
+      gap: 6px; padding: 6px 0 4px;
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .05em; color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .pi-ev-row {
+      display: grid;
+      grid-template-columns: 46px 1fr 64px 56px 52px 52px;
+      gap: 6px; padding: 4px 0;
+      font-size: 12px; border-bottom: 1px solid var(--border-subtle, var(--border));
+      align-items: center;
+    }
+    .pi-ev-row:last-child { border-bottom: none; }
+    .pi-ev-num { font-family: var(--mono); font-size: 11px; color: var(--text-sub); }
+    .pi-ev-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pi-ev-est, .pi-ev-act { font-family: var(--mono); font-size: 11px; text-align: right; }
+    .pi-ev-delta {
+      font-family: var(--mono); font-size: 11px; font-weight: 600; text-align: right;
+    }
+    .pi-ev-under { color: var(--green, #16a34a); }
+    .pi-ev-over  { color: var(--red, #dc2626); }
+    .pi-ev-on    { color: var(--text-sub); }
+    .pi-ev-status { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+    .pi-ev-status-done { color: var(--green); }
+    .pi-ev-status-fail { color: var(--red); }
+    .pi-ev-status-skip { color: var(--text-muted); }
+
     /* ── Pre-flight check banner (issue #434) ── */
     .smgmt-preflight-banner {
       margin: 0 12px 10px;
@@ -7259,460 +7318,6 @@
     }
     .smgmt-kickoff-retry-btn:hover { background: rgba(239,68,68,.14); }
 
-    /* ── Logs tab (issue #420) ── */
-    .logs-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-    .logs-toolbar {
-      display: flex; flex-direction: column; gap: 8px;
-      padding: 14px 20px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
-    }
-    .logs-filter-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-    @media (max-width:640px) { .logs-filter-bar { display:grid; grid-template-columns:1fr 1fr; gap:8px; } }
-    .logs-chip-group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-    .logs-chip-label {
-      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
-      color: var(--text-sub); margin-right: 2px; white-space: nowrap;
-    }
-    .logs-chip {
-      display: inline-flex; align-items: center; padding: 3px 10px;
-      border-radius: 20px; border: 1px solid var(--border); background: none;
-      color: var(--text-muted); font-size: 12px; font-family: inherit;
-      cursor: pointer; transition: background .12s, border-color .12s, color .12s; white-space: nowrap;
-    }
-    .logs-chip:hover { background: var(--surface-2); color: var(--text); }
-    .logs-chip.active { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); font-weight: 600; }
-    .logs-chip:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-    /* Errors-only overlay pill reads in red when active (distinct from the blue
-       source filters); deck filter=errors lands here. */
-    .logs-chip--errors.active { background: var(--red-bg); border-color: var(--red); color: var(--red); }
-    .logs-chip--hidden { display: none !important; }
-    .logs-tags-see-more-btn { font-style: italic; color: var(--text-sub); }
-    .logs-toolbar-row2 { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .logs-search-wrap { position: relative; flex: 1; max-width: 320px; }
-    .logs-search-icon {
-      position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
-      color: var(--text-sub); font-size: 14px; pointer-events: none;
-    }
-    .logs-search {
-      width: 100%; padding: 6px 10px 6px 28px;
-      border: 1px solid var(--border); border-radius: 6px;
-      background: var(--surface-2); color: var(--text); font-size: 13px; font-family: inherit;
-      transition: border-color .15s;
-    }
-    .logs-search:focus { outline: none; border-color: var(--blue); background: var(--surface); }
-    .logs-toolbar-top {
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    }
-    .logs-seg {
-      display: inline-flex; border: 1px solid var(--border); border-radius: 8px;
-      overflow: hidden; background: var(--surface-2); padding: 2px;
-    }
-    .logs-seg-btn {
-      padding: 5px 14px; background: none; border: none; border-radius: 6px;
-      color: var(--text-muted); font-size: 12px; font-weight: 500;
-      font-family: inherit; cursor: pointer; transition: background .12s, color .12s, box-shadow .12s;
-      display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
-    }
-    .logs-seg-btn:hover { color: var(--text); }
-    .logs-seg-btn.active {
-      background: var(--surface); color: var(--text); font-weight: 600;
-      box-shadow: 0 1px 2px rgba(0,0,0,.06);
-    }
-    .logs-seg-btn:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
-    .logs-toolbar-filters {
-      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    }
-    .logs-filter-select {
-      padding: 5px 10px; font-size: 12px; border: 1px solid var(--border);
-      border-radius: 6px; background: var(--surface); color: var(--text);
-      font-family: inherit; cursor: pointer;
-    }
-    .logs-level-seg {
-      display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden;
-    }
-    .logs-level-seg button {
-      padding: 4px 10px; border: none; border-right: 1px solid var(--border);
-      background: none; font-size: 11px; font-family: inherit; color: var(--text-muted);
-      cursor: pointer;
-    }
-    .logs-level-seg button:last-child { border-right: none; }
-    .logs-level-seg button.active { background: var(--text); color: var(--surface); font-weight: 600; }
-    .logs-level-seg button[aria-pressed="true"] { background: var(--text); color: var(--surface); font-weight: 600; }
-    .lsr-label { font-size: 11px; color: var(--text-sub); font-weight: 500; }
-    .lsr-input { padding: 5px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); color: var(--text); width: 100%; }
-    .lsr-input:focus { outline: none; border-color: var(--blue); }
-    .lsr-result { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
-    .lsr-result:hover { background: var(--surface-hover); }
-    .lsr-result-meta { font-size: 11px; color: var(--text-sub); display: flex; gap: 8px; }
-    .lsr-result-text { font-size: 12px; font-family: var(--font-mono, monospace); color: var(--text); white-space: pre-wrap; word-break: break-all; }
-    .lsr-result-text mark { background: var(--yellow-bg, #fef9c3); color: inherit; border-radius: 2px; }
-    .lsr-badge { padding: 1px 5px; border-radius: 3px; background: var(--surface-2); font-size: 10px; }
-    .lsr-truncation { padding: 8px 12px; font-size: 11px; color: var(--text-sub); background: var(--surface-2); text-align: center; }
-    .logs-body { flex: 1; overflow-y: auto; min-height: 0; }
-    .logs-empty { padding: 40px 20px; text-align: center; color: var(--text-sub); font-size: 13px; }
-    /* Loading skeleton for activity list */
-    .logs-skeleton { padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; }
-    .logs-skeleton-row {
-      height: 36px; border-radius: 6px;
-      background: var(--surface-2); opacity: .7;
-      animation: logs-shimmer 1.4s ease-in-out infinite;
-    }
-    .logs-skeleton-row:nth-child(2) { animation-delay: .15s; }
-    .logs-skeleton-row:nth-child(3) { animation-delay: .3s; }
-    @keyframes logs-shimmer { 0%, 100% { opacity: .4; } 50% { opacity: .85; } }
-    .logs-event-line { display: flex; gap: 8px; }
-    .logs-event-ts { color: var(--text-sub); flex-shrink: 0; }
-    .logs-event-line.dispatch .logs-event-msg { color: var(--blue); }
-    .logs-event-line.success .logs-event-msg { color: var(--green); }
-    .logs-event-line.warn .logs-event-msg { color: var(--amber); }
-    .logs-event-line.fail .logs-event-msg { color: var(--red); }
-    .logs-event-line.event .logs-event-msg { color: var(--text-muted); }
-    .logs-raw-stream {
-      font-family: var(--mono); font-size: 11px; line-height: 1.7;
-      max-height: 60vh; overflow-y: auto; padding: 12px 20px;
-    }
-    .logs-raw-line { color: var(--text-muted); white-space: pre-wrap; word-break: break-all; }
-    .logs-live-dot {
-      width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0;
-      animation: smgmt-running-badge-pulse 2s ease-in-out infinite;
-    }
-    /* ── Events Activity Log (issue #633) ── */
-    .evl-bundle-row { border-bottom: 1px solid var(--border); }
-    .evl-bundle-header {
-      display: flex; align-items: center; gap: 8px;
-      padding: 10px 16px; cursor: pointer; user-select: none;
-    }
-    .evl-bundle-header:hover { background: var(--surface-hover); }
-    .evl-bundle-header:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; background: var(--surface-hover); }
-    .evl-bundle-row.evl-single .evl-bundle-header { cursor: default; }
-    .evl-bundle-row.evl-single .evl-bundle-header:hover { background: transparent; }
-    .evl-headline { font-size: 13px; font-weight: 500; color: var(--text); flex-shrink: 0; }
-    .evl-effect-chips { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; flex: 1; min-width: 0; }
-    .evl-effect-chip {
-      font-size: 11px; font-weight: 600; padding: 1px 6px;
-      border-radius: 10px; border: 1px solid; white-space: nowrap;
-    }
-    .evl-effect-chip--added  { background: var(--green-bg);  color: var(--green);    border-color: var(--green); }
-    .evl-effect-chip--removed{ background: var(--red-bg);    color: var(--red);      border-color: var(--red); }
-    .evl-effect-chip--neutral{ background: var(--surface-2); color: var(--text-sub); border-color: var(--border); }
-    .evl-count-badge {
-      font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px;
-      background: var(--surface-2); color: var(--text-muted);
-      border: 1px solid var(--border); flex-shrink: 0;
-    }
-    .evl-chevron { font-size: 12px; color: var(--text-sub); transition: transform .15s; flex-shrink: 0; }
-    .evl-bundle-row.expanded .evl-chevron { transform: rotate(90deg); }
-    .evl-sub-rows { display: none; border-top: 1px solid var(--border); background: var(--surface-2); }
-    .evl-bundle-row.expanded .evl-sub-rows { display: block; }
-    .evl-sub-row {
-      display: flex; align-items: center; gap: 12px;
-      padding: 6px 32px; font-size: 12px;
-      border-bottom: 1px solid var(--border);
-    }
-    .evl-sub-row:last-child { border-bottom: none; }
-    .evl-ts { font-family: var(--mono); font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
-    .evl-actor { color: var(--text-sub); flex-shrink: 0; }
-    .evl-type-label { color: var(--text-muted); flex: 1; }
-    .evl-standalone-row {
-      display: flex; align-items: center; gap: 8px;
-      padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 13px;
-    }
-    .evl-source-badge {
-      font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px;
-      border: 1px solid var(--border); background: var(--surface-2);
-      color: var(--text-sub); flex-shrink: 0; text-transform: uppercase; letter-spacing: .03em;
-    }
-
-    /* ── Unified timeline (issue #632) ── */
-    .evl-day-head {
-      padding: 8px 16px; font-family: var(--mono); font-size: 11px; font-weight: 700;
-      letter-spacing: .05em; color: var(--text-sub); text-transform: uppercase;
-      background: var(--surface-2); border-bottom: 1px solid var(--border);
-      border-top: 1px solid var(--border);
-    }
-    .evl-day-head:first-child { border-top: none; }
-    /* Sprint-run group headers (issue #1853) */
-    .evl-run-group { border-top: 1px solid var(--border); }
-    .evl-run-group:first-child { border-top: none; }
-    .evl-run-head {
-      display: flex; align-items: center; gap: 8px; padding: 8px 12px;
-      background: var(--surface-2); border-bottom: 1px solid var(--border);
-      cursor: pointer; user-select: none;
-    }
-    .evl-run-head:hover { background: var(--surface-hover); }
-    .evl-run-head:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
-    .evl-run-head--error { border-left: 3px solid var(--red); }
-    .evl-run-chevron { font-size: 12px; color: var(--text-sub); transition: transform .15s; flex-shrink: 0; }
-    .evl-run-group.expanded .evl-run-chevron { transform: rotate(90deg); }
-    .evl-run-label { font-size: 13px; font-weight: 600; color: var(--text); }
-    .evl-run-err-badge {
-      background: var(--red-bg); color: var(--red);
-      border: 1px solid var(--red); border-radius: 4px;
-      padding: 1px 6px; font-size: 11px; font-weight: 600; flex-shrink: 0;
-    }
-    .evl-run-summary { font-size: 11px; color: var(--text-muted); font-weight: 400; margin-left: auto; }
-    .evl-run-outcome {
-      font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
-      padding: 1px 5px; border-radius: 3px; flex-shrink: 0;
-    }
-    .evl-run-outcome--completed { background: var(--green-bg); color: var(--green); }
-    .evl-run-outcome--failed { background: var(--red-bg); color: var(--red); }
-    .evl-run-body { display: none; }
-    .evl-run-group.expanded .evl-run-body { display: block; }
-    .evl-run-body > .evl-log-row:first-child { border-top: none; }
-    .evl-log-row {
-      display: flex; align-items: flex-start; gap: 11px; padding: 8px 16px;
-      border-top: 1px solid var(--border); transition: background .1s;
-      flex-wrap: wrap;
-    }
-    .evl-log-row:hover { background: var(--surface-hover); }
-    .evl-day-head + .evl-log-row { border-top: none; }
-    .lr-time {
-      font-family: var(--mono); font-size: 11px; color: var(--text-sub);
-      min-width: 54px; padding-top: 2px; flex-shrink: 0;
-    }
-    .lr-badge {
-      font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: .04em;
-      padding: 2px 6px; border-radius: 3px; flex-shrink: 0; min-width: 62px; text-align: center;
-    }
-    .lr-badge.agent  { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
-    .lr-badge.dash   { background: var(--blue-bg);   color: var(--blue); }
-    .lr-badge.github { background: var(--purple-bg); color: var(--purple); }
-    .lr-badge.error  { background: var(--red-bg);   color: var(--red); }
-    .lr-badge.sprint { background: var(--green-bg); color: var(--green); }
-    .lr-body {
-      flex: 1; min-width: 0; display: flex; align-items: baseline;
-      gap: 8px; flex-wrap: wrap;
-    }
-    .lr-desc { font-size: 13px; color: var(--text); }
-    .lr-desc .mono { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
-    .evl-agent-role { font-weight: 600; color: var(--text); text-transform: capitalize; }
-    .evl-issue-link { color: var(--blue); text-decoration: none; font-weight: 600; }
-    .evl-issue-link:hover { text-decoration: underline; }
-    /* issue #764: per-agent run duration shown on finished agent rows */
-    .evl-agent-duration {
-      margin-left: 8px;
-      padding: 1px 6px;
-      border-radius: 4px;
-      background: var(--surface-2);
-      color: var(--text-sub);
-      font-size: 12px;
-      font-variant-numeric: tabular-nums;
-    }
-    .lr-actor {
-      font-family: var(--mono); font-size: 11px; color: var(--text-sub);
-      display: inline-flex; align-items: center; gap: 4px;
-    }
-    .git-ico { font-size: 14px; vertical-align: -3px; margin-right: 4px; }
-    .git-ico.branch   { color: var(--text-muted); }
-    .git-ico.pr-open  { color: var(--green); }
-    .git-ico.pr-merged{ color: var(--purple); }
-    .branch-name {
-      font-family: var(--mono); font-size: 11px; color: var(--text-muted);
-      background: var(--surface-2); padding: 1px 6px; border-radius: 3px;
-      border: 1px solid var(--border);
-    }
-    .lbl-act {
-      display: inline-flex; width: 15px; height: 15px; border-radius: 3px;
-      align-items: center; justify-content: center; font-size: 11px;
-      vertical-align: -3px; margin-right: 2px;
-    }
-    .lbl-act.added   { background: var(--green-bg); color: var(--green); }
-    .lbl-act.removed { background: var(--red-bg);   color: var(--red); }
-    .lbl-chip {
-      font-family: var(--mono); font-size: 10px; padding: 1px 6px; border-radius: 3px;
-      font-weight: 600; display: inline-block; vertical-align: 1px;
-    }
-    .lbl-sprint  { background: var(--green-bg);  color: var(--green); }
-    .lbl-uat     { background: var(--purple-bg); color: var(--purple); }
-    .lbl-flow    { background: var(--blue-bg);   color: var(--blue); }
-    .lbl-generic { background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border); }
-
-    /* ── Severity chips (issue #1062) ── */
-    .evl-sev-chip {
-      font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: .04em;
-      padding: 2px 6px; border-radius: 3px; flex-shrink: 0; min-width: 44px; text-align: center;
-    }
-    .evl-sev-chip--info  { background: var(--surface-2); color: var(--text-muted); }
-    .evl-sev-chip--warn  { background: var(--amber-bg);  color: var(--amber); }
-    .evl-sev-chip--error { background: var(--red-bg);    color: var(--red); }
-
-    /* Activity log entity chips */
-    .evl-chip {
-      display: inline-flex; align-items: center; gap: 3px;
-      font-size: 11px; font-weight: 600; padding: 1px 8px;
-      border-radius: 99px; line-height: 1.45; vertical-align: 1px;
-    }
-    .evl-chip--issue {
-      background: var(--blue-bg); color: var(--blue); text-decoration: none;
-    }
-    a.evl-chip--issue:hover { text-decoration: underline; }
-    .evl-chip--sprint { background: var(--green-bg); color: var(--green); }
-    .evl-chip--branch {
-      font-family: var(--mono); font-size: 10px;
-      background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
-    }
-    .evl-chip--branch i { font-size: 10px; opacity: .65; }
-    .evl-chip--agent { text-transform: lowercase; }
-    .evl-meta { font-size: 12px; color: var(--text-muted); }
-    .evl-dur-pill {
-      flex-shrink: 0; align-self: center;
-      font-size: 11px; font-variant-numeric: tabular-nums;
-      padding: 2px 8px; border-radius: 99px;
-      background: var(--surface-2); color: var(--text-sub);
-      border: 1px solid var(--border);
-    }
-    .evl-dur-pill.warn { background: var(--amber-bg); color: var(--amber); border-color: var(--amber); }
-    .evl-dur-pill.live { background: var(--blue-bg); color: var(--blue); border-color: var(--blue); }
-    /* issue #920: backend label chip (cline / claude-code) in activity pills */
-    .evl-backend-chip {
-      display: inline-block;
-      font-size: 10px; font-weight: 600; text-transform: lowercase;
-      padding: 1px 6px; border-radius: 99px;
-      background: var(--purple-bg); color: var(--purple);
-      border: 1px solid var(--purple);
-      vertical-align: middle;
-    }
-
-    /* Error rows — red accent + collapsible detail panel */
-    .evl-log-row.evl-row-error {
-      background: var(--red-bg);
-      border-left: 3px solid var(--red);
-      padding-left: 13px;
-      cursor: pointer;
-    }
-    .evl-log-row.evl-row-error:hover { background: var(--red-bg); }
-    .evl-error-chev {
-      margin-left: auto; flex-shrink: 0; font-size: 14px; color: var(--text-sub);
-      align-self: center; transition: transform .15s;
-    }
-    .evl-log-row.evl-row-error.evl-error-open .evl-error-chev { transform: rotate(180deg); }
-    .evl-error-panel {
-      display: none;
-      flex-basis: 100%;
-      margin: 4px 0 4px calc(54px + 62px + 11px);
-      padding: 10px 12px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-size: 12px;
-      line-height: 1.5;
-    }
-    .evl-error-panel.open { display: block; }
-    .evl-dup-badge {
-      flex-shrink: 0; align-self: center;
-      font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 99px;
-      background: var(--surface-2); color: var(--text-muted); border: 1px solid var(--border);
-    }
-    .evl-st-label {
-      font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px;
-    }
-    .evl-st-label.st-rework { background: var(--red-bg); color: var(--red); }
-    .evl-st-label.st-progress { background: var(--blue-bg); color: var(--blue); }
-    .evl-st-label.st-sit { background: var(--amber-bg); color: var(--amber); }
-    .evl-st-label.st-uat { background: var(--teal-bg, #e6f7f5); color: var(--teal, #0d9488); }
-    .evl-st-label.st-generic { background: var(--surface-2); color: var(--text-muted); }
-    .evl-error-head {
-      font-weight: 700; color: var(--red); margin-bottom: 4px;
-    }
-    .evl-error-loc {
-      color: var(--blue); font-family: var(--mono); font-size: 11px;
-    }
-    .evl-error-msg {
-      color: var(--text-muted); font-family: var(--mono); font-size: 11px;
-      margin-top: 4px; white-space: pre-wrap; word-break: break-word;
-    }
-    .evl-error-gate { color: var(--text-sub); font-size: 11px; margin-top: 6px; }
-    .evl-error-actions {
-      display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
-    }
-    .evl-error-btn {
-      font-size: 11px; padding: 3px 10px; border-radius: 5px;
-      border: 1px solid var(--border); background: var(--surface-2);
-      color: var(--text-muted); cursor: pointer; text-decoration: none;
-    }
-    .evl-error-btn:hover { background: var(--surface-hover); color: var(--text); }
-    .evl-error-btn--action {
-      border-color: var(--amber); color: var(--amber); background: var(--amber-bg);
-    }
-    .evl-error-btn--action:hover { background: var(--amber-bg); }
-
-    /* ── Logs nav error badge (issue #1857) ── */
-    .logs-nav-badge {
-      display: inline-flex; align-items: center; justify-content: center;
-      min-width: 16px; height: 16px;
-      background: var(--red); color: #fff;
-      border-radius: 8px; font-size: 10px; font-weight: 700;
-      padding: 0 4px; margin: 0 3px 0 1px; line-height: 1; flex-shrink: 0;
-    }
-    .logs-nav-badge.hidden { display: none; }
-    .evl-since-banner {
-      display: flex; align-items: center; gap: 8px;
-      padding: 7px 16px; font-size: 12px; color: var(--text-sub);
-      border-bottom: 1px solid var(--border); background: var(--surface-2);
-    }
-    .evl-since-banner i { font-size: 13px; flex-shrink: 0; }
-    .evl-since-banner-link {
-      color: var(--blue); background: none; border: none;
-      cursor: pointer; font-size: 12px; padding: 0;
-      text-decoration: underline; white-space: nowrap;
-    }
-    .evl-since-banner-link:hover { text-decoration: none; }
-
-    /* ── Branch cleanup controls (issue #634) ── */
-    .evl-stale-banner-inner {
-      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-      padding: 10px 16px; background: var(--amber-bg);
-      border-bottom: 1px solid var(--amber); font-size: 13px;
-    }
-    .evl-stale-banner-inner i { color: var(--amber); font-size: 15px; flex-shrink: 0; }
-    .evl-del-btn {
-      font-size: 11px; padding: 2px 8px; border-radius: 4px;
-      border: 1px solid var(--border); background: var(--surface-2);
-      color: var(--text-muted); cursor: pointer; flex-shrink: 0; white-space: nowrap;
-    }
-    .evl-del-btn:hover { border-color: var(--red); color: var(--red); background: var(--red-bg); }
-    .evl-del-btn:disabled { opacity: .5; cursor: not-allowed; }
-    .evl-cleanup-all-btn { margin-left: auto; }
-    .evl-branch-deleted {
-      font-size: 11px; color: var(--text-muted); font-family: var(--mono); opacity: .65;
-    }
-    .evl-sprint-cleanup {
-      font-size: 11px; padding: 2px 8px; border-radius: 4px;
-      border: 1px solid var(--border); background: var(--surface-2);
-      color: var(--purple); cursor: pointer; flex-shrink: 0; white-space: nowrap;
-    }
-    .evl-sprint-cleanup:hover { border-color: var(--purple); background: var(--purple-bg); }
-    .evl-sprint-cleanup:disabled { opacity: .5; cursor: not-allowed; }
-
-    /* List filter fade transition */
-    .evl-list { transition: opacity .15s ease; }
-    .evl-list.logs-filtering { opacity: .5; }
-    .evl-bundle-row { transition: opacity .12s ease; }
-
-    /* Suppress all Logs tab motion when user prefers reduced motion */
-    @media (prefers-reduced-motion: reduce) {
-      .logs-chip, .logs-view-btn,
-      .evl-bundle-header, .evl-bundle-row, .evl-list, .evl-log-row,
-      .evl-chevron, .logs-live-dot,
-      .logs-skeleton-row { transition: none !important; animation: none !important; }
-    }
-
-    @media (max-width: 768px) {
-      .logs-toolbar { padding: 10px 12px 8px; }
-      .logs-raw-stream { padding: 8px 12px; }
-      .logs-search-wrap { max-width: 100%; }
-    }
-
-    @media (max-width: 620px) {
-      .logs-toolbar-row2 { flex-direction: column; align-items: stretch; }
-      .logs-search-wrap { max-width: 100%; width: 100%; }
-      .logs-view-toggle { width: 100%; }
-    }
-
-    @media (max-width:640px) {
-      .logs-raw-stream { overflow-x:auto; }
-      .logs-raw-line { white-space:pre; }
-    }
 
     /* Touch devices have no hover, so hover-revealed row actions never appear.
        Keep the actionable controls visible (the drag grip is intentionally left
@@ -9749,6 +9354,9 @@
     <div class="global-search-dropdown" id="global-search-dropdown"></div>
   </div>
   <div class="top-nav-right">
+    <a href="/diagnostics" class="btn-icon" title="System diagnostics" aria-label="System diagnostics">
+      <i class="ti ti-heartbeat"></i>
+    </a>
     <button class="btn-icon" onclick="toggleTheme()" id="theme-toggle-btn" title="Toggle theme" aria-label="Toggle dark/light theme">
       <i class="ti ti-moon" id="theme-icon"></i>
     </button>
@@ -9787,21 +9395,6 @@
     }).catch(function () { /* leave the default grey bar */ });
   });
 </script>
-
-<!-- ── Docked per-project to-do panel (#844): always available, collapsible ── -->
-<aside class="todo-dock collapsed" id="todo-dock" aria-label="Project to-do list">
-  <div class="todo-dock-bar" id="todo-dock-bar" role="button" tabindex="0"
-       aria-expanded="false" onclick="toggleTodoDock()">
-    <i class="ti ti-checklist"></i> To-do
-    <button type="button" class="todo-dock-expand" title="Open full screen"
-            onclick="event.stopPropagation();if(window.CommanderTodo)CommanderTodo.openFullscreen(_slug)"
-            aria-label="Open to-do full screen"><i class="ti ti-arrows-maximize"></i></button>
-    <i class="ti ti-chevron-down" style="font-size:13px"></i>
-  </div>
-  <div class="todo-dock-body">
-    <div class="todo" id="todo-dock-panel"></div>
-  </div>
-</aside>
 
 <!-- ── Page layout: sidebar + main ── -->
 <div class="page-layout">
@@ -10175,17 +9768,7 @@
             <p class="smgmt-running-empty-title">No sprint is running</p>
             <p class="smgmt-running-empty-sub">Start a sprint from the Board to watch it live here.</p>
           </div>
-          <!-- Kickoff stepper (issue #932) — shown while sprint is being launched -->
-          <div id="smgmt-kickoff-shell" hidden>
-            <div class="smgmt-kickoff-wrap">
-              <p class="smgmt-kickoff-title">Starting sprint…</p>
-              <div class="pf-stepper" id="smgmt-kickoff-steps"></div>
-              <div id="smgmt-kickoff-error" hidden>
-                <span id="smgmt-kickoff-error-msg"></span>
-                <button class="smgmt-kickoff-retry-btn" onclick="smgmtKickoffRetry()">Retry</button>
-              </div>
-            </div>
-          </div>
+          <!-- Kickoff stepper removed (issue #2251 — dispatch controls removed) -->
           <div class="run-shell" id="smgmt-run-shell" hidden>
             <div id="smgmt-run-head" aria-live="polite"></div>
             <!-- Orchestrator log panel (issue #1106) -->
@@ -11940,21 +11523,11 @@ function buildSidebar(projects) {
 function _buildMobileProjectSwitcher(projects) {
   const sel = document.getElementById('proj-mobile-switcher');
   if (!sel) return;
-  if (!projects || !projects.length) {
-    sel.innerHTML = '';
-    return;
-  }
-  sel.innerHTML = projects.map((proj) => {
-    const slug = proj.slug || '';
-    const name = proj.name || slug;
-    const selected = slug === _slug ? ' selected' : '';
-    return `<option value="${escHtml(slug)}"${selected}>${escHtml(name)}</option>`;
-  }).join('');
+  sel.innerHTML = buildProjectSwitcherOptions(projects, _slug);
 }
 
 function projMobileSwitch(slug) {
-  if (!slug || slug === _slug) return;
-  window.location.href = '/project/' + encodeURIComponent(slug) + '/sprint-mgmt';
+  navigateToProject(slug, _slug, _activeTab);
 }
 
 // Add Project modal logic now lives in the shared /static/add-project-modal.js
@@ -12110,9 +11683,6 @@ async function loadHomeData(silent) {
 
     const projects = data.projects || [];
     _projectData = projects.find(p => p.slug === _slug) || null;
-
-    // Populate error badge when returning to a non-Logs tab (issue #1857)
-    if (_activeTab !== 'logs') _logsBadgeFetch().catch(() => {});
 
     buildSidebar(projects);
     updateProjectHeader(_projectData);
@@ -13030,15 +12600,6 @@ async function _prefetchFullRepo() {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-// AC2: expand/collapse the docked to-do panel (#844)
-function toggleTodoDock() {
-  const dock = document.getElementById('todo-dock');
-  if (!dock) return;
-  const collapsed = dock.classList.toggle('collapsed');
-  const bar = document.getElementById('todo-dock-bar');
-  if (bar) bar.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-}
-
 async function init() {
   const { slug, tab, view, filter } = parseUrl();
 
@@ -13058,11 +12619,6 @@ async function init() {
   _deepLinkView = view;
   _deepLinkFilter = filter;
   if (filter === 'errors') _evlState.errorsOnly = true;  // applied on first activity render
-
-  // AC2/AC3: mount the docked per-project to-do panel, keyed by slug so it shows
-  // the identical list as this project's home-page block (#844).
-  const _todoDockPanel = document.getElementById('todo-dock-panel');
-  if (_todoDockPanel && window.CommanderTodo) CommanderTodo.mount(_todoDockPanel, slug);
 
   initTheme();
   updateSidebarFooter();
@@ -13145,14 +12701,6 @@ async function init() {
 
   // Live dashboard updates (sprint_finished / sprint_reconciled → refresh panes)
   _projConnectSse();
-
-  // If logs tab was active before _projectData was available, now fetch runs
-  if (_activeTab === 'logs' && _logsState.runs.length === 0) {
-    logsFetchRuns();
-  }
-  if (_activeTab === 'logs' && _logsState.viewMode === 'activity' && _evlState.events === null) {
-    evlFetch();
-  }
 
 }
 
@@ -13384,14 +12932,6 @@ function _projConnectSse() {
       }
       if (data.type !== 'update' || !data.event) return;
       const et = data.event.event_type;
-      // Increment error badge when an error event arrives while not on Logs tab (issue #1857)
-      if (_activeTab !== 'logs' && typeof window.evlIsErrorEvent === 'function') {
-        const sseEv = { type: et, detail: { status: data.event.status } };
-        if (window.evlIsErrorEvent(sseEv)) {
-          _logsBadgeCount++;
-          _logsUpdateNavBadge(_logsBadgeCount);
-        }
-      }
       if (et !== 'sprint_finished' && et !== 'sprint_reconciled') return;
       const repo = _cachedFullRepo[_slug];
       if (!repo) return;
@@ -16018,9 +15558,8 @@ function _smgmtRunHeadHtml(label, live, isLinger) {
       ? '<span class="run-head-badge run-head-badge--cancelled"><span class="run-head-badge-dot"></span>Cancelled</span>'
       : '<span class="run-head-badge"><span class="run-head-badge-dot"></span>Finished</span>')
     : '<span class="run-head-badge"><span class="run-head-badge-dot"></span>Running</span>';
-  const cancelBtn = isLinger ? '' :
-    `<button type="button" class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${safeLabel}')">
-        <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
+  // Cancel sprint button removed (issue #2251 — dispatch controls removed).
+  const cancelBtn = '';
   const watchdog = isLinger
     ? `<span class="run-head-watchdog" id="smgmt-run-head-watchdog">kept for 1h after finish</span>`
     : `<span class="run-head-watchdog" id="smgmt-run-head-watchdog">watchdog heartbeat ${_smgmtLiveHeartbeatSec()}s ago</span>`;
@@ -21596,7 +21135,7 @@ function _smgmtKbColTickets(label) {
 
 /** Returns true if any modal, dialog, or dropdown is open. */
 function _smgmtKbAnyModalOpen() {
-  const backdropIds = ['mt-backdrop', 'hs-backdrop', 'pf-backdrop', 'ci-backdrop', 'lv-backdrop', 'rr-backdrop', 'apm-backdrop'];
+  const backdropIds = ['mt-backdrop', 'hs-backdrop', 'pf-backdrop', 'ci-backdrop', 'lv-backdrop', 'apm-backdrop'];
   if (backdropIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
   const menuIds = ['smgmt-row-menu', 'smgmt-moveto-popup', 'smgmt-ctx-menu', 'smgmt-ar-menu', 'proj-create-menu'];
   if (menuIds.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); })) return true;
@@ -22597,11 +22136,6 @@ function _setupModals() {
   document.getElementById('bc-cancel-btn').addEventListener('click', _bcClose);
   document.getElementById('bc-backdrop').addEventListener('click', _bcClose);
   document.getElementById('bc-confirm-btn').addEventListener('click', _bcConfirm);
-
-  document.getElementById('rr-close-btn').addEventListener('click', _rrClose);
-  document.getElementById('rr-cancel-btn').addEventListener('click', _rrClose);
-  document.getElementById('rr-backdrop').addEventListener('click', _rrClose);
-  document.getElementById('rr-confirm-btn').addEventListener('click', _rrConfirm);
 
   document.getElementById('ns-close-btn').addEventListener('click', _nsClose);
   document.getElementById('ns-cancel-btn').addEventListener('click', _nsClose);
@@ -26383,1639 +25917,6 @@ document.addEventListener('click', function(e) {
 
 document.addEventListener('DOMContentLoaded', init);
 
-// ── Logs Tab (issue #420) ─────────────────────────────────────────────────────
-
-const _logsState = {
-  runs: [],
-  search: '',
-  filter: {
-    sprint: '',
-    agent: '',
-    source: 'all',
-    severity: 'all',
-    rawLevel: '',
-    issue: '',
-  },
-  events: {},
-  loadingEvents: new Set(),
-  issues: null,
-  viewMode: 'activity',
-  pollTimer: null,
-  liveEs: null,
-  liveRunId: null,
-  rawLines: null,
-};
-let _logsLoaded = false;
-let _logsSearchTimer = null;
-let _logsBadgeCount = 0;
-
-/** Build a Logs-tab URL filtered to one sprint issue (raw per-issue log view). */
-function _logsIssueLogUrl(issueNum, sprintLabel) {
-  const params = new URLSearchParams();
-  if (sprintLabel) params.set('sprint', sprintLabel);
-  if (issueNum != null && issueNum !== '') params.set('issue', String(issueNum));
-  params.set('view', 'raw');
-  const qs = params.toString();
-  return '/project/' + encodeURIComponent(_slug) + '/logs' + (qs ? '?' + qs : '');
-}
-
-/** Apply ?sprint= & ?issue= & ?view= from the URL into logs filters (one-shot). */
-function _logsApplyQueryParams() {
-  const q = new URLSearchParams(window.location.search);
-  const sprint = q.get('sprint') || '';
-  const issue = q.get('issue') || '';
-  const view = (q.get('view') || '').toLowerCase();
-  if (!sprint && !issue) return false;
-
-  if (sprint) {
-    _logsState.filter.sprint = sprint;
-    const sel = document.getElementById('logs-filter-sprint');
-    if (sel) sel.value = sprint;
-  }
-  if (issue) {
-    _logsState.filter.issue = String(issue);
-    _logsState.search = String(issue);
-    const searchEl = document.getElementById('logs-search');
-    if (searchEl) searchEl.value = '#' + issue;
-  }
-  if (issue || view === 'raw') logsSetView('raw');
-  else _logsApplyFilters();
-  return true;
-}
-
-function logsInit() {
-  const searchEl = document.getElementById('logs-search');
-  if (searchEl && !_logsLoaded) searchEl.value = '';
-
-  if (!_logsLoaded) {
-    _logsLoaded = true;
-    // Capture last-visit timestamp before overwriting it (used by evlFetch)
-    _evlState.sinceTs = typeof window.logsReadLastVisit === 'function'
-      ? window.logsReadLastVisit(_slug) : null;
-    // Pre-apply error severity filter when badge shows unseen errors
-    if (_logsBadgeCount > 0) {
-      _logsState.filter.severity = 'error';
-      document.querySelectorAll('#logs-severity-seg button').forEach(function(b) {
-        var on = b.dataset.level === 'error';
-        b.classList.toggle('active', on);
-        b.setAttribute('aria-pressed', on ? 'true' : 'false');
-      });
-    }
-    // Clear badge and stamp last-visit as seen
-    _logsBadgeCount = 0;
-    _logsUpdateNavBadge(0);
-    if (typeof window.logsWriteLastVisit === 'function') window.logsWriteLastVisit(_slug);
-    _logsPopulateRawLevelDropdown();
-    logsFetchRuns();
-    logsSyncGitHub();
-    evlFetch();
-  }
-
-  _logsApplyQueryParams();
-
-  if (!_logsState.pollTimer) {
-    _logsState.pollTimer = visibilityInterval(logsFetchRuns, 15000);
-  }
-}
-
-async function logsSyncGitHub() {
-  if (!_projectData) return;
-  const project = _projectData.repo;
-  try {
-    await fetch(`/api/logs/sync-github?project=${encodeURIComponent(project)}`, { method: 'POST' });
-  } catch (_) {}
-}
-
-function logsRefresh() {
-  logsFetchRuns();
-  logsSyncGitHub();
-  if (_logsState.viewMode === 'activity') {
-    _evlState.events = null;
-    evlFetch();
-  }
-}
-
-function logsDestroy() {
-  if (_logsState.pollTimer) {
-    clearInterval(_logsState.pollTimer);
-    _logsState.pollTimer = null;
-  }
-  _logsDisconnectLive();
-}
-
-// ── Error badge helpers (issue #1857) ────────────────────────────────────────
-
-function _logsUpdateNavBadge(count) {
-  var badge = document.getElementById('logs-nav-badge');
-  if (!badge) return;
-  if (count > 0) {
-    badge.textContent = count > 99 ? '99+' : String(count);
-    badge.classList.remove('hidden');
-  } else {
-    badge.classList.add('hidden');
-  }
-}
-
-function _logsUpdateSinceBanner() {
-  var banner = document.getElementById('evl-since-banner');
-  if (!banner) return;
-  if (!_evlState.sinceMode || !_evlState.sinceTs) {
-    banner.className = 'hidden';
-    banner.innerHTML = '';
-    return;
-  }
-  var dt = '';
-  try { dt = new Date(_evlState.sinceTs).toLocaleString(); } catch (_) { dt = _evlState.sinceTs; }
-  banner.className = 'evl-since-banner';
-  banner.innerHTML = '<i class="ti ti-clock"></i>'
-    + '<span>Showing events since ' + escHtml(dt) + '</span>'
-    + '<button class="evl-since-banner-link" onclick="evlFetchFull()">Show full history</button>';
-}
-
-async function _logsBadgeFetch() {
-  if (!_projectData) return;
-  var since = typeof window.logsReadLastVisit === 'function'
-    ? window.logsReadLastVisit(_slug) : null;
-  if (!since) { _logsBadgeCount = 0; _logsUpdateNavBadge(0); return; }
-  var slug = (_projectData.repo || '').split('/').pop();
-  try {
-    var url = typeof window.buildEvlFetchUrl === 'function'
-      ? window.buildEvlFetchUrl(slug, since)
-      : '/api/projects/' + encodeURIComponent(slug) + '/events?since=' + encodeURIComponent(since) + '&limit=50';
-    var resp = await fetch(url);
-    var events = resp.ok ? await resp.json() : [];
-    var count = typeof window.logsCountNewErrors === 'function'
-      ? window.logsCountNewErrors(events) : 0;
-    _logsBadgeCount = count;
-    _logsUpdateNavBadge(count);
-  } catch (_) { _logsBadgeCount = 0; _logsUpdateNavBadge(0); }
-}
-
-async function evlFetchFull() {
-  _evlState.sinceTs = null;
-  _evlState.sinceMode = false;
-  _logsState.filter.severity = 'all';
-  document.querySelectorAll('#logs-severity-seg button').forEach(function(b) {
-    var on = b.dataset.level === 'all';
-    b.classList.toggle('active', on);
-    b.setAttribute('aria-pressed', on ? 'true' : 'false');
-  });
-  _logsUpdateSinceBanner();
-  _evlState.events = null;
-  _evlState.loading = false;
-  await evlFetch();
-}
-
-async function logsFetchRuns() {
-  if (!_projectData) return;
-  const project = _projectData.repo;
-  try {
-    const resp = await fetch(`/api/logs/runs?project=${encodeURIComponent(project)}&page_size=100`);
-    if (!resp.ok) return;
-    const data = await resp.json();
-    const newRuns = data.items || [];
-    const existingIds = new Set(_logsState.runs.map(r => r.run_id));
-    const added = newRuns.filter(r => !existingIds.has(r.run_id));
-
-    _logsState.runs = newRuns;
-    _logsPopulateSprintDropdown();
-
-    if (_logsState.filter.sprint) {
-      const sprintSel = document.getElementById('logs-filter-sprint');
-      if (sprintSel) sprintSel.value = _logsState.filter.sprint;
-    }
-    if (_logsState.viewMode === 'raw' &&
-        (_logsState.filter.issue || _logsState.rawLines === null)) {
-      logsLoadRawView();
-    }
-  } catch (_) {}
-}
-
-function _logsApplyFilters() {
-  if (_logsState.viewMode === 'activity') evlRender();
-  else if (_logsState.viewMode === 'raw') _logsRenderRawStream();
-}
-
-function logsFilterSprintSelect(sel) {
-  _logsState.filter.sprint = sel.value || '';
-  _logsApplyFilters();
-}
-
-function logsFilterAgentSelect(sel) {
-  _logsState.filter.agent = sel.value || '';
-  _logsApplyFilters();
-}
-
-function logsFilterSourceSelect(sel) {
-  _logsState.filter.source = sel.value || 'all';
-  _logsApplyFilters();
-}
-
-function logsSetSeverityFilter(level, btnEl) {
-  _logsState.filter.severity = level || 'all';
-  document.querySelectorAll('#logs-severity-seg button').forEach(function(b) {
-    var on = b === btnEl || b.dataset.level === level;
-    b.classList.toggle('active', on);
-    b.setAttribute('aria-pressed', on ? 'true' : 'false');
-  });
-  _logsApplyFilters();
-}
-
-function logsFilterRawLevelSelect(sel) {
-  _logsState.filter.rawLevel = sel.value || '';
-  _logsApplyFilters();
-}
-
-function _logsPopulateSprintDropdown() {
-  var sel = document.getElementById('logs-filter-sprint');
-  if (!sel) return;
-  var current = _logsState.filter.sprint;
-  var recency = {};
-  (_logsState.runs || []).forEach(function(run) {
-    var lbl = run.sprint_label;
-    if (!lbl) return;
-    if (!recency[lbl] || run.start_time > recency[lbl]) recency[lbl] = run.start_time;
-  });
-  if (_evlState.events) {
-    _evlState.events.forEach(function(ev) {
-      var d = ev.detail || {};
-      [d.sprint_id, d.sprint_label, d.from_sprint, d.to_sprint, d.sub_label].forEach(function(lbl) {
-        if (lbl && !recency[lbl]) recency[lbl] = ev.timestamp || '';
-      });
-    });
-  }
-  var sorted = Object.keys(recency).sort(function(a, b) {
-    return (recency[b] || '').localeCompare(recency[a] || '');
-  });
-  var html = '<option value="">All sprints</option>';
-  sorted.forEach(function(lbl) {
-    html += '<option value="' + escHtml(lbl) + '"' + (lbl === current ? ' selected' : '') + '>'
-      + escHtml(lbl) + '</option>';
-  });
-  sel.innerHTML = html;
-}
-
-function _logsPopulateRawLevelDropdown() {
-  var sel = document.getElementById('logs-filter-raw-level');
-  if (!sel) return;
-  var current = _logsState.filter.rawLevel;
-  var html = '<option value="">All levels</option>';
-  _LOGS_RAW_LEVELS.forEach(function(lvl) {
-    html += '<option value="' + escHtml(lvl) + '"' + (lvl === current ? ' selected' : '') + '>'
-      + escHtml(lvl) + '</option>';
-  });
-  sel.innerHTML = html;
-}
-
-function logsOnSearch(value) {
-  clearTimeout(_logsSearchTimer);
-  _logsSearchTimer = setTimeout(() => {
-    const trimmed = value.trim();
-    const issueMatch = trimmed.match(/^#?(\d+)$/);
-    _logsState.filter.issue = issueMatch ? issueMatch[1] : '';
-    _logsState.search = trimmed.toLowerCase();
-    _logsApplyFilters();
-    if (_logsState.filter.issue && _logsState.viewMode === 'raw') logsLoadRawView();
-  }, 280);
-}
-
-function logsSetView(mode) {
-  if (mode === 'timeline') {
-    switchTab('sprint-mgmt');
-    _smgmtShowSubView('history');
-    return;
-  }
-  _logsState.viewMode = mode;
-  const rawEl      = document.getElementById('logs-raw');
-  const activityEl = document.getElementById('logs-activity');
-  const sevSeg     = document.getElementById('logs-severity-seg');
-  const rawLvlSel  = document.getElementById('logs-filter-raw-level');
-  const segBtns = ['activity', 'raw'];
-  segBtns.forEach(function(m) {
-    var btn = document.getElementById('logs-view-' + m);
-    if (btn) {
-      var on = mode === m;
-      btn.classList.toggle('active', on);
-      btn.setAttribute('aria-selected', on ? 'true' : 'false');
-    }
-  });
-  rawEl?.classList.toggle('hidden', mode !== 'raw');
-  activityEl?.classList.toggle('hidden', mode !== 'activity');
-  sevSeg?.classList.toggle('hidden', mode !== 'activity');
-  rawLvlSel?.classList.toggle('hidden', mode === 'activity');
-  document.getElementById('logs-filter-agent')?.classList.toggle('hidden', mode !== 'activity');
-  document.getElementById('logs-filter-source')?.classList.toggle('hidden', mode !== 'activity');
-  if (mode === 'raw')      logsLoadRawView();
-  if (mode === 'activity') { if (_evlState.events === null) evlFetch(); else evlRender(); }
-}
-
-function _logsRepo() { return _projectData ? _projectData.repo : (_smgmtRepo() || ''); }
-
-function _logsClassifyLine(raw) {
-  const s = String(raw || '').trim();
-  if (!s) return 'event';
-  if (s.startsWith('→') || s.startsWith('---') || s.includes('start_feature') || s.includes('Dispatching')) return 'dispatch';
-  if (s.startsWith('✓') || /promoted|merged|completed|done/i.test(s)) return 'success';
-  if (/warning|\[retry\]/i.test(s) || /^warn/i.test(s)) return 'warn';
-  if (/error|fail|skipped|retry_exhausted/i.test(s) || /^err/i.test(s)) return 'fail';
-  if (/^info\b/i.test(s)) return 'info';
-  return 'event';
-}
-
-function _logsRunEventMatches(entry) {
-  const f = _logsState.filter;
-  const q = _logsState.search;
-  if (f.rawLevel && entry.type !== f.rawLevel) return false;
-  if (f.agent) {
-    const msg = (entry.message || '').toLowerCase();
-    const role = f.agent.toLowerCase();
-    if (!msg.includes(role) && entry.type !== role) return false;
-  }
-  if (q && !(entry.message || '').toLowerCase().includes(q)) return false;
-  return true;
-}
-
-function _logsFilterEvents(events) {
-  return (events || []).filter(_logsRunEventMatches);
-}
-
-
-// Whole-token count → compact "5.0k" / "1.2M"; missing token total reads as a
-// dash so a NULL agent_runs.total_tokens degrades gracefully (#858 AC5).
-function _logsFmtTokens(n) {
-  if (n == null || isNaN(n)) return '—';
-  return _histFmtTokens(n);
-}
-
-function _logsEventsHtml(events) {
-  const filtered = _logsFilterEvents(events);
-  if (filtered.length === 0) {
-    return '<div class="logs-empty" style="padding:6px 0;font-size:11px">No events match current filters.</div>';
-  }
-  const repo = (typeof _logsRepo === 'function' ? (_logsRepo() || '') : '');
-  return filtered.map(e =>
-    `<div class="logs-event-line ${escHtml(e.type)}">` +
-    `<span class="logs-event-ts">${escHtml(e.timestamp)}</span>` +
-    `<span class="logs-event-msg">${colorizeLogLine(e.message, repo)}</span>` +
-    `</div>`
-  ).join('');
-}
-
-async function _logsFetchRunEvents(sprintLabel, project) {
-  try {
-    const url = `/api/sprints/${encodeURIComponent(sprintLabel)}/dispatch-log?project=${encodeURIComponent(project)}&tail_lines=500`;
-    const resp = await fetch(url);
-    if (!resp.ok) return [];
-    const data = await resp.json();
-    if (!data.found || !data.tail) return [];
-    return _logsParseLines(data.tail.split('\n'));
-  } catch (_) { return []; }
-}
-
-function _logsParseLines(lines) {
-  const entries = [];
-  for (const raw of lines) {
-    const s = raw.trim();
-    if (!s) continue;
-    const type = _logsClassifyLine(s);
-    entries.push({ timestamp: '—', type, message: s });
-  }
-  return entries;
-}
-
-async function logsLoadRawView() {
-  const streamEl = document.getElementById('logs-raw-stream');
-  if (!streamEl) return;
-  let sprintLabel = _logsState.filter.sprint || null;
-  const issueNum = _logsState.filter.issue || null;
-  let project = _projectData?.repo;
-  if (!sprintLabel && _logsState.runs.length > 0) {
-    sprintLabel = _logsState.runs[0].sprint_label;
-    project = _logsState.runs[0].project;
-  } else if (sprintLabel) {
-    const run = _logsState.runs.find(r => r.sprint_label === sprintLabel);
-    if (run) project = run.project;
-  }
-  if (!project && typeof _smgmtRepo === 'function') project = _smgmtRepo();
-  if (!sprintLabel) {
-    streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">Select a sprint to view raw output…</div>';
-    _logsState.rawLines = null;
-    return;
-  }
-  const loadingMsg = issueNum
-    ? `Loading issue #${escHtml(issueNum)} log…`
-    : 'Loading…';
-  streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">' + loadingMsg + '</div>';
-  try {
-    const url = issueNum
-      ? `/api/sprints/${encodeURIComponent(sprintLabel)}/issue/${encodeURIComponent(issueNum)}/log?project=${encodeURIComponent(project)}&tail_lines=2000`
-      : `/api/sprints/${encodeURIComponent(sprintLabel)}/dispatch-log?project=${encodeURIComponent(project)}&tail_lines=2000`;
-    const resp = await fetch(url);
-    if (!resp.ok) { streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--red)">Failed to load log.</div>'; return; }
-    const data = await resp.json();
-    if (!data.found || !data.tail) {
-      const emptyMsg = issueNum
-        ? `No log file found for issue #${escHtml(issueNum)}.`
-        : 'No log file found for this sprint.';
-      streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">' + emptyMsg + '</div>';
-      _logsState.rawLines = null;
-      return;
-    }
-    _logsState.rawLines = data.tail.split('\n');
-    _logsRenderRawStream();
-  } catch (_) { streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--red)">Error loading log.</div>'; }
-}
-
-function _logsRawLineMatches(line) {
-  const f = _logsState.filter;
-  const s = String(line || '');
-  if (f.rawLevel && _logsClassifyLine(s) !== f.rawLevel) return false;
-  if (f.issue) return true;
-  const q = _logsState.search;
-  if (q && !s.toLowerCase().includes(q)) return false;
-  return true;
-}
-
-function _logsRenderRawStream() {
-  const streamEl = document.getElementById('logs-raw-stream');
-  if (!streamEl) return;
-  const project = _projectData?.repo || '';
-  const lines = _logsState.rawLines;
-  if (!lines || lines.length === 0) {
-    streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">No log output.</div>';
-    return;
-  }
-  const visible = lines.filter(_logsRawLineMatches);
-  if (visible.length === 0) {
-    streamEl.innerHTML = '<div class="logs-raw-line" style="color:var(--text-sub)">No lines match current filters.</div>';
-    return;
-  }
-  streamEl.innerHTML = visible.map(line =>
-    `<div class="logs-raw-line">${colorizeLogLine(line, project)}</div>`
-  ).join('');
-  streamEl.scrollTop = streamEl.scrollHeight;
-}
-
-function _logsDisconnectLive() {
-  if (_logsState.liveEs) {
-    _logsState.liveEs.close();
-    _logsState.liveEs = null;
-    _logsState.liveRunId = null;
-  }
-}
-
-// ── Events Activity Log (issue #633) ──────────────────────────────────────────
-
-const _EVL_GITHUB_SOURCE = 'github';
-const _EVL_CAUSE_SOURCES = new Set(['dashboard']);
-const _EVL_LIFECYCLE_SOURCES = new Set(['sprint_manager']);
-const _EVL_PROTECTED_BRANCHES = new Set(['develop', 'master', 'main', 'attachments']);
-const _EVL_STALE_BRANCH_RE = /^(feat|feature|sprint)\//;
-
-// Raw log levels for Runs/Raw filters (unbucketed). Activity maps these into
-// Info / Warn / Error via _evlSeverityBucket — no level is dropped.
-const _LOGS_RAW_LEVELS = [
-  'dispatch', 'success', 'info', 'event',
-  'dispatched', 'started', 'finished', 'resumed', 'transitioned',
-  'warn', 'partial',
-  'fail', 'error', 'failed', 'killed',
-  'retry_exhausted', 'crash', 'hang', 'gate_fail', 'lint_fail', 'pytest_fail',
-  'merge_conflict', 'coder_no_work', 'tester_rejected', 'timed_out', 'ticket_failed',
-];
-
-const _LOGS_INFO_LEVELS = new Set([
-  'dispatch', 'success', 'info', 'event',
-  'dispatched', 'started', 'finished', 'resumed', 'transitioned',
-  'sprint_started', 'sprint_finished', 'sprint_rerun', 'sprint_created', 'sprint_run',
-  'sprint_cancelled', 'ticket_dispatched', 'ticket_agent_finished', 'ticket_moved',
-  'ticket_label_changed', 'label_added', 'label_removed',
-  'issue_opened', 'issue_closed', 'branch_created', 'pr_opened', 'pr_merged',
-  'bulk_created', 'coder_backend_escalated',
-]);
-
-const _LOGS_WARN_LEVELS = new Set([
-  'warn', 'partial', 'hang', 'warning',
-]);
-
-const _LOGS_ERROR_LEVELS = new Set([
-  'fail', 'error', 'failed', 'retry_exhausted', 'crash', 'gate_fail', 'lint_fail',
-  'pytest_fail', 'merge_conflict', 'coder_no_work', 'tester_rejected', 'timed_out',
-  'ticket_failed',
-]);
-
-function _evlNormLevel(s) {
-  return String(s || '').toLowerCase().replace(/\s+/g, '_');
-}
-
-function _evlRawLevel(ev) {
-  var detail = ev.detail || {};
-  var fc = _evlNormLevel(detail.failure_class || detail.category || '');
-  if (fc && _LOGS_RAW_LEVELS.indexOf(fc) >= 0) return fc;
-  if (fc === 'retry_exhausted') return 'retry_exhausted';
-  if (fc === 'gate_fail' || fc === 'gate_failed') return 'gate_fail';
-  if (fc === 'hang') return 'hang';
-  if (fc === 'crash') return 'crash';
-  if (fc === 'lint_fail') return 'lint_fail';
-  if (fc === 'pytest_fail') return 'pytest_fail';
-  if (fc === 'merge_conflict') return 'merge_conflict';
-  if (fc === 'coder_no_work') return 'coder_no_work';
-  if (fc === 'tester_rejected') return 'tester_rejected';
-
-  var st = _evlNormLevel(detail.status || '');
-  if (st === 'timed_out') return 'timed_out';
-  if (st === 'partial') return 'partial';
-  if (st === 'error' || st === 'failed') return 'error';
-
-  if (ev.category === 'error' || ev.category === 'gate') return 'fail';
-  if (ev.category === 'sprint') return 'info';
-
-  var type = _evlNormLevel(ev.type || '');
-  if (type === 'ticket_failed') return 'ticket_failed';
-  if (_LOGS_RAW_LEVELS.indexOf(type) >= 0) return type;
-  if (type.indexOf('sprint_') === 0) return 'info';
-  if (type === 'agent_finished' && (st === 'error' || st === 'timed_out')) return 'error';
-  if (type === 'agent_finished' && st === 'partial') return 'partial';
-  return 'info';
-}
-
-function _evlSeverityBucket(ev) {
-  var raw = _evlRawLevel(ev);
-  if (_LOGS_ERROR_LEVELS.has(raw)) return 'error';
-  if (_LOGS_WARN_LEVELS.has(raw)) return 'warn';
-  return 'info';
-}
-
-const _evlState = {
-  events: null,
-  errorsOnly: false,
-  loading: false,
-  staleBranches: new Set(),
-  sprintFeatMap: {},
-  sinceMode: false,   // true when current events were fetched with a since= constraint
-  sinceTs: null,      // the since= timestamp used for this Logs session (captured before overwrite)
-};
-
-function _evlEffectChip(ev) {
-  const type = ev.type || '';
-  const detail = ev.detail || {};
-  if (type === 'label_added')   return { label: '+' + (detail.label_name || ev.target || ''), cls: 'evl-effect-chip--added' };
-  if (type === 'label_removed') return { label: '−' + (detail.label_name || ev.target || ''), cls: 'evl-effect-chip--removed' };
-  if (type === 'issue_opened')  return { label: '+' + (ev.target || 'issue'), cls: 'evl-effect-chip--added' };
-  if (type === 'issue_closed')  return { label: 'closed ' + (ev.target || ''), cls: 'evl-effect-chip--neutral' };
-  if (type === 'branch_created')return { label: 'branch', cls: 'evl-effect-chip--neutral' };
-  if (type === 'pr_opened')     return { label: 'PR opened', cls: 'evl-effect-chip--neutral' };
-  if (type === 'pr_merged')     return { label: 'PR merged', cls: 'evl-effect-chip--added' };
-  return { label: type.replace(/_/g, ' '), cls: 'evl-effect-chip--neutral' };
-}
-
-function _evlHeadlineLabel(causeEvent) {
-  const type = causeEvent.type || '';
-  const detail = causeEvent.detail || {};
-  if (type === 'ticket_moved') {
-    const from = detail.from_sprint ? '−' + detail.from_sprint : '';
-    const to   = detail.to_sprint   ? '+'     + detail.to_sprint   : '';
-    const parts = [from, to].filter(Boolean).join(' → ');
-    return 'Sprint move' + (parts ? ': ' + parts : '');
-  }
-  if (type === 'bulk_created')    return 'Bulk create';
-  if (type === 'sprint_created')  return 'Sprint created';
-  if (type === 'sprint_run')      return 'Sprint run';
-  if (type === 'sprint_cancelled')return 'Sprint cancelled';
-  return type.replace(/_/g, ' ');
-}
-
-function _evlBundleEvents(events, sourceFilter) {
-  if (sourceFilter === 'github') {
-    return events
-      .filter(e => e.source === _EVL_GITHUB_SOURCE)
-      .map(e => ({ kind: 'standalone', event: e }));
-  }
-
-  const ghByAid = {};
-  for (const e of events) {
-    if (e.source === _EVL_GITHUB_SOURCE && e.action_id) {
-      if (!ghByAid[e.action_id]) ghByAid[e.action_id] = [];
-      ghByAid[e.action_id].push(e);
-    }
-  }
-
-  const consumed = new Set();
-  const rows = [];
-
-  for (const e of events) {
-    const src = e.source || '';
-    if (src === _EVL_GITHUB_SOURCE) continue;
-    if (_EVL_LIFECYCLE_SOURCES.has(src)) { rows.push({ kind: 'standalone', event: e }); continue; }
-    if (_EVL_CAUSE_SOURCES.has(src)) {
-      const aid = e.action_id;
-      if (aid && ghByAid[aid]) {
-        const effects = ghByAid[aid];
-        effects.forEach(eff => consumed.add(eff));
-        rows.push({ kind: 'bundle', cause: e, effects, count: effects.length });
-      } else {
-        rows.push({ kind: 'standalone', event: e });
-      }
-      continue;
-    }
-    rows.push({ kind: 'standalone', event: e });
-  }
-
-  for (const e of events) {
-    if (e.source === _EVL_GITHUB_SOURCE && !consumed.has(e)) {
-      rows.push({ kind: 'standalone', event: e });
-    }
-  }
-
-  return rows;
-}
-
-function _evlFmtTs(ts) {
-  if (!ts) return '';
-  return ts.replace('T', ' ').substring(0, 19);
-}
-
-// issue #764: format an agent run duration (seconds) as "Nm Ns" / "Ns".
-function _evlFmtDuration(secs) {
-  var n = Number(secs);
-  if (!isFinite(n) || n < 0) return '';
-  n = Math.round(n);
-  var m = Math.floor(n / 60);
-  var s = n % 60;
-  return m > 0 ? (m + 'm ' + s + 's') : (s + 's');
-}
-
-function _evlLabelChangeText(e) {
-  const d = e.detail || {};
-  const target = e.target || '';
-  const added = Array.isArray(d.added) ? d.added : [];
-  const removed = Array.isArray(d.removed) ? d.removed : [];
-  if (added.length && removed.length) {
-    return `moved ${target} → ${d.to_label || added.join(', ')}`;
-  }
-  if (added.length) {
-    return `labeled ${target} ${d.to_label || added.join(', ')}`;
-  }
-  if (removed.length) {
-    return `unlabeled ${target} ${d.from_label || removed.join(', ')}`;
-  }
-  return `label change ${target}`.trim();
-}
-
-function _evlStatusLabelHtml(name) {
-  var n = (name || '').toLowerCase();
-  var cls = 'st-generic';
-  if (n === 'needs-rework' || n === 'blocked' || n === 'fail') cls = 'st-rework';
-  else if (n === 'in-progress' || n.indexOf('progress') > -1) cls = 'st-progress';
-  else if (n === 'sit') cls = 'st-sit';
-  else if (n === 'uat' || n === 'done' || n === 'ready') cls = 'st-uat';
-  return '<span class="evl-st-label ' + cls + '">' + escHtml(name) + '</span>';
-}
-
-function _evlLabelChangeHtml(e) {
-  var d = e.detail || {};
-  var target = e.target || '';
-  var issueNum = _evlParseIssueNum(e) || (target.match(/#?(\d+)/) || [])[1];
-  var added = Array.isArray(d.added) ? d.added : [];
-  var removed = Array.isArray(d.removed) ? d.removed : [];
-  var chip = issueNum ? _evlIssueChip(issueNum) : escHtml(target);
-  if (added.length && removed.length) {
-    var toLbl = d.to_label || added[0] || '';
-    return '<span class="lr-desc">moved ' + chip + ' <span class="evl-meta">→</span> '
-      + _evlStatusLabelHtml(toLbl) + '</span>';
-  }
-  if (added.length) {
-    var lbl = d.to_label || added[0] || '';
-    return '<span class="lr-desc">labeled ' + chip + ' ' + _evlStatusLabelHtml(lbl) + '</span>';
-  }
-  if (removed.length) {
-    var fromLbl = d.from_label || removed[0] || '';
-    return '<span class="lr-desc">unlabeled ' + chip + ' ' + _evlStatusLabelHtml(fromLbl) + '</span>';
-  }
-  return '<span class="lr-desc">' + escHtml(_evlLabelChangeText(e)) + '</span>';
-}
-
-function _evlDedupSignature(ev) {
-  var d = ev.detail || {};
-  return [
-    ev.type, ev.source, ev.target, ev.actor || '',
-    d.agent || '', d.role || '', d.status || '',
-    d.sprint_id || '', d.sprint_label || '', d.issue_num || '',
-    (d.added || []).join(','), (d.removed || []).join(','),
-    d.branch || '', d.reason ? String(d.reason).substring(0, 120) : '',
-    d.failure_class || '', d.error_type || ''
-  ].join('|');
-}
-
-function evlToggleErrorRow(rowEl) {
-  if (!rowEl || !rowEl.classList.contains('evl-row-error')) return;
-  rowEl.classList.toggle('evl-error-open');
-  var panel = rowEl.querySelector('.evl-error-panel');
-  if (panel) panel.classList.toggle('open');
-}
-
-function _evlRenderRow(row) {
-  if (row.kind === 'standalone') {
-    const e = row.event;
-    const ts = _evlFmtTs(e.timestamp);
-    const src = e.source || '';
-    let typeText;
-    if (e.type === 'ticket_label_changed') {
-      typeText = _evlLabelChangeText(e);
-    } else {
-      const type = (e.type || '').replace(/_/g, ' ');
-      const target = e.target ? ' ' + e.target : '';
-      typeText = type + target;
-    }
-    const actor = e.actor ? `<span class="evl-actor">${escHtml(e.actor)}</span>` : '';
-    return `<div class="evl-standalone-row">
-      <span class="evl-ts">${escHtml(ts)}</span>
-      <span class="evl-source-badge">${escHtml(src)}</span>
-      <span class="evl-type-label">${escHtml(typeText)}</span>
-      ${actor}
-    </div>`;
-  }
-
-  if (row.kind === 'bundle') {
-    const { cause, effects, count } = row;
-    const headline = _evlHeadlineLabel(cause);
-    const isSingle = count === 1;
-
-    const chipsHtml = effects.map(eff => {
-      const { label, cls } = _evlEffectChip(eff);
-      return `<span class="evl-effect-chip ${cls}">${escHtml(label)}</span>`;
-    }).join('');
-
-    const singleClass = isSingle ? ' evl-single' : '';
-    const chevron = isSingle ? '' : `<i class="ti ti-chevron-right evl-chevron"></i>`;
-    const clickAttr = isSingle ? '' : ' onclick="evlToggleBundle(this)"';
-    const badge = isSingle ? '' : `<span class="evl-count-badge">${count}</span>`;
-
-    const subRowsHtml = effects.map(eff => {
-      const ts = _evlFmtTs(eff.timestamp);
-      const { label } = _evlEffectChip(eff);
-      const actor = eff.actor ? ` by ${escHtml(eff.actor)}` : '';
-      return `<div class="evl-sub-row">
-        <span class="evl-ts">${escHtml(ts)}</span>
-        <span class="evl-type-label">${escHtml(label)}</span>
-        <span class="evl-actor">${actor}</span>
-      </div>`;
-    }).join('');
-
-    return `<div class="evl-bundle-row${singleClass}">
-      <div class="evl-bundle-header"${clickAttr}>
-        ${chevron}
-        <span class="evl-headline">${escHtml(headline)}</span>
-        <div class="evl-effect-chips">${chipsHtml}</div>
-        ${badge}
-      </div>
-      ${isSingle ? '' : `<div class="evl-sub-rows">${subRowsHtml}</div>`}
-    </div>`;
-  }
-
-  return '';
-}
-
-function evlToggleBundle(headerEl) {
-  const row = headerEl.closest('.evl-bundle-row');
-  if (!row || row.classList.contains('evl-single')) return;
-  row.classList.toggle('expanded');
-}
-
-function evlRender() {
-  const listEl = document.getElementById('evl-list');
-  if (!listEl) return;
-
-  // Hide skeleton once we have data (loaded or empty)
-  const skEl = document.getElementById('evl-skeleton');
-  const emEl = document.getElementById('evl-empty');
-
-  if (!_evlState.events) {
-    if (skEl) skEl.classList.remove('hidden');
-    if (emEl) emEl.classList.add('hidden');
-    return;
-  }
-
-  if (skEl) skEl.classList.add('hidden');
-
-  const rendered = evlRenderTimeline(_evlState.events);
-  // evlRenderTimeline returns empty-state HTML when empty; inject after skeleton/empty els
-  const staticEls = listEl.querySelectorAll('#evl-skeleton, #evl-empty');
-  // Remove any previous dynamic content
-  [...listEl.children].forEach(function(c) {
-    if (c.id !== 'evl-skeleton' && c.id !== 'evl-empty') c.remove();
-  });
-
-  if (!rendered || rendered.includes('logs-empty')) {
-    // Show the dedicated empty element
-    if (emEl) { emEl.textContent = 'No events'; emEl.classList.remove('hidden'); }
-  } else {
-    if (emEl) emEl.classList.add('hidden');
-    const tmp = document.createElement('div');
-    tmp.innerHTML = rendered;
-    while (tmp.firstChild) listEl.appendChild(tmp.firstChild);
-  }
-
-  const _errBtn = document.getElementById('evl-filter-errors');
-  if (_errBtn) {
-    _errBtn.classList.toggle('active', _evlState.errorsOnly);
-    _errBtn.setAttribute('aria-pressed', _evlState.errorsOnly ? 'true' : 'false');
-    if (_evlState.errorsOnly) {
-      _logsState.filter.severity = 'error';
-      var lvlErr = document.querySelector('#logs-severity-seg button[data-level="error"]');
-      if (lvlErr) logsSetSeverityFilter('error', lvlErr);
-    }
-  }
-  _evlUpdateBanner();
-}
-
-// Errors-only overlay toggle (also seeded by the deck `filter=errors` deep link).
-function evlToggleErrorsOnly() {
-  _evlState.errorsOnly = !_evlState.errorsOnly;
-  var errBtn = document.getElementById('evl-filter-errors');
-  if (errBtn) errBtn.setAttribute('aria-pressed', _evlState.errorsOnly ? 'true' : 'false');
-  evlRender();
-}
-
-async function evlFetch() {
-  if (!_projectData || _evlState.loading) return;
-  _evlState.loading = true;
-
-  // Show skeleton while loading
-  const skEl = document.getElementById('evl-skeleton');
-  const emEl = document.getElementById('evl-empty');
-  if (skEl) skEl.classList.remove('hidden');
-  if (emEl) emEl.classList.add('hidden');
-
-  const slug = (_projectData.repo || '').split('/').pop();
-  const since = _evlState.sinceTs;
-  try {
-    var url = typeof window.buildEvlFetchUrl === 'function'
-      ? window.buildEvlFetchUrl(slug, since)
-      : ('/api/projects/' + encodeURIComponent(slug) + '/events?limit=200');
-    const resp = await fetch(url);
-    _evlState.events = resp.ok ? await resp.json() : [];
-    _evlState.sinceMode = !!since;
-  } catch (_) {
-    _evlState.events = [];
-    _evlState.sinceMode = false;
-  }
-
-  // Auto-apply error filter when since-mode has errors and no filter was manually set
-  if (_evlState.sinceMode && _evlState.events.some(_evlIsError)
-      && _logsState.filter.severity === 'all') {
-    _logsState.filter.severity = 'error';
-    document.querySelectorAll('#logs-severity-seg button').forEach(function(b) {
-      var on = b.dataset.level === 'error';
-      b.classList.toggle('active', on);
-      b.setAttribute('aria-pressed', on ? 'true' : 'false');
-    });
-  }
-
-  await evlFetchStaleBranches();
-  _evlState.loading = false;
-  _logsPopulateSprintDropdown();
-  _logsPopulateRawLevelDropdown();
-  _logsUpdateSinceBanner();
-  if (_logsState.viewMode === 'activity') evlRender();
-}
-
-async function evlFetchStaleBranches() {
-  const repo = _logsRepo();
-  if (!repo) return;
-  const parts = repo.split('/');
-  const owner = parts[0], repoName = parts[1];
-  if (!owner || !repoName) return;
-  try {
-    const resp = await fetch(
-      `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(repoName)}/branches/stale`
-    );
-    if (resp.ok) {
-      const list = await resp.json();
-      _evlState.staleBranches = new Set(list);
-    }
-  } catch (_) {}
-}
-
-function evlSetFilter(filter) {
-  var sel = document.getElementById('logs-filter-source');
-  if (sel) sel.value = filter || 'all';
-  _logsState.filter.source = filter || 'all';
-  evlRender();
-}
-
-function evlSetSource(source) {
-  evlSetFilter(source);
-}
-
-function _evlDayLabel(ts) {
-  if (!ts) return '';
-  var d = new Date(ts.replace('T', ' '));
-  var today = new Date(); today.setHours(0,0,0,0);
-  var yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
-  var evDay = new Date(d); evDay.setHours(0,0,0,0);
-  var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var base = days[d.getDay()] + ' ' + months[d.getMonth()] + ' ' + d.getDate();
-  if (evDay.getTime() === today.getTime()) return 'Today · ' + base;
-  if (evDay.getTime() === yesterday.getTime()) return 'Yesterday · ' + base;
-  return base;
-}
-
-function _evlSeverity(ev) {
-  return _evlSeverityBucket(ev);
-}
-
-function _evlMatchesFilter(ev) {
-  var f = _logsState.filter;
-  if (_evlState.errorsOnly && !_evlIsError(ev)) return false;
-
-  if (f.severity && f.severity !== 'all') {
-    if (_evlSeverityBucket(ev) !== f.severity) return false;
-  }
-
-  if (f.agent) {
-    var d = ev.detail || {};
-    var role = (d.agent || d.role || ev.actor || '').toLowerCase();
-    if (f.agent === 'agent') {
-      if (role && role !== 'agent' && role !== 'sprint_manager' && role !== 'dispatch') return false;
-      if (!role && ev.source !== 'agent') return false;
-    } else if (role !== f.agent) {
-      return false;
-    }
-  }
-
-  if (f.sprint) {
-    var det = ev.detail || {};
-    var sf = f.sprint;
-    var inSprint = det.sprint_id === sf || det.sprint_label === sf
-      || det.from_sprint === sf || det.to_sprint === sf || det.sub_label === sf
-      || ev.sprint_label === sf || (ev.target || '') === sf;
-    if (!inSprint) return false;
-  }
-
-  var q = (_logsState.search || '').trim();
-  if (q) {
-    var blob = JSON.stringify(ev).toLowerCase();
-    var issueNum = _evlParseIssueNum(ev);
-    if (!blob.includes(q) && !(issueNum && ('#' + issueNum).includes(q))) return false;
-  }
-
-  var srcFilter = f.source || 'all';
-  if (srcFilter === 'all') return true;
-  var evSrc = ev.source || '';
-  var evType = ev.type || '';
-  if (srcFilter === 'sprint') {
-    return evType.indexOf('sprint_') === 0 || evType === 'sprint_rerun' || ev.category === 'sprint';
-  }
-  if (srcFilter === 'github') return evSrc === 'github';
-  if (srcFilter === 'dashboard') {
-    return evSrc === 'dashboard' && evType.indexOf('sprint_') !== 0;
-  }
-  if (srcFilter === 'agent') {
-    return evSrc === 'agent' && evType.indexOf('sprint_') !== 0;
-  }
-  return evSrc === srcFilter;
-}
-
-function _evlBadgeLabel(source, type) {
-  if (type === 'ticket_failed') return 'ERROR';
-  if (source === 'github') return 'GITHUB';
-  if (source === 'dashboard') return 'DASH';
-  if (source === 'agent') {
-    if ((type || '').startsWith('sprint_')) return 'SPRINT';
-    return 'AGENT';
-  }
-  return (source || '').toUpperCase();
-}
-
-function _evlBadgeCls(label) {
-  if (label === 'ERROR') return 'error';
-  if (label === 'GITHUB') return 'github';
-  if (label === 'DASH') return 'dash';
-  if (label === 'SPRINT') return 'sprint';
-  return 'agent';
-}
-
-function _evlParseIssueNum(ev) {
-  var d = ev.detail || {};
-  if (d.issue_num != null) return d.issue_num;
-  var t = ev.target || '';
-  var m = t.match(/#?(\d+)/);
-  return m ? m[1] : null;
-}
-
-function _evlIssueChip(num, extraCls) {
-  if (num == null) return '';
-  var repo = _projectData ? (_projectData.repo || '') : '';
-  var href = repo ? 'https://github.com/' + repo + '/issues/' + encodeURIComponent(num) : '';
-  var cls = 'evl-chip evl-chip--issue' + (extraCls ? ' ' + extraCls : '');
-  var inner = '#' + escHtml(String(num));
-  return href
-    ? '<a class="' + cls + '" href="' + escHtml(href) + '" target="_blank" rel="noopener">' + inner + '</a>'
-    : '<span class="' + cls + '">' + inner + '</span>';
-}
-
-function _evlSprintChip(label) {
-  if (!label) return '';
-  return '<span class="evl-chip evl-chip--sprint">' + escHtml(label) + '</span>';
-}
-
-function _evlBranchChip(branch) {
-  if (!branch) return '';
-  return '<span class="evl-chip evl-chip--branch"><i class="ti ti-git-branch"></i>'
-    + escHtml(branch) + '</span>';
-}
-
-function _evlAgentChip(role) {
-  var key = (role || 'agent').toLowerCase();
-  return '<span class="evl-chip evl-chip--agent log-agent-' + escHtml(key) + '">'
-    + escHtml(key) + '</span>';
-}
-
-function _evlIsError(ev) {
-  var type = ev.type || '';
-  if (type === 'ticket_failed') return true;
-  if (type === 'agent_finished') {
-    var st = (ev.detail || {}).status || '';
-    return st === 'error' || st === 'timed_out';
-  }
-  return false;
-}
-
-function _evlErrorPanelHtml(ev) {
-  var d = ev.detail || {};
-  var reason = d.reason || d.message || d.summary || '';
-  var errType = d.error_type || d.failure_class || d.category || '';
-  var loc = d.location || '';
-  var gateName = d.gate_name || (d.gate ? 'pytest' : '');
-  var issueNum = _evlParseIssueNum(ev);
-  var sprintLabel = d.sprint_label || d.sprint_id || '';
-
-  if (!errType && reason) {
-    var em = reason.match(/\b([A-Z][A-Z0-9_]+|[A-Z][a-zA-Z]+Error)\b/);
-    if (em) errType = em[1];
-  }
-  if (!loc && reason) {
-    var lm = reason.match(/([\w/.-]+\.py:\d+)/);
-    if (lm) loc = lm[1];
-  }
-
-  var head = '';
-  if (errType && loc) head = escHtml(errType) + ' · <span class="evl-error-loc">' + escHtml(loc) + '</span>';
-  else if (errType) head = escHtml(String(errType));
-
-  var msg = d.message || reason;
-  if (msg && msg.length > 400) msg = msg.substring(0, 400) + '…';
-
-  var gateLine = '';
-  if (gateName || d.sidecar) {
-    gateLine = 'gate: ' + escHtml(gateName || 'failure');
-    if (d.sidecar) gateLine += ' · sidecar ' + escHtml(d.sidecar.split('/').slice(-3).join('/'));
-  }
-
-  var actions = '<div class="evl-error-actions">';
-  if (issueNum) {
-    actions += '<button type="button" class="evl-error-btn" onclick="event.stopPropagation(); evlOpenIssueLog('
-      + escHtml(String(issueNum)) + ')"><i class="ti ti-file-text"></i> Full log</button>';
-    var repo = _projectData ? (_projectData.repo || '') : '';
-    if (repo) {
-      actions += '<a class="evl-error-btn" href="https://github.com/' + escHtml(repo)
-        + '/issues/' + encodeURIComponent(issueNum) + '" target="_blank" rel="noopener" '
-        + 'onclick="event.stopPropagation()"><i class="ti ti-ticket"></i> #'
-        + escHtml(String(issueNum)) + '</a>';
-    }
-    actions += '<button type="button" class="evl-error-btn evl-error-btn--action" data-issue="'
-      + escHtml(String(issueNum)) + '" data-sprint="' + escHtml(sprintLabel || '')
-      + '" onclick="event.stopPropagation(); evlRedispatchCoder(this.dataset.issue, this.dataset.sprint || null)">'
-      + '<i class="ti ti-refresh"></i> Re-dispatch coder</button>';
-  }
-  actions += '</div>';
-
-  return '<div class="evl-error-panel" onclick="event.stopPropagation()">'
-    + (head ? '<div class="evl-error-head">' + head + '</div>' : '')
-    + (msg ? '<div class="evl-error-msg">' + escHtml(msg) + '</div>' : '')
-    + (gateLine ? '<div class="evl-error-gate">' + gateLine + '</div>' : '')
-    + actions
-    + '</div>';
-}
-
-function evlOpenIssueLog(issueNum, sprintLabel) {
-  var repo = _projectData ? (_projectData.repo || '') : '';
-  var label = sprintLabel || '';
-  if (!label && typeof _smgmtData !== 'undefined' && _smgmtData && _smgmtData.issues) {
-    var iss = _smgmtData.issues.find(function(i) { return i.number === Number(issueNum); });
-    if (iss) label = iss.sprint_label || '';
-  }
-  if (!label && _evlState.events) {
-    for (var i = 0; i < _evlState.events.length; i++) {
-      var ev = _evlState.events[i];
-      if (_evlParseIssueNum(ev) === String(issueNum)) {
-        label = (ev.detail || {}).sprint_label || (ev.detail || {}).sprint_id || '';
-        if (label) break;
-      }
-    }
-  }
-  if (typeof openLvIssueLog === 'function') {
-    openLvIssueLog(Number(issueNum), label, repo);
-  }
-}
-
-function _evlParentSprintLabel(label) {
-  if (!label) return '';
-  return String(label).replace(/\.\d+$/, '');
-}
-
-async function evlRedispatchCoder(issueNum, sprintLabel) {
-  var num = parseInt(issueNum, 10);
-  if (!num) return;
-  var repo = _projectData ? (_projectData.repo || '') : '';
-  if (!repo) return;
-  var parent = _evlParentSprintLabel(sprintLabel);
-  if (!parent) {
-    if (typeof showToast === 'function') showToast('No sprint label for this issue — open the sprint board to re-run.', 'warning');
-    return;
-  }
-  if (!confirm('Re-dispatch coder for #' + num + ' in ' + parent + '?')) return;
-  if (typeof _smgmtAnySprintRunning !== 'undefined' && _smgmtAnySprintRunning) {
-    if (typeof showToast === 'function') showToast('Cannot re-dispatch while another sprint is running.', 'warning');
-    return;
-  }
-  try {
-    var enc = encodeURIComponent(parent);
-    var res = await fetch('/api/sprints/' + enc + '/rerun?project=' + encodeURIComponent(repo), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticket_numbers: [num], auto_run: true })
-    });
-    if (!res.ok) {
-      var errText = await res.text();
-      if (typeof showToast === 'function') showToast('Re-dispatch failed: ' + errText, 'error');
-      return;
-    }
-    var data = await res.json();
-    if (data.noop) {
-      if (typeof showToast === 'function') showToast(data.message || 'Nothing to re-dispatch.', 'warning');
-      return;
-    }
-    if (typeof showToast === 'function') {
-      showToast('Re-dispatching #' + num + ' → ' + (data.sub_label || parent), 'success');
-    }
-    if (typeof switchTab === 'function') switchTab('sprint-mgmt');
-  } catch (e) {
-    if (typeof showToast === 'function') showToast('Re-dispatch error: ' + e.message, 'error');
-  }
-}
-
-function _evlLabelChipClass(name) {
-  var n = (name || '').toLowerCase();
-  if (n.startsWith('sprint')) return 'lbl-sprint';
-  if (n === 'uat' || n === 'done' || n === 'ready') return 'lbl-uat';
-  if (n === 'in-progress' || n === 'sit' || n.indexOf('running') > -1) return 'lbl-flow';
-  return 'lbl-generic';
-}
-
-function _evlDescHtml(ev) {
-  var type = ev.type || '';
-  var detail = ev.detail || {};
-  var target = ev.target || '';
-  var issueNum = _evlParseIssueNum(ev);
-
-  if (type === 'ticket_failed') {
-    var role = (detail.agent || 'agent').toLowerCase();
-    var branch = detail.branch || '';
-    var tail = detail.reason ? ' — ' + escHtml(String(detail.reason).substring(0, 80)) : '';
-    return '<span class="lr-desc">'
-      + _evlAgentChip(role) + ' failed on ' + _evlIssueChip(issueNum)
-      + (branch ? ' · ' + _evlBranchChip(branch) : '')
-      + tail
-      + '</span>';
-  }
-
-  if (type === 'sprint_started') {
-    var sprintId = detail.sprint_id || target || '';
-    var count = detail.ticket_count;
-    return '<span class="lr-desc">sprint started ' + _evlSprintChip(sprintId)
-      + (count != null ? ' <span class="evl-meta">' + escHtml(String(count)) + ' tickets</span>' : '')
-      + '</span>';
-  }
-
-  if (type === 'sprint_finished') {
-    var finLabel = detail.sprint_id || target || '';
-    var parts = [];
-    if (detail.done != null) parts.push(detail.done + ' done');
-    if (detail.failed != null && detail.failed > 0) parts.push(detail.failed + ' failed');
-    if (detail.skipped != null && detail.skipped > 0) parts.push(detail.skipped + ' skipped');
-    return '<span class="lr-desc">sprint finished ' + _evlSprintChip(finLabel)
-      + (parts.length ? ' <span class="evl-meta">' + escHtml(parts.join(' · ')) + '</span>' : '')
-      + '</span>';
-  }
-
-  if (type === 'sprint_rerun') {
-    var parent = detail.sprint_id || '';
-    var sub = detail.sub_label || target || '';
-    return '<span class="lr-desc">sprint rerun '
-      + _evlSprintChip(parent) + ' <span class="evl-meta">→</span> ' + _evlSprintChip(sub)
-      + '</span>';
-  }
-
-  if (type === 'ticket_dispatched' || type === 'ticket_agent_finished') {
-    var agentName = (detail.agent || '').toLowerCase();
-    var verb = type === 'ticket_dispatched' ? 'dispatched' : 'finished';
-    return '<span class="lr-desc">'
-      + _evlAgentChip(agentName) + ' ' + verb + ' on ' + _evlIssueChip(issueNum)
-      + '</span>';
-  }
-
-  if (type === 'ticket_label_changed') {
-    return _evlLabelChangeHtml(ev);
-  }
-
-  if (type === 'label_added' || type === 'label_removed') {
-    var actCls = type === 'label_added' ? 'added' : 'removed';
-    var actIcon = type === 'label_added' ? '<i class="ti ti-plus"></i>' : '<i class="ti ti-minus"></i>';
-    var labelName = detail.label_name || ev.target || '';
-    var chipCls = _evlLabelChipClass(labelName);
-    return '<span class="lr-desc">'
-      + '<span class="lbl-act ' + actCls + '">' + actIcon + '</span>'
-      + ' label <span class="lbl-chip ' + chipCls + '">' + escHtml(labelName) + '</span>'
-      + (issueNum ? ' on ' + _evlIssueChip(issueNum) : (target ? ' on <span class="mono">' + escHtml(target) + '</span>' : ''))
-      + '</span>';
-  }
-
-  if (type === 'pr_opened' || type === 'pr_merged') {
-    var prCls = type === 'pr_opened' ? 'pr-open' : 'pr-merged';
-    var prIcon = type === 'pr_opened' ? 'ti-git-pull-request' : 'ti-git-merge';
-    var head = detail.head ? _evlBranchChip(detail.head) : '';
-    var base = detail.base ? _evlBranchChip(detail.base) : '';
-    var arrow = head && base ? ' <span class="evl-meta">→</span> ' : '';
-    var prNum = target ? _evlIssueChip(target.replace(/^#/, '')) : '';
-    var action = type === 'pr_opened' ? 'opened' : 'merged';
-    return '<span class="lr-desc">'
-      + '<i class="ti ' + prIcon + ' git-ico ' + prCls + '"></i>'
-      + 'PR ' + prNum + ' ' + action
-      + (head ? ' — ' + head + arrow + base : '')
-      + '</span>';
-  }
-
-  if (type === 'branch_created') {
-    var branchRef = detail.ref || ev.target || '';
-    return '<span class="lr-desc">'
-      + 'branch ' + _evlBranchChip(branchRef) + ' created'
-      + '</span>';
-  }
-
-  if (type === 'issue_opened') {
-    return '<span class="lr-desc">' + _evlIssueChip(issueNum || target.replace(/^#/, '')) + ' opened</span>';
-  }
-  if (type === 'issue_closed') {
-    return '<span class="lr-desc">' + _evlIssueChip(issueNum || target.replace(/^#/, '')) + ' closed</span>';
-  }
-
-  if (type === 'agent_started' || type === 'agent_finished') {
-    var aRole = detail.role || '';
-    var aIssue = detail.issue_num;
-    var st = detail.status || '';
-    var isFail = type === 'agent_finished' && (st === 'error' || st === 'timed_out');
-    var verb = type === 'agent_started' ? 'started' : (isFail ? 'failed on' : 'finished');
-    if (aRole && aIssue) {
-      return '<span class="lr-desc evl-agent-row">'
-        + _evlAgentChip(aRole) + ' ' + verb + ' ' + _evlIssueChip(aIssue)
-        + '</span>';
-    }
-    var rawId = escHtml(ev.actor || ev.target || '');
-    return '<span class="lr-desc evl-agent-row">'
-      + 'agent ' + verb + (rawId ? ' <span class="mono">' + rawId + '</span>' : '')
-      + '</span>';
-  }
-  if (type === 'coder_backend_escalated') {
-    var fromBk = (detail.from_backend || ev.from_backend || 'cline');
-    var toBk = (detail.to_backend || ev.to_backend || 'claude-code');
-    var escIssue = detail.issue_num || ev.issue_num || issueNum;
-    return '<span class="lr-desc evl-agent-row">'
-      + _evlAgentChip('coder') + ' escalated '
-      + '<span class="evl-backend-chip">' + escHtml(fromBk) + '</span>'
-      + ' <span class="evl-meta">→</span> '
-      + '<span class="evl-backend-chip">' + escHtml(toBk) + '</span>'
-      + (escIssue ? ' on ' + _evlIssueChip(escIssue) : '')
-      + '</span>';
-  }
-
-  var label = type.replace(/_/g, ' ');
-  return '<span class="lr-desc">' + escHtml(label)
-    + (target ? ' <span class="mono">' + escHtml(target) + '</span>' : '') + '</span>';
-}
-
-function _evlDurationPill(ev) {
-  var type = ev.type || '';
-  var detail = ev.detail || {};
-  var secs = null;
-  if (type === 'agent_finished') {
-    secs = ev.duration_seconds != null ? ev.duration_seconds : detail.duration;
-  } else if (type === 'ticket_agent_finished') {
-    secs = detail.duration;
-  } else if (type === 'sprint_finished') {
-    secs = detail.duration;
-  }
-  if (secs == null) return '';
-  var txt = _evlFmtDuration(secs);
-  if (!txt) return '';
-  var warn = Number(secs) >= 3600;
-  // issue #920: prefix coder agent_finished pills with backend label
-  var prefix = '';
-  if (type === 'agent_finished' && (detail.role || '').toLowerCase() === 'coder') {
-    var bk = ev.backend || detail.backend;
-    if (bk) prefix = '<span class="evl-backend-chip">' + escHtml(bk) + '</span> ';
-  }
-  return prefix + '<span class="evl-dur-pill' + (warn ? ' warn' : '') + '">' + escHtml(txt) + '</span>';
-}
-
-function evlRenderTimeline(events) {
-  if (!events || events.length === 0) return '<div class="logs-empty">No events</div>';
-
-  var visible = events.filter(function(e) { return _evlMatchesFilter(e); });
-  if (visible.length === 0) return '<div class="logs-empty">No events</div>';
-
-  // Pre-compute sprint → feat branches map for bulk cleanup (issue #634)
-  var sprintFeatMap = {};
-  for (var si = 0; si < events.length; si++) {
-    var se = events[si];
-    if (se.type === 'pr_merged' && se.detail) {
-      var sBase = se.detail.base || '';
-      var sHead = se.detail.head || '';
-      if (/^sprint\//.test(sBase) && /^(feat|feature)\//.test(sHead)) {
-        if (!sprintFeatMap[sBase]) sprintFeatMap[sBase] = [];
-        sprintFeatMap[sBase].push(sHead);
-      }
-    }
-  }
-  _evlState.sprintFeatMap = sprintFeatMap;
-
-  // Group events by sprint run (issue #1853)
-  var groups = evlGroupEventsByRun(events);
-
-  var html = '';
-  for (var g = 0; g < groups.length; g++) {
-    var group = groups[g];
-
-    // Compress visible events in this group (dedup consecutive identical rows)
-    var compressed = [];
-    var lastSig = null;
-    for (var k = 0; k < group.events.length; k++) {
-      var evK = group.events[k];
-      if (!_evlMatchesFilter(evK)) continue;
-      var sigK = _evlDedupSignature(evK);
-      if (sigK === lastSig && compressed.length > 0) {
-        compressed[compressed.length - 1].count += 1;
-      } else {
-        compressed.push({ ev: evK, count: 1 });
-        lastSig = sigK;
-      }
-    }
-    if (compressed.length === 0) continue;
-
-    // Build event rows HTML
-    var rowsHtml = '';
-    for (var c = 0; c < compressed.length; c++) {
-      var item = compressed[c];
-      var ev = item.ev;
-      var dupN = item.count;
-      var timePart = (ev.timestamp || '').substring(11, 16);
-      var badgeLabel = _evlBadgeLabel(ev.source, ev.type);
-      var badgeCls = _evlBadgeCls(badgeLabel);
-      var desc = _evlDescHtml(ev);
-      var actor = (ev.source === 'github' && ev.actor)
-        ? '<span class="lr-actor">' + escHtml(ev.actor) + '</span>'
-        : '';
-      var cleanup = _evlBranchCleanupHtml(ev);
-      var durPill = _evlDurationPill(ev);
-      var isErr = _evlIsError(ev);
-      var errPanel = isErr ? _evlErrorPanelHtml(ev) : '';
-      var dupBadge = dupN > 1 ? '<span class="evl-dup-badge" title="' + dupN + ' identical events">×' + dupN + '</span>' : '';
-      var errChev = isErr ? '<i class="ti ti-chevron-down evl-error-chev"></i>' : '';
-      var clickAttr = isErr ? ' onclick="evlToggleErrorRow(this)"' : '';
-      rowsHtml += '<div class="evl-log-row' + (isErr ? ' evl-row-error' : '') + '" data-source="'
-        + escHtml(ev.source) + '" data-type="' + escHtml(ev.type || '') + '"' + clickAttr + '>'
-        + '<span class="lr-time">' + escHtml(timePart) + '</span>'
-        + '<span class="lr-badge ' + badgeCls + '">' + badgeLabel + '</span>'
-        + '<div class="lr-body">' + desc + actor + (cleanup ? cleanup : '') + '</div>'
-        + dupBadge + durPill + errChev + errPanel
-        + '</div>';
-    }
-
-    if (group.isOther) {
-      // Dashboard / other: day-header, no collapse
-      var dayLabel = group.dayKey
-        ? 'Dashboard / other · ' + _evlDayLabel(group.dayKey + 'T00:00:00')
-        : 'Dashboard / other';
-      html += '<div class="evl-day-head">' + escHtml(dayLabel) + '</div>';
-      html += rowsHtml;
-    } else {
-      // Sprint run: collapsible group header
-      var isExpanded = group.hasErrors;  // error runs start expanded
-      var outcomeHtml = '';
-      if (group.outcome === 'completed') {
-        outcomeHtml = '<span class="evl-run-outcome evl-run-outcome--completed">completed</span>';
-      } else if (group.outcome === 'failed') {
-        outcomeHtml = '<span class="evl-run-outcome evl-run-outcome--failed">failed</span>';
-      }
-      var errBadge = group.errorCount > 0
-        ? '<span class="evl-run-err-badge">' + group.errorCount + ' error' + (group.errorCount !== 1 ? 's' : '') + '</span>'
-        : '';
-      var summary = compressed.length + ' event' + (compressed.length !== 1 ? 's' : '');
-      var headCls = 'evl-run-head' + (group.errorCount > 0 ? ' evl-run-head--error' : '');
-      html += '<div class="evl-run-group' + (isExpanded ? ' expanded' : '') + '">'
-        + '<div class="' + headCls + '" role="button" tabindex="0"'
-        + ' onclick="evlToggleRunGroup(this.parentNode)"'
-        + ' onkeydown="if(event.key===\'Enter\'||event.key===\' \')evlToggleRunGroup(this.parentNode)">'
-        + '<i class="ti ti-chevron-right evl-run-chevron"></i>'
-        + '<span class="evl-run-label">' + escHtml(sprintLabelDisplay(group.sprint_label)) + '</span>'
-        + outcomeHtml
-        + errBadge
-        + '<span class="evl-run-summary">' + escHtml(summary) + '</span>'
-        + '</div>'
-        + '<div class="evl-run-body">' + rowsHtml + '</div>'
-        + '</div>';
-    }
-  }
-
-  return html || '<div class="logs-empty">No events</div>';
-}
-
-function evlToggleRunGroup(groupEl) {
-  if (groupEl) groupEl.classList.toggle('expanded');
-}
-
-// ── Branch cleanup helpers (issue #634) ──────────────────────────────────────
-
-function _evlBranchCleanupHtml(ev) {
-  if (ev.type !== 'pr_merged') return '';
-  var head = (ev.detail || {}).head || '';
-  if (!head || !_EVL_STALE_BRANCH_RE.test(head) || _EVL_PROTECTED_BRANCHES.has(head)) return '';
-
-  if (/^sprint\//.test(head)) {
-    var featBranches = (_evlState.sprintFeatMap[head] || []);
-    var staleFeats = featBranches.filter(function(b) { return _evlState.staleBranches.has(b); });
-    var n = staleFeats.length + (_evlState.staleBranches.has(head) ? 1 : 0);
-    if (n === 0) return '';
-    return ' <button class="evl-sprint-cleanup" data-sprint="' + escHtml(head) + '"'
-      + ' onclick="evlCleanupSprint(this)">'
-      + 'Clean up ' + n + ' merged branch' + (n !== 1 ? 'es' : '')
-      + '</button>';
-  }
-
-  if (_evlState.staleBranches.has(head)) {
-    return ' <button class="evl-del-btn" data-branch="' + escHtml(head) + '"'
-      + ' onclick="evlDeleteBranch(this)">'
-      + '<i class="ti ti-trash"></i> Delete branch'
-      + '</button>';
-  }
-  return ' <span class="evl-branch-deleted">branch deleted</span>';
-}
-
-function _evlUpdateBanner() {
-  var banner = document.getElementById('evl-stale-banner');
-  if (!banner) return;
-  var n = _evlState.staleBranches.size;
-  if (n === 0) {
-    banner.innerHTML = '';
-    banner.classList.add('hidden');
-    return;
-  }
-  banner.classList.remove('hidden');
-  banner.innerHTML = '<div class="evl-stale-banner-inner">'
-    + '<i class="ti ti-git-branch-deleted"></i>'
-    + '<span>' + n + ' merged branch' + (n !== 1 ? 'es' : '') + ' not yet deleted</span>'
-    + '<button class="evl-del-btn evl-cleanup-all-btn" onclick="evlCleanupAll()">'
-    + 'Clean up all</button>'
-    + '</div>';
-}
-
-function _evlRepoForBranchOps() {
-  var repo = _logsRepo();
-  if (!repo) return null;
-  var parts = repo.split('/');
-  if (parts.length < 2) return null;
-  return { owner: parts[0], repoName: parts[1] };
-}
-
-function _evlRefreshSprintButtons() {
-  document.querySelectorAll('.evl-sprint-cleanup').forEach(function(btn) {
-    var sprint = btn.dataset.sprint;
-    if (!sprint) return;
-    var featBranches = (_evlState.sprintFeatMap[sprint] || []);
-    var staleFeats = featBranches.filter(function(b) { return _evlState.staleBranches.has(b); });
-    var n = staleFeats.length + (_evlState.staleBranches.has(sprint) ? 1 : 0);
-    if (n === 0) {
-      btn.remove();
-    } else {
-      btn.textContent = 'Clean up ' + n + ' merged branch' + (n !== 1 ? 'es' : '');
-    }
-  });
-}
-
-async function evlDeleteBranch(btnEl) {
-  var branch = btnEl.dataset.branch;
-  if (!branch) return;
-  if (_EVL_PROTECTED_BRANCHES.has(branch) || !_EVL_STALE_BRANCH_RE.test(branch)) {
-    console.warn('evlDeleteBranch: refusing to delete branch', branch);
-    return;
-  }
-
-  btnEl.disabled = true;
-  btnEl.textContent = 'Deleting…';
-
-  var r = _evlRepoForBranchOps();
-  if (!r) { btnEl.disabled = false; btnEl.textContent = 'Delete branch'; return; }
-
-  try {
-    var resp = await fetch(
-      '/api/projects/' + encodeURIComponent(r.owner) + '/'
-      + encodeURIComponent(r.repoName) + '/branches/'
-      + branch.split('/').map(encodeURIComponent).join('/'),
-      { method: 'DELETE' }
-    );
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-
-    _evlState.staleBranches.delete(branch);
-    btnEl.outerHTML = '<span class="evl-branch-deleted">branch deleted</span>';
-    _evlRefreshSprintButtons();
-    _evlUpdateBanner();
-  } catch (_) {
-    btnEl.disabled = false;
-    btnEl.innerHTML = '<i class="ti ti-trash"></i> Delete branch';
-  }
-}
-
-async function evlCleanupSprint(btnEl) {
-  var sprintBranch = btnEl.dataset.sprint;
-  if (!sprintBranch) return;
-
-  var featBranches = (_evlState.sprintFeatMap[sprintBranch] || []);
-  var toDelete = featBranches.filter(function(b) { return _evlState.staleBranches.has(b); });
-  if (_evlState.staleBranches.has(sprintBranch)) toDelete.push(sprintBranch);
-
-  var n = toDelete.length;
-  if (n === 0) { btnEl.remove(); return; }
-
-  if (!confirm('Delete ' + n + ' merged branch' + (n !== 1 ? 'es' : '') + '? This cannot be undone.')) return;
-
-  btnEl.disabled = true;
-
-  var r = _evlRepoForBranchOps();
-  if (!r) { btnEl.disabled = false; return; }
-
-  for (var i = 0; i < toDelete.length; i++) {
-    var branch = toDelete[i];
-    try {
-      var resp = await fetch(
-        '/api/projects/' + encodeURIComponent(r.owner) + '/'
-        + encodeURIComponent(r.repoName) + '/branches/'
-        + branch.split('/').map(encodeURIComponent).join('/'),
-        { method: 'DELETE' }
-      );
-      if (resp.ok) {
-        _evlState.staleBranches.delete(branch);
-        var rowBtn = document.querySelector('.evl-del-btn[data-branch="' + CSS.escape(branch) + '"]');
-        if (rowBtn) rowBtn.outerHTML = '<span class="evl-branch-deleted">branch deleted</span>';
-      }
-    } catch (_) {}
-  }
-
-  btnEl.remove();
-  _evlUpdateBanner();
-}
-
-async function evlCleanupAll() {
-  var all = Array.from(_evlState.staleBranches);
-  var n = all.length;
-  if (n === 0) return;
-
-  if (!confirm('Delete all ' + n + ' stale merged branch' + (n !== 1 ? 'es' : '') + '? This cannot be undone.')) return;
-
-  var r = _evlRepoForBranchOps();
-  if (!r) return;
-
-  for (var i = 0; i < all.length; i++) {
-    var branch = all[i];
-    try {
-      var resp = await fetch(
-        '/api/projects/' + encodeURIComponent(r.owner) + '/'
-        + encodeURIComponent(r.repoName) + '/branches/'
-        + branch.split('/').map(encodeURIComponent).join('/'),
-        { method: 'DELETE' }
-      );
-      if (resp.ok) {
-        _evlState.staleBranches.delete(branch);
-        var rowBtn = document.querySelector('.evl-del-btn[data-branch="' + CSS.escape(branch) + '"]');
-        if (rowBtn) rowBtn.outerHTML = '<span class="evl-branch-deleted">branch deleted</span>';
-      }
-    } catch (_) {}
-  }
-
-  document.querySelectorAll('.evl-sprint-cleanup').forEach(function(b) { b.remove(); });
-  _evlUpdateBanner();
-}
-
 // ── AC Template Picker (issue #567) ───────────────────────────────────────
 
 const _UAT_TEMPLATE =
@@ -28491,33 +26392,6 @@ document.addEventListener('keydown', function(e) {
   </div>
 </div>
 
-<!-- ── Re-run Sprint modal (issue #512) ── -->
-<div class="modal-backdrop hidden" id="rr-backdrop"></div>
-<div class="modal hidden" id="rr-modal"
-     role="dialog" aria-modal="true" aria-labelledby="rr-modal-title">
-  <div class="modal-header">
-    <span class="modal-title" id="rr-modal-title">Re-run Sprint?</span>
-    <button class="modal-close" id="rr-close-btn" aria-label="Close">&times;</button>
-  </div>
-  <div class="modal-body">
-    <div id="rr-loading" style="color:var(--text-muted);padding:8px 0">Loading preview…</div>
-    <div id="rr-content" class="hidden">
-      <div class="rr-controls">
-        <span style="font-size:13px;color:var(--text-secondary)">Select tickets to move to child sprint:</span>
-        <a onclick="_rrSelectAll(true)">Select all</a>
-        <a onclick="_rrSelectAll(false)">Select none</a>
-      </div>
-      <div class="rr-ticket-list" id="rr-ticket-list"></div>
-      <div class="rr-uat-warning" id="rr-uat-warning"></div>
-    </div>
-    <div class="modal-error hidden" id="rr-error"></div>
-  </div>
-  <div class="modal-footer">
-    <button class="btn-ghost" id="rr-cancel-btn" type="button">Cancel</button>
-    <button class="btn-primary" id="rr-confirm-btn" type="button" disabled>Create sprint and run</button>
-  </div>
-</div>
-
 <!-- ── New Sprint modal ── -->
 <div class="modal-backdrop hidden" id="ns-backdrop"></div>
 <div class="modal ns-modal hidden" id="ns-modal"
@@ -28771,23 +26645,18 @@ document.addEventListener('keydown', function(e) {
   </div>
 </div>
 
-<!-- ── Run Sprint preflight modal (issue #448) ── -->
+<!-- ── Preflight Warnings modal (read-only, issue #2251) ── -->
 <div class="modal-backdrop hidden" id="pf-backdrop" onclick="_pfClose()"></div>
 <div class="modal pf-modal hidden" id="pf-modal"
      role="dialog" aria-modal="true" aria-labelledby="pf-modal-title">
   <div class="modal-header">
-    <span class="modal-title" id="pf-modal-title">Run Sprint</span>
+    <span class="modal-title" id="pf-modal-title">Preflight Warnings</span>
     <button class="modal-close" id="pf-close-btn" onclick="_pfClose()" aria-label="Close">&times;</button>
   </div>
   <div class="modal-body" id="pf-body">
     <div id="pf-loading" class="hidden" style="text-align:center;padding:24px 0;">
       <span class="pf-spinner" aria-label="Loading…"></span>
       <p style="margin:12px 0 0;font-size:13px;color:var(--text-muted);">Checking sprint…</p>
-    </div>
-    <!-- Pre-flight stepper component (shared ProgressActivity — stepper mode, issue #933) -->
-    <div id="pf-stepper" class="hidden">
-      <div class="pf-stepper" id="pf-stepper-steps"></div>
-      <div class="pf-stepper-summary hidden" id="pf-stepper-summary"></div>
     </div>
     <div id="pf-content" class="hidden"></div>
     <div id="pf-error" class="hidden">
@@ -28797,11 +26666,11 @@ document.addEventListener('keydown', function(e) {
       </div>
     </div>
   </div>
-  <div class="modal-footer hidden" id="pf-footer">
-    <button class="btn-ghost" id="pf-cancel-btn" type="button" onclick="_pfClose()">Cancel</button>
-    <button class="btn-primary" id="pf-confirm-btn" type="button" onclick="_pfConfirm()" disabled>Run Sprint</button>
+  <div class="modal-footer" id="pf-footer">
+    <button class="btn-ghost" id="pf-cancel-btn" type="button" onclick="_pfClose()">Close</button>
   </div>
-  <!-- Bulk flag action progress overlay (Approve All / Re-estimate All) -->
+  <!-- pf-confirm-btn kept as hidden for backward compat with project.html init wiring -->
+  <button id="pf-confirm-btn" type="button" style="display:none" onclick="_pfConfirm()"></button>
   <div class="pf-bulk-overlay hidden" id="pf-bulk-overlay">
     <div class="pf-bulk-overlay-header">
       <span class="pf-bulk-overlay-title" id="pf-bulk-title"></span>
@@ -31015,8 +28884,6 @@ async function scaffoldApplyConfirm() {
 <script src="/static/dist/bundle.js"></script>
 <!-- Shared Add Project modal logic (single source of truth for home + project) -->
 <script src="/static/add-project-modal.js"></script>
-<!-- Shared per-project to-do panel (single source of truth for home + project, #844) -->
-<script src="/static/project-todo.js"></script>
 
 </body>
 </html>

@@ -187,9 +187,6 @@ docs/
   todo.md            sprint history (documentor-owned AUTO region) + hand TODO
   milestones/        active milestone tracking (one .md per initiative)
   features/          one .md per subsystem
-  bulk-create/       saved bulk-create prompts (YYYY-MM-DD-N-<topic>.md; N =
-                     sequence within the day so batches file in order; BKK
-                     dates; never edit a file whose batch already ran)
   changelog/         dated per-sprint entries (uat/ and prd/)
 ```
 

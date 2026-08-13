@@ -378,7 +378,9 @@ ship-tracking.
 1,311 LOC), which is retained.
 
 Before deleting: `docs/bulk-create/2026-06-21-2-planning-definition-of-ready.md`
-is the spec for S5-2 — migrate it first.
+was the spec for S5-2 — that file was never committed to the repo. Its content
+was captured in issue #2262 (Definition of Ready — parser, preflight readiness,
+board gate), which is the canonical destination for that spec.
 
 ### S4-7 — Lock the lookout read contract — **S**
 Guard ticket, land it **before** S4-3.

@@ -5460,7 +5460,6 @@ ${listing}`
     }
     return "";
   }
-  var _NON_DISPATCHABLE_LABELS = /* @__PURE__ */ new Set(["UAT", "UAT-approved", "released"]);
   function _smgmtCardActionBtnHtml(label, {
     isRunning,
     isLinger,
@@ -5499,12 +5498,6 @@ ${listing}`
                   onclick="smgmtRunSprint('${escHtml(label)}')">
                   <i class="ti ti-player-play"></i> Run Sprint</button>`;
   }
-  function _smgmtHasDispatchableTickets(tickets) {
-    return tickets.some((t) => {
-      const names = (t.labels || []).map((l) => l.name);
-      return !names.some((n) => _NON_DISPATCHABLE_LABELS.has(n));
-    });
-  }
   function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
     const isRunning = _smgmtRunningLabels.has(label);
     const isLinger = false;
@@ -5531,9 +5524,6 @@ ${listing}`
     const isAwaitingMerge = isReadyToMerge || finished && !isRunning && !isHasRework && !planBlocksPostRun;
     const showRunningChrome = isRunningView && !isAwaitingMerge;
     const isPostRun = !isRunningView && !planBlocksPostRun && hasLedgerRun;
-    const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
-    const rerunInto = (_smgmtData?.sprint_rerun_into || {})[label];
-    const rerunChildDisplay = rerunInto ? sprintLabelDisplay(rerunInto).replace("Sprint ", "") : "";
     const actionBtn = !isRunning && !isLinger && !isHasRework && !isPostRun && !finished ? `<button class="smgmt-preflight-warnings-btn" type="button"
               title="View preflight warnings for this sprint"
               onclick="smgmtOpenPreflightWarnings('${escHtml(label)}')">

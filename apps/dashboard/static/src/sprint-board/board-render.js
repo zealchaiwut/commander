@@ -1581,15 +1581,6 @@ export function _smgmtCardHtml(
     (finished && !isRunning && !isHasRework && !planBlocksPostRun);
   const showRunningChrome = isRunningView && !isAwaitingMerge;
   const isPostRun = !isRunningView && !planBlocksPostRun && hasLedgerRun;
-  // Run is only for first attempts: post-run labels (incl. has-rework) re-run
-  // into a child sub-sprint instead (P0 — no same-label re-dispatch).
-  const canRun = tickets.length >= 1 && _smgmtHasDispatchableTickets(tickets);
-
-  const rerunInto = (_smgmtData?.sprint_rerun_into || {})[label];
-  const rerunChildDisplay = rerunInto
-    ? sprintLabelDisplay(rerunInto).replace("Sprint ", "")
-    : "";
-
   // Dispatch controls removed (issue #2251). Action button logic is preserved
   // in _smgmtCardActionBtnHtml() for reference; preflight warnings are still
   // accessible via the Preflight button on planning-state cards.

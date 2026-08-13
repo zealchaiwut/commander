@@ -33,7 +33,7 @@ class TestScriptDeleted:
     def test_script_file_deleted(self):
         script = SCRIPTS_DIR / "check_docs_freshness.py"
         assert not script.exists(), (
-            f"scripts/check_docs_freshness.py still exists — delete it"
+            "scripts/check_docs_freshness.py still exists — delete it"
         )
 
     def test_script_absent_from_agents_md(self):

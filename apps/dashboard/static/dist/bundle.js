@@ -6175,6 +6175,7 @@ ${listing}`
          <i class="ti ti-sort-ascending-2"></i> Apply DAG Order</button>` : "";
     const isStaleNoTickets = !isRunning && !!(_smgmtData && _smgmtData._staleNoTicketLabels instanceof Set && _smgmtData._staleNoTicketLabels.has(label));
     const staleNoticeHtml = isStaleNoTickets ? `<span class="smgmt-stale-no-tickets-notice" title="No open tickets remain on this sprint"><i class="ti ti-alert-circle"></i> stale \u2014 no tickets</span>` : "";
+    const dispatchNoteHtml = !isRunning && !hasLedgerRun && !finished ? `<div class="smgmt-dispatch-note"><i class="ti ti-terminal-2" aria-hidden="true"></i> Dispatch is a Claude Code session \u2014 run <code>/coder</code> then <code>/tester</code> per ticket, in dependency order.</div>` : "";
     return `
     <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}">
       ${runningStripeHtml}
@@ -6234,6 +6235,7 @@ ${listing}`
         return "";
       return `<div class="sc-status-line"><i class="ti ti-clock sc-status-icon" aria-hidden="true"></i><span>${escHtml(_ss)}</span></div>`;
     }()}
+      ${dispatchNoteHtml}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
       ${summaryHtml}

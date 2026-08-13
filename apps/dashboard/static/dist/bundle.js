@@ -4804,7 +4804,6 @@ ${listing}`
   var _noopStr = () => "";
   var smgmtRunBlockedToast = _noop;
   var smgmtRunSprint = _noop;
-  var smgmtCancelSprint = _noop;
   var smgmtApproveSprint = _noop;
   var smgmtRejectSprint = _noop;
   var _pfOpen = _noop;
@@ -5435,8 +5434,6 @@ ${listing}`
         const cachedOutcome = _smgmtOutcomeCache[label];
         return `<div class="smgmt-sprint-unit" id="smgmt-unit-${escHtml(label)}">` + _smgmtAncestorRowHtml(label, cachedOutcome, childLabel) + `</div>`;
       }
-      if (_smgmtIsFreshRerunSprint(label))
-        delete _smgmtOutcomeCache[label];
       const outcome = _smgmtRunningLabels.has(label) ? null : _smgmtOutcomeCache[label] || null;
       const parent = _sprintParents[label] || null;
       const cardHtml = _smgmtCardHtml(
@@ -5612,55 +5609,6 @@ ${listing}`
       el.style.display = allDeactivated ? "none" : "";
     });
   }
-  function _smgmtIsFreshRerunSprint(label) {
-    const parents = _smgmtData && _smgmtData.sprint_parents || {};
-    if (!parents[label])
-      return false;
-    const planState = (_smgmtData && _smgmtData.sprint_plan_states || {})[label];
-    return planState === "draft" || planState === "planning";
-  }
-  function _smgmtApplyRerunOptimistic(parentLabel, subLabel, ticketNumbers) {
-    if (!_smgmtData || !parentLabel || !subLabel)
-      return;
-    const nums = new Set(ticketNumbers || []);
-    const issues = _smgmtData.issues || [];
-    for (const iss of issues) {
-      if (nums.has(iss.number))
-        iss.sprint_label = subLabel;
-    }
-    if (!_smgmtData.order)
-      _smgmtData.order = [];
-    if (!_smgmtData.order.includes(subLabel)) {
-      const parentIdx = _smgmtData.order.indexOf(parentLabel);
-      if (parentIdx >= 0)
-        _smgmtData.order.splice(parentIdx + 1, 0, subLabel);
-      else
-        _smgmtData.order.push(subLabel);
-    }
-    if (!_smgmtData.sprint_parents)
-      _smgmtData.sprint_parents = {};
-    _smgmtData.sprint_parents[subLabel] = parentLabel;
-    if (!_smgmtData.sprint_rerun_into)
-      _smgmtData.sprint_rerun_into = {};
-    _smgmtData.sprint_rerun_into[parentLabel] = subLabel;
-    if (!_smgmtData.sprint_has_run)
-      _smgmtData.sprint_has_run = {};
-    _smgmtData.sprint_has_run[parentLabel] = true;
-    if (!_smgmtData.sprint_plan_states)
-      _smgmtData.sprint_plan_states = {};
-    _smgmtData.sprint_plan_states[subLabel] = "draft";
-    delete _smgmtOutcomeCache[parentLabel];
-    delete _smgmtOutcomeCache[subLabel];
-    if (_smgmtBySprint) {
-      const moved = (_smgmtBySprint[parentLabel] || []).filter(
-        (t) => nums.has(t.number)
-      );
-      _smgmtBySprint[subLabel] = [..._smgmtBySprint[subLabel] || [], ...moved];
-      _smgmtBySprint[parentLabel] = (_smgmtBySprint[parentLabel] || []).filter(
-        (t) => !nums.has(t.number)
-      );
-    }
-  }
   function _smgmtCardBucket(label, planStates) {
     const aggBuckets = _smgmtData && _smgmtData._aggregateBuckets;
     if (aggBuckets && label in aggBuckets) {
@@ -5715,8 +5663,6 @@ ${listing}`
       return;
     for (const label of orderedLabels) {
       if (_smgmtRunningLabels.has(label))
-        continue;
-      if (_smgmtIsFreshRerunSprint(label))
         continue;
       if (_smgmtOutcomeCache[label] !== void 0)
         continue;
@@ -5968,8 +5914,6 @@ ${listing}`
       for (const [label, card] of Object.entries(_smgmtAggregateCards)) {
         if (!card || !card.finish_card)
           continue;
-        if (_smgmtIsFreshRerunSprint(label))
-          continue;
         const cardData = card.finish_card;
         if (cardData.state === "no_data")
           continue;
@@ -5982,8 +5926,6 @@ ${listing}`
     const order = _smgmtData.order && _smgmtData.order.length ? _smgmtData.order : (_smgmtData.sprints || []).map((n) => `sprint-${n}`);
     await Promise.allSettled(
       order.map(async (label) => {
-        if (_smgmtIsFreshRerunSprint(label))
-          return;
         try {
           const [cardRes, branchRes] = await Promise.all([
             fetch(
@@ -6078,20 +6020,8 @@ ${listing}`
     canRun,
     tickets
   } = {}) {
-    if (isRunning) {
-      return `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
-                  <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
-    }
-    if (isLinger) {
-      return `<span class="smgmt-linger-note">Finished \u2014 snapshot kept 1h</span>`;
-    }
-    if (isHasRework && rerunInto && (tickets || []).length === 0) {
-      const _rrDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-      const _rrTitle = _smgmtAnySprintRunning ? 'title="Cannot run: another sprint is currently running."' : "";
-      return `<button class="smgmt-run-btn" ${_rrDisabled} ${_rrTitle}
-                  onclick="smgmtRunSprint('${escHtml(rerunInto)}')">
-                  <i class="ti ti-player-play"></i> Run \u2192 ${escHtml(rerunChildDisplay || "")}</button>`;
-    }
+    if (isRunning || isLinger)
+      return "";
     if (isHasRework || isPostRun)
       return "";
     if (_smgmtSignoffState(label) === "pending")
@@ -6121,9 +6051,6 @@ ${listing}`
         isCollapsed = false;
     } catch (_) {
     }
-    const isFreshRerun = _smgmtIsFreshRerunSprint(label);
-    if (isFreshRerun)
-      outcome = null;
     const planState = ((_smgmtData && _smgmtData.sprint_plan_states || {})[label] || "").toLowerCase();
     const planBlocksPostRun = ["planned", "draft", "planning"].includes(
       planState
@@ -6224,7 +6151,7 @@ ${listing}`
     const plannedBadge = !finished && !isPostRun && !outcomeBadgeHtml && !isRunningView ? '<span class="sc-draft-badge">DRAFT</span>' : "";
     const signoffBadge = _smgmtSignoffBadgeHtml(label);
     const blockedHint = "";
-    const parentLineage = parent && !isFreshRerun ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">\u2190 from ${escHtml(sprintLabelDisplay(parent))}</span>` : "";
+    const parentLineage = parent ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">\u2190 from ${escHtml(sprintLabelDisplay(parent))}</span>` : "";
     const live = isRunningView ? (typeof _smgmtLingerLive === "function" ? _smgmtLingerLive(label) : null) || _smgmtLiveCache[label] || null : null;
     const runningComplete = live ? (live.done_count || 0) + (live.failed_count || 0) + (live.skipped_count || 0) : 0;
     const runningTotal = live ? live.total_count || tickets.length : tickets.length;
@@ -7252,7 +7179,6 @@ ${listing}`
   globalThis.smgmtOpenPreflightWarnings = smgmtOpenPreflightWarnings;
   globalThis.smgmtRunBlockedToast = smgmtRunBlockedToast;
   globalThis.smgmtRunSprint = smgmtRunSprint;
-  globalThis.smgmtCancelSprint = smgmtCancelSprint;
   globalThis.smgmtApproveSprint = smgmtApproveSprint;
   globalThis.smgmtRejectSprint = smgmtRejectSprint;
   globalThis._pfOpen = _pfOpen;
@@ -7323,7 +7249,6 @@ ${listing}`
   globalThis._smgmtTicketRowHtml = _smgmtTicketRowHtml;
   globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;
   globalThis._smgmtBacklogTicketHtml = _smgmtBacklogTicketHtml;
-  globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic;
   globalThis._smgmtAncestorMergeState = _smgmtAncestorMergeState;
   globalThis._smgmtAncestorCarrySummary = _smgmtAncestorCarrySummary;
   globalThis._smgmtAncestorTicketsHtml = _smgmtAncestorTicketsHtml;

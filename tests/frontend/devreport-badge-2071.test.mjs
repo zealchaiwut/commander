@@ -92,9 +92,8 @@ function makeLoadReportFactory() {
     'fetch', 'document', 'esc', 'todayIso',
     '_renderEmpty', '_renderReport', '_buildProjBySlug',
     `
-    var _curDate = null;
     var _projBySlug = {};
-    var _reportEverLoaded = false;
+    var _homeLoaded = false;
     ${showFetchErrorFn}
     ${dismissFetchErrorFn}
     ${loadReportFn}
@@ -184,7 +183,7 @@ test('AC2/AC5: _updateLiveBadge must NOT produce a "live ·" label', () => {
 
 // ── loadReport error-handling tests ───────────────────────────────────────────
 
-test('AC3/AC5: 404 after first successful load → root.innerHTML NOT overwritten', async () => {
+test('AC3/AC5: error after first successful load → root.innerHTML NOT overwritten', async () => {
   const factory = makeLoadReportFactory();
   const root = makeMockRoot('');
   const doc = makeMockDocument(root);
@@ -193,24 +192,24 @@ test('AC3/AC5: 404 after first successful load → root.innerHTML NOT overwritte
   const mockFetch = async () => {
     callCount++;
     if (callCount === 1) {
-      return { status: 200, ok: true, json: async () => ({ for_date: '2026-07-31', generated_at: '2026-07-31T05:45:00Z', projects: [] }) };
+      return { status: 200, ok: true, json: async () => ({ generated_at: '2026-07-31T05:45:00Z', projects: [], stats: {} }) };
     }
-    return { status: 404, ok: false };
+    return { status: 500, ok: false };
   };
 
   const loadReport = factory(mockFetch, doc, mockEsc, mockTodayIso, mockRenderEmpty, mockRenderReport, mockBuildProjBySlug);
 
-  // First: successful load sets _reportEverLoaded = true
-  await loadReport(null);
+  // First: successful load sets _homeLoaded = true
+  await loadReport();
 
   // Reset tracking after initial load
   root._innerHTMLSet = false;
 
-  // Second call: 404 — must NOT blank the page
-  await loadReport(null);
+  // Second call: error — must NOT blank the page
+  await loadReport();
 
   assert.equal(root._innerHTMLSet, false,
-    'root.innerHTML must not be overwritten on 404 after a previous successful load');
+    'root.innerHTML must not be overwritten on error after a previous successful load');
 });
 
 test('AC3/AC5: network error after first successful load → root.innerHTML NOT overwritten', async () => {
@@ -222,36 +221,36 @@ test('AC3/AC5: network error after first successful load → root.innerHTML NOT 
   const mockFetch = async () => {
     callCount++;
     if (callCount === 1) {
-      return { status: 200, ok: true, json: async () => ({ for_date: '2026-07-31', generated_at: '2026-07-31T05:45:00Z', projects: [] }) };
+      return { status: 200, ok: true, json: async () => ({ generated_at: '2026-07-31T05:45:00Z', projects: [], stats: {} }) };
     }
     throw new Error('network failure');
   };
 
   const loadReport = factory(mockFetch, doc, mockEsc, mockTodayIso, mockRenderEmpty, mockRenderReport, mockBuildProjBySlug);
 
-  await loadReport(null);
+  await loadReport();
   root._innerHTMLSet = false;
 
-  await loadReport(null);
+  await loadReport();
 
   assert.equal(root._innerHTMLSet, false,
     'root.innerHTML must not be overwritten on network error after a previous successful load');
 });
 
-test('AC3/AC5: initial 404 (no prior load) → empty state shown via root.innerHTML', async () => {
+test('AC3/AC5: initial fetch failure (no prior load) → error state shown via root.innerHTML', async () => {
   const factory = makeLoadReportFactory();
   const root = makeMockRoot('');
   const doc = makeMockDocument(root);
 
-  const mockFetch = async () => ({ status: 404, ok: false });
+  const mockFetch = async () => ({ status: 500, ok: false });
   const loadReport = factory(mockFetch, doc, mockEsc, mockTodayIso, mockRenderEmpty, mockRenderReport, mockBuildProjBySlug);
 
-  await loadReport(null);
+  await loadReport();
 
   assert.equal(root._innerHTMLSet, true,
-    'root.innerHTML must be set with empty state on initial 404 (no prior successful load)');
+    'root.innerHTML must be set with error state on initial fetch failure (no prior successful load)');
   assert.ok(root._innerHTML.includes('empty-note'),
-    'must render empty-note content');
+    'must render empty-note content on initial failure');
 });
 
 test('AC1/AC5: loadReport success → returns generated_at string', async () => {
@@ -263,17 +262,17 @@ test('AC1/AC5: loadReport success → returns generated_at string', async () => 
     status: 200,
     ok: true,
     json: async () => ({
-      for_date: '2026-07-31',
       generated_at: '2026-07-31T05:45:00Z',
       projects: [],
+      stats: {},
     }),
   });
 
   const loadReport = factory(mockFetch, doc, mockEsc, mockTodayIso, mockRenderEmpty, mockRenderReport, mockBuildProjBySlug);
-  const result = await loadReport(null);
+  const result = await loadReport();
 
   assert.equal(result, '2026-07-31T05:45:00Z',
-    'loadReport must return report.generated_at on success');
+    'loadReport must return data.generated_at on success');
 });
 
 test('AC1/AC5: loadReport failure → returns null', async () => {
@@ -284,7 +283,7 @@ test('AC1/AC5: loadReport failure → returns null', async () => {
   const mockFetch = async () => ({ status: 500, ok: false });
   const loadReport = factory(mockFetch, doc, mockEsc, mockTodayIso, mockRenderEmpty, mockRenderReport, mockBuildProjBySlug);
 
-  const result = await loadReport(null);
+  const result = await loadReport();
 
   assert.equal(result, null, 'loadReport must return null on failure');
 });
@@ -297,7 +296,7 @@ test('AC1/AC5: loadReport 404 → returns null', async () => {
   const mockFetch = async () => ({ status: 404, ok: false });
   const loadReport = factory(mockFetch, doc, mockEsc, mockTodayIso, mockRenderEmpty, mockRenderReport, mockBuildProjBySlug);
 
-  const result = await loadReport(null);
+  const result = await loadReport();
 
   assert.equal(result, null, 'loadReport must return null on 404');
 });

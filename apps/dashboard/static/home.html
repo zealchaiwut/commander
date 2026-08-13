@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Dev Report — Commander</title>
+    <title>Projects — Commander</title>
     <script>
       try {
         document.documentElement.setAttribute(
@@ -678,6 +678,69 @@
       }
       .dr-fetch-error button:hover { opacity: 1; }
 
+      /* ── global stats strip (issue #2261) ── */
+      .home-stats-strip {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 16px 0 20px;
+        align-items: center;
+      }
+      .hstat-item {
+        font-family: var(--mono);
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--text-muted);
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        padding: 4px 12px;
+      }
+      .hstat-item.run {
+        color: var(--green);
+        background: var(--green-bg);
+        border-color: transparent;
+      }
+      .hstat-item.uat {
+        color: var(--amber);
+        background: var(--amber-bg);
+        border-color: transparent;
+      }
+      .hstat-item .hstat-d {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--green);
+        animation: pulse-dot 2s ease-in-out infinite;
+      }
+
+      /* uat-pending status pill */
+      .pbstatus.uat {
+        background: var(--amber-bg);
+        color: var(--amber);
+      }
+
+      /* last-sprint / activity meta in project row */
+      .pb-meta {
+        margin-left: auto;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--text-sub);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+      }
+      .pb-meta span {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        white-space: nowrap;
+      }
+
       /* ── reduced motion ── */
       @media (prefers-reduced-motion: reduce) {
         .pbstatus.run .d,
@@ -704,12 +767,19 @@
         .top-nav-date-nav {
           gap: 3px;
         }
-        .report-date {
-          font-size: 22px;
-        }
         .top-nav-sep,
         .top-nav-page {
           display: none;
+        }
+        .pb-meta {
+          display: none;
+        }
+        .home-stats-strip {
+          gap: 6px;
+        }
+        .hstat-item {
+          font-size: 11px;
+          padding: 3px 9px;
         }
       }
     </style>
@@ -718,19 +788,9 @@
     <nav class="top-nav" aria-label="Commander">
       <span class="top-nav-brand">Commander</span>
       <span class="top-nav-sep" aria-hidden="true" role="presentation"></span>
-      <span class="top-nav-page" id="top-nav-label">Dev Report</span>
+      <span class="top-nav-page">Projects</span>
       <div class="top-nav-date-nav">
-        <button
-          class="nav-btn"
-          onclick="gotoPrevDay()"
-          aria-label="Previous day"
-        >
-          <i class="ti ti-chevron-left" style="font-size: 13px"></i>
-        </button>
-        <button class="nav-btn today" onclick="gotoToday()" id="today-btn">
-          Today
-        </button>
-        <button class="nav-btn" id="refresh-btn" onclick="loadReport(_curDate)">
+        <button class="nav-btn" id="refresh-btn" onclick="loadReport()">
           Refresh
         </button>
         <span
@@ -738,32 +798,15 @@
           class="dr-live-ts"
           aria-live="polite"
           role="status"
-          title="Last auto-refreshed"
+          title="Last refreshed"
         ></span>
-        <span class="date-pick-wrap">
-          <button
-            class="nav-btn"
-            type="button"
-            aria-hidden="true"
-            tabindex="-1"
-          >
-            <i class="ti ti-calendar" style="font-size: 12px"></i>
-          </button>
-          <input
-            type="date"
-            id="date-pick"
-            aria-label="Pick a date"
-            max=""
-            onchange="onDatePick(event)"
-          />
-        </span>
       </div>
     </nav>
 
     <div class="page-body">
       <div id="home">
         <div class="loading-state" id="boot-note">
-          <i class="ti ti-loader-2"></i> Loading dev report…
+          <i class="ti ti-loader-2"></i> Loading…
         </div>
       </div>
     </div>
@@ -771,38 +814,11 @@
     <script src="/static/visibility.js"></script>
     <script src="/static/add-project-modal.js"></script>
     <script>
-      // ── Dev Report home page (issue #1961) ───────────────────────────────────────
+      // ── Projects home page (issue #2261) ────────────────────────────────────────
 
-      const MONTHS = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-      ];
-      const DOW = [
-        "Sunday",
-        "Monday",
-        "Tuesday",
-        "Wednesday",
-        "Thursday",
-        "Friday",
-        "Saturday",
-      ];
-
-      let _curDate = null;
-      let _projBySlug = {};
-      let _reportEverLoaded = false;
-
-      // ── live auto-refresh (issue #2023) ──────────────────────────────────────
       var REPORT_REFRESH_INTERVAL_MS = 20000; // 20 s
+      let _projBySlug = {};
+      let _homeLoaded = false;
 
       const PBIC_PALETTE = new Set([
         "gray",
@@ -827,35 +843,33 @@
           .replace(/"/g, "&quot;");
       }
 
-      function parseDate(s) {
-        const [y, m, d] = String(s).split("-").map(Number);
-        return new Date(y, m - 1, d);
-      }
-      function fmtIso(dt) {
-        return (
-          dt.getFullYear() +
-          "-" +
-          String(dt.getMonth() + 1).padStart(2, "0") +
-          "-" +
-          String(dt.getDate()).padStart(2, "0")
-        );
-      }
-      function todayIso() {
-        return fmtIso(new Date());
-      }
-
       function prettyLabel(label) {
         const m = /^sprint-(\d+)$/.exec(String(label || ""));
         return m ? "Sprint " + m[1] : String(label || "");
+      }
+
+      function _relativeDate(dt) {
+        try {
+          const diffMs = Date.now() - dt.getTime();
+          const diffMins = Math.floor(diffMs / 60000);
+          const diffHours = Math.floor(diffMins / 60);
+          const diffDays = Math.floor(diffHours / 24);
+          if (diffMins < 2) return "just now";
+          if (diffMins < 60) return diffMins + "m ago";
+          if (diffHours < 24) return diffHours + "h ago";
+          if (diffDays < 7) return diffDays + "d ago";
+          return dt.toLocaleDateString([], { month: "short", day: "numeric" });
+        } catch (_) { return ""; }
       }
 
       // ── project metadata map ──────────────────────────────────────────────────
       function _buildProjBySlug(projects) {
         const map = {};
         (projects || []).forEach(function (p) {
-          if (p.project) {
-            map[p.project] = {
-              repo: p.repo || p.project,
+          const key = p.slug || (p.repo ? p.repo.split("/").pop() : null);
+          if (key) {
+            map[key] = {
+              repo: p.repo || p.slug,
               icon: p.icon || "ti-folder",
               color: p.color || "gray",
               name: p.name,
@@ -876,10 +890,6 @@
         return `<span class="pbic pbic--${esc(color)}" aria-hidden="true"><i class="ti ${esc(icon)}"></i></span>`;
       }
 
-      function _projectDisplayName(p) {
-        return p.name || _projBySlug[p.project]?.name || p.project;
-      }
-
       function _sprintMgmtHref(slug) {
         return "/project/" + encodeURIComponent(slug) + "/sprint-mgmt";
       }
@@ -891,88 +901,47 @@
         if (!project) return false;
         const view = (p.get("view") || "").toLowerCase();
         const tab =
-          view === "activity"
-            ? "logs"
-            : view === "tickets"
-              ? "tickets"
-              : "sprint";
+          view === "activity" ? "logs" : view === "tickets" ? "tickets" : "sprint";
         const q = new URLSearchParams();
         if (view) q.set("view", view);
         const filter = p.get("filter");
         if (filter) q.set("filter", filter);
         const qs = q.toString();
         window.location.replace(
-          "/project/" +
-            encodeURIComponent(project) +
-            "/" +
-            tab +
-            (qs ? "?" + qs : ""),
+          "/project/" + encodeURIComponent(project) + "/" + tab + (qs ? "?" + qs : ""),
         );
         return true;
       }
 
       async function init() {
         if (_deckRedirect()) return;
-        const url = new URL(window.location.href);
-        const d = url.searchParams.get("date");
-        await loadReport(d);
+        await loadReport();
       }
 
-      // ── report load ────────────────────────────────────────────────────────────
-      async function loadReport(date) {
-        _curDate = date;
+      // ── home data load ─────────────────────────────────────────────────────────
+      async function loadReport() {
         const root = document.getElementById("home");
-
-        const pick = document.getElementById("date-pick");
-        const today = todayIso();
-        if (pick) {
-          pick.max = today;
-          if (date) pick.value = date;
-          else pick.value = today;
-        }
-        const todayBtn = document.getElementById("today-btn");
-        if (todayBtn) todayBtn.disabled = !date || date === today;
-        const navLabel = document.getElementById("top-nav-label");
-        if (navLabel && date) {
-          const dt = parseDate(date);
-          navLabel.textContent =
-            DOW[dt.getDay()] +
-            ", " +
-            MONTHS[dt.getMonth()] +
-            " " +
-            dt.getDate();
-        } else if (navLabel) {
-          navLabel.textContent = "Dev Report";
-        }
-
-        let report;
+        let data;
         try {
-          const q = date ? "?date=" + encodeURIComponent(date) : "";
-          const resp = await fetch("/api/dev-report" + q);
-          if (resp.status === 404) {
-            if (!_reportEverLoaded) root.innerHTML = _renderEmpty();
-            else _showFetchError(root, "No report for this date.");
-            return null;
-          }
+          const resp = await fetch("/api/home");
           if (!resp.ok) {
-            if (!_reportEverLoaded) root.innerHTML =
-              '<div class="empty-note"><i class="ti ti-alert-triangle"></i>Could not load dev report.</div>';
-            else _showFetchError(root, "Could not load dev report.");
+            if (!_homeLoaded)
+              root.innerHTML = '<div class="empty-note"><i class="ti ti-alert-triangle"></i>Could not load projects.</div>';
+            else _showFetchError(root, "Could not load projects.");
             return null;
           }
-          report = await resp.json();
+          data = await resp.json();
         } catch (_) {
-          if (!_reportEverLoaded) root.innerHTML =
-            '<div class="empty-note"><i class="ti ti-alert-triangle"></i>Could not load dev report.</div>';
-          else _showFetchError(root, "Could not load dev report.");
+          if (!_homeLoaded)
+            root.innerHTML = '<div class="empty-note"><i class="ti ti-alert-triangle"></i>Could not load projects.</div>';
+          else _showFetchError(root, "Could not load projects.");
           return null;
         }
-
-        _reportEverLoaded = true;
+        _homeLoaded = true;
         _dismissFetchError(root);
-        _projBySlug = _buildProjBySlug(report.projects);
-        root.innerHTML = _renderReport(report);
-        return report.generated_at || null;
+        _projBySlug = _buildProjBySlug(data.projects);
+        root.innerHTML = _renderReport(data);
+        return data.generated_at || null;
       }
 
       // ── fetch-error banner helpers (issue #2071) ───────────────────────────────
@@ -995,307 +964,105 @@
         if (e) e.remove();
       }
 
-      // ── empty state ────────────────────────────────────────────────────────────
-      function _renderEmpty() {
-        return `<div class="empty-note"><i class="ti ti-moon-stars"></i>No report yet — runs nightly at 05:45</div>`;
+      // ── stats strip ───────────────────────────────────────────────────────────
+      function _renderStats(stats) {
+        const sr = stats.sprint_running || {};
+        const uat = stats.awaiting_uat || {};
+        const bl = stats.backlog || {};
+        const sp = stats.sprints_planned || {};
+        const running = sr.count || 0;
+        const awaitingUat = uat.count || 0;
+        const backlog = bl.count || 0;
+        const planned = sp.count || 0;
+        if (!running && !awaitingUat && !backlog && !planned) return "";
+        let parts = [];
+        if (running)
+          parts.push(`<span class="hstat-item run"><span class="hstat-d"></span>${running} running</span>`);
+        if (awaitingUat)
+          parts.push(`<span class="hstat-item uat"><i class="ti ti-clock-pause" style="font-size:11px"></i>${awaitingUat} awaiting sign-off</span>`);
+        if (backlog)
+          parts.push(`<span class="hstat-item"><i class="ti ti-inbox" style="font-size:11px"></i>${backlog} backlog</span>`);
+        if (planned)
+          parts.push(`<span class="hstat-item"><i class="ti ti-calendar-time" style="font-size:11px"></i>${planned} planned</span>`);
+        return `<div class="home-stats-strip">${parts.join("")}</div>`;
       }
 
       // ── report render ──────────────────────────────────────────────────────────
-      function _renderReport(report) {
-        const projects = report.projects || [];
-        const forDate = report.for_date || todayIso();
-        const dt = parseDate(forDate);
-        const dateStr =
-          DOW[dt.getDay()] + ", " + MONTHS[dt.getMonth()] + " " + dt.getDate();
-
-        let html = `
-    <div class="report-head">
-      <div class="report-l">
-        <div class="report-date">${esc(dateStr)}</div>
-        <div class="report-footer">${_renderFooter(report)}</div>
-      </div>
-    </div>`;
-
+      function _renderReport(data) {
+        const projects = data.projects || [];
+        const stats = data.stats || {};
+        let html = _renderStats(stats);
         if (!projects.length) {
-          html +=
-            '<div class="empty-note"><i class="ti ti-folder-off"></i>No projects in this report.</div>';
+          html += '<div class="empty-note"><i class="ti ti-folder-off"></i>No projects configured.</div>';
         } else {
-          projects.forEach((p) => {
-            html += _renderProject(p);
-          });
+          projects.forEach(function (p) { html += _renderProject(p); });
         }
-
         html += `<a class="add-proj" href="/static/home-preview.html" onclick="return openAdd(event)" aria-label="Add new project"><i class="ti ti-plus" aria-hidden="true"></i> Add new project</a>`;
         return html;
       }
 
-      function _renderFooter(report) {
-        const cost = report.cost ? `Cost today: ${esc(report.cost)} · ` : "";
-        const ws = report.window_start ? esc(report.window_start) : "";
-        const we = report.window_end ? esc(report.window_end) : "";
-        if (!ws && !we) return "";
-        return `${cost}window ${ws}&rarr;${we}`;
-      }
-
       // ── project block ──────────────────────────────────────────────────────────
       function _renderProject(p) {
-        const slug = p.project;
-        const name = _projectDisplayName(p);
-        const counts = p.counts || {};
-
+        const slug = p.slug;
+        const name = p.name || slug;
+        const href = _sprintMgmtHref(slug);
         const statusPill = _statusPill(p);
-        const countsHtml = _countsHtml(counts);
-        const hasBody = _projectHasBody(p);
-
-        const collapseKey = "dr_collapse_" + slug;
-        let collapsed = false;
-        try {
-          collapsed = localStorage.getItem(collapseKey) === "1";
-        } catch (_) {}
-        if (!hasBody) collapsed = true;
-
-        const collapsedCls = collapsed ? " collapsed" : "";
-        const hasBodyCls = hasBody ? " has-body" : "";
-
-        const toggleBtn = hasBody
-          ? `<button class="pb-collapse-btn" title="Toggle details"
-           aria-label="Toggle details" onclick="toggleProject('${esc(slug)}')">
-           <i class="ti ti-chevron-up"></i></button>`
-          : "";
-
-        let html = `
-    <div class="pbrief${collapsedCls}${hasBodyCls}" data-slug="${esc(slug)}">
+        const countsHtml = _countsHtml(p);
+        const metaHtml = _projectMetaHtml(p);
+        return `
+    <div class="pbrief" data-slug="${esc(slug)}">
       <div class="pbrief-head">
-        <a class="pb-title-link" href="${esc(_sprintMgmtHref(slug))}" title="Open sprint management">
+        <a class="pb-title-link" href="${esc(href)}" title="Open sprint management">
           ${_projectBadgeHtml(slug)}
           <span class="pbname">${esc(name)}</span>
           <span class="pbname-go" aria-hidden="true"><i class="ti ti-arrow-right"></i></span>
         </a>
         ${statusPill}
         ${countsHtml}
-        ${toggleBtn}
-      </div>`;
-
-        if (hasBody) {
-          html += `<div class="pbrief-body">`;
-          html += _renderBuckets(p, slug);
-          html += `</div>
-      <div class="pbrief-foot">
-        ${_reviewLink(p, slug)}
-        <a class="open-proj" href="${esc(_sprintMgmtHref(slug))}" aria-label="Open ${esc(slug)} project">${esc(slug)} <i class="ti ti-arrow-right" style="font-size:12px" aria-hidden="true"></i></a>
-      </div>`;
-        }
-
-        html += `</div>`;
-        return html;
-      }
-
-      function _projectHasBody(p) {
-        const counts = p.counts || {};
-        return (
-          (counts.shipped || 0) > 0 ||
-          (counts.fixed || 0) > 0 ||
-          (counts.stale || 0) > 0 ||
-          (counts.waiting || 0) > 0
-        );
+        ${metaHtml}
+      </div>
+    </div>`;
       }
 
       function _statusPill(p) {
         const s = (p.status || "idle").toLowerCase();
         if (s === "running") {
           const lbl =
-            p.in_progress && p.in_progress.sprint_label
-              ? prettyLabel(p.in_progress.sprint_label) + " running"
+            p.sprint_running && p.sprint_running.label
+              ? prettyLabel(p.sprint_running.label) + " running"
               : "running";
           return `<span class="pbstatus run"><span class="d"></span> ${esc(lbl)}</span>`;
         }
-        if (s === "blocked")
-          return '<span class="pbstatus blocked">blocked</span>';
+        if (s === "uat-pending")
+          return '<span class="pbstatus uat"><i class="ti ti-clock-pause" style="font-size:9px"></i> sign-off</span>';
         return '<span class="pbstatus idle">idle</span>';
       }
 
-      function _countsHtml(counts) {
-        const shipped = counts.shipped || 0;
-        const stale = counts.stale || 0;
-        const waiting = counts.waiting || 0;
-        const fixed = counts.fixed || 0;
-        if (!shipped && !stale && !waiting && !fixed) return "";
-        let parts = [];
-        if (shipped)
-          parts.push(
-            `<span class="cnt-item go"><i class="ti ti-rocket" style="font-size:10px"></i>${shipped} shipped</span>`,
-          );
-        if (waiting)
-          parts.push(
-            `<span class="cnt-item hi"><i class="ti ti-clock" style="font-size:10px"></i>${waiting} waiting</span>`,
-          );
-        if (stale)
-          parts.push(
-            `<span class="cnt-item"><i class="ti ti-alert-circle" style="font-size:10px"></i>${stale} stale</span>`,
-          );
-        if (fixed)
-          parts.push(
-            `<span class="cnt-item"><i class="ti ti-circle-check" style="font-size:10px"></i>${fixed} fixed</span>`,
-          );
+      function _countsHtml(p) {
+        const uat = p.uat_count || 0;
+        const backlog = p.backlog_count || 0;
+        if (!uat && !backlog) return "";
+        const parts = [];
+        if (uat)
+          parts.push(`<span class="cnt-item hi"><i class="ti ti-clock-pause" style="font-size:10px"></i>${uat} UAT</span>`);
+        if (backlog)
+          parts.push(`<span class="cnt-item"><i class="ti ti-inbox" style="font-size:10px"></i>${backlog} backlog</span>`);
         return `<div class="pb-counts">${parts.join("")}</div>`;
       }
 
-      // ── buckets ────────────────────────────────────────────────────────────────
-      function _renderBuckets(p, slug) {
-        let html = "";
-
-        if ((p.shipped || []).length) html += _renderShipped(p.shipped, slug);
-        if ((p.fixed || []).length) html += _renderFixed(p.fixed, slug);
-        if ((p.stale || []).length) html += _renderStale(p.stale, slug);
-        if ((p.waiting || []).length)
-          html += _renderWaiting(p.waiting, slug, p);
-
-        return html;
-      }
-
-      function _renderShipped(items, slug) {
-        const rows = items.map((s) => {
-          const label = prettyLabel(s.label || "");
-          const goal = s.goal ? esc(s.goal) : "";
-          const done = s.done != null ? `${s.done} done` : "";
-          const pr = s.pr_number != null ? `PR #${s.pr_number}` : "";
-          const meta = [goal, done, pr].filter(Boolean).join(" · ");
-          return `
-        <div class="planner-row">
-          <span class="outcome-badge success"><i class="ti ti-rocket" style="font-size:10px"></i>shipped</span>
-          <span class="label">${esc(label)}</span>
-          <span class="planner-meta">${esc(meta)}</span>
-        </div>`;
-        });
-        return `<div class="bucket">
-      <div class="bucket-hdr"><i class="ti ti-rocket"></i> Shipped</div>
-      ${_briefCollapsibleRows(rows, slug + "-shipped")}
-    </div>`;
-      }
-
-      function _renderFixed(items, slug) {
-        const rows = items.map((f) => {
-          const ref = f.issue_number != null ? `#${f.issue_number}` : "";
-          return `
-        <div class="planner-row">
-          <span class="outcome-badge success"><i class="ti ti-circle-check" style="font-size:10px"></i>fixed</span>
-          <span class="label">${esc(ref)}</span>
-          <span class="planner-meta">${esc(f.title || "")}</span>
-        </div>`;
-        });
-        return `<div class="bucket">
-      <div class="bucket-hdr"><i class="ti ti-circle-check"></i> Fixed</div>
-      ${_briefCollapsibleRows(rows, slug + "-fixed")}
-    </div>`;
-      }
-
-      function _renderStale(items, slug) {
-        const rows = items.map((st) => {
-          const kind = esc(st.kind || "blocked");
-          const ref =
-            st.issue_number != null
-              ? `#${st.issue_number}`
-              : st.sprint_label
-                ? prettyLabel(st.sprint_label)
-                : "";
-          const age = st.age_days != null ? `${st.age_days}d` : "";
-          return `
-        <div class="planner-row">
-          <span class="outcome-badge blocked"><i class="ti ti-alert-circle" style="font-size:10px"></i>${kind}</span>
-          <span class="label">${esc(ref)}</span>
-          <span class="planner-meta">${esc(st.title || "")}${age ? ` · ${esc(age)}` : ""}</span>
-        </div>`;
-        });
-        return `<div class="bucket">
-      <div class="bucket-hdr"><i class="ti ti-alert-circle"></i> Stale</div>
-      ${_briefCollapsibleRows(rows, slug + "-stale")}
-    </div>`;
-      }
-
-      function _renderWaiting(items, slug, p) {
-        const rows = items.map((w) => {
-          const label = prettyLabel(w.label || "");
-          const tc =
-            w.ticket_count != null
-              ? `${w.ticket_count} ticket${w.ticket_count === 1 ? "" : "s"}`
-              : "";
-          const hrs = w.estimated_hours != null ? `~${w.estimated_hours}h` : "";
-          const meta = [tc, hrs].filter(Boolean).join(" · ");
-          return `
-        <div class="planner-row">
-          <span class="outcome-badge partial"><i class="ti ti-clock-pause" style="font-size:10px"></i>sign-off</span>
-          <span class="label">${esc(label)}</span>
-          <span class="planner-meta">${esc(meta)}</span>
-        </div>`;
-        });
-        return `<div class="bucket">
-      <div class="bucket-hdr"><i class="ti ti-hourglass-high"></i> Waiting</div>
-      ${_briefCollapsibleRows(rows, slug + "-waiting")}
-    </div>`;
-      }
-
-      // ── collapsible rows (existing pattern) ───────────────────────────────────
-      function _briefCollapsibleRows(rowsArr, id) {
-        const threshold = 3;
-        if (rowsArr.length <= threshold)
-          return `<div class="planner-list">${rowsArr.join("")}</div>`;
-        const head = rowsArr.slice(0, threshold).join("");
-        const rest = rowsArr.slice(threshold).join("");
-        const n = rowsArr.length - threshold;
-        return `<div class="planner-list">${head}</div>
-      <div class="planner-list planner-more" id="${id}-more" style="display:none">${rest}</div>
-      <button type="button" class="planner-see-more" id="${id}-btn" onclick="_briefToggleMore('${id}', ${n})">See ${n} more <i class="ti ti-chevron-down"></i></button>`;
-      }
-      function _briefToggleMore(id, n) {
-        const more = document.getElementById(id + "-more");
-        const btn = document.getElementById(id + "-btn");
-        if (!more) return;
-        const show = more.style.display === "none";
-        more.style.display = show ? "" : "none";
-        if (btn)
-          btn.innerHTML = show
-            ? 'See less <i class="ti ti-chevron-up"></i>'
-            : `See ${n} more <i class="ti ti-chevron-down"></i>`;
-      }
-
-      // ── action buttons ────────────────────────────────────────────────────────
-      function _reviewLink(p, slug) {
-        if (!(p.waiting && p.waiting.length)) return "";
-        const href = "/project/" + encodeURIComponent(slug) + "/sprint-mgmt";
-        return `<a class="planner-link" href="${esc(href)}">Review <i class="ti ti-arrow-right" style="font-size:11px"></i></a>`;
-      }
-
-      // ── collapse toggle ───────────────────────────────────────────────────────
-      function toggleProject(slug) {
-        const card = document.querySelector(
-          `.pbrief[data-slug="${CSS.escape ? CSS.escape(slug) : slug}"]`,
-        );
-        if (!card) return;
-        const collapsed = card.classList.toggle("collapsed");
-        try {
-          localStorage.setItem("dr_collapse_" + slug, collapsed ? "1" : "0");
-        } catch (_) {}
-      }
-
-      // ── date navigation ───────────────────────────────────────────────────────
-      function _go(date) {
-        const url = new URL(window.location.href);
-        if (date) url.searchParams.set("date", date);
-        else url.searchParams.delete("date");
-        window.history.replaceState({}, "", url);
-        loadReport(date);
-      }
-      function gotoPrevDay() {
-        const dt = parseDate(_curDate || todayIso());
-        dt.setDate(dt.getDate() - 1);
-        _go(fmtIso(dt));
-      }
-      function gotoToday() {
-        _go(null);
-      }
-      function onDatePick(ev) {
-        const v = ev.target.value;
-        if (v) _go(v);
+      function _projectMetaHtml(p) {
+        const parts = [];
+        if (p.last_sprint && p.last_sprint.sprint_num != null) {
+          parts.push(`<span><i class="ti ti-history" style="font-size:10px"></i>${esc("S" + p.last_sprint.sprint_num)}</span>`);
+        }
+        if (p.last_activity_at) {
+          try {
+            const rel = _relativeDate(new Date(p.last_activity_at));
+            if (rel) parts.push(`<span><i class="ti ti-clock" style="font-size:10px"></i>${esc(rel)}</span>`);
+          } catch (_) {}
+        }
+        if (!parts.length) return "";
+        return `<div class="pb-meta">${parts.join("")}</div>`;
       }
 
       // ── add project ───────────────────────────────────────────────────────────
@@ -1311,9 +1078,7 @@
         return true;
       }
 
-      // ── live-refresh badge helper (issue #2023, updated #2071) ─────────────────
-      // Shows "generated · HH:MM" from the report's generated_at timestamp so the
-      // badge reflects data freshness, not poll time. Noop when no timestamp given.
+      // ── live-refresh badge helper (issue #2261) ─────────────────────────────
       function _updateLiveBadge(generatedAtIso) {
         var el = document.getElementById("dr-live-ts");
         if (!el || !generatedAtIso) return;
@@ -1324,14 +1089,14 @@
         } catch (_) {}
       }
 
-      // Start visibility-aware auto-refresh after the initial report loads.
-      // visibilityInterval() is provided by /static/visibility.js (already
-      // loaded above) — it pauses while the tab is hidden and fires a
-      // catch-up tick when the tab becomes visible again.
-      init()
+      // Start visibility-aware auto-refresh (issue #2261).
+      // visibilityInterval() is from /static/visibility.js — pauses when tab hidden.
+      // _homeBootPromise is exposed so tests can await the first load.
+      var _homeBootPromise = init();
+      _homeBootPromise
         .then(function () {
-          visibilityInterval(async function _devReportTick() {
-            var generatedAt = await loadReport(_curDate);
+          visibilityInterval(async function _homeTick() {
+            var generatedAt = await loadReport();
             if (generatedAt) _updateLiveBadge(generatedAt);
           }, REPORT_REFRESH_INTERVAL_MS);
         })

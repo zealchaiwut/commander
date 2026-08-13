@@ -60,7 +60,6 @@ class TestEndpointGone:
     def client(self):
         """Build a minimal FastAPI app from only the changelog router package
         to assert the route is absent — avoids pulling in all of server.py."""
-        import importlib
         import fastapi
 
         app = fastapi.FastAPI()

@@ -200,7 +200,10 @@ test('AC1: home page requests /api/home on init', async () => {
   assert.ok(homeCalls.length >= 1, `expected at least one /api/home call, got: ${JSON.stringify(fetchCalls)}`);
 });
 
-test('AC1: home page does NOT request /api/dev-report', async () => {
+test('AC1: /api/home is fetched before /api/dev-report (home is the primary data source)', async () => {
+  // #2290 added a secondary non-blocking /api/dev-report fetch for a digest block.
+  // The original AC1 invariant — that /api/home is the PRIMARY source for project
+  // navigation and is fetched first — still holds.
   const { fetchCalls } = await runHomePage(url => {
     if (url.includes('/api/home') && !url.includes('/api/home/')) {
       return Promise.resolve({ ok: true, json: async () => fakeHomeResponse() });
@@ -208,8 +211,16 @@ test('AC1: home page does NOT request /api/dev-report', async () => {
     return Promise.resolve({ ok: true, json: async () => ({}) });
   });
 
-  const devReportCalls = fetchCalls.filter(u => u.includes('/api/dev-report'));
-  assert.equal(devReportCalls.length, 0, `must make zero /api/dev-report calls, got: ${JSON.stringify(devReportCalls)}`);
+  const homeIdx = fetchCalls.findIndex(u => u.includes('/api/home') && !u.includes('/api/home/'));
+  assert.ok(homeIdx !== -1, `/api/home must be called, got: ${JSON.stringify(fetchCalls)}`);
+
+  const devReportIdx = fetchCalls.findIndex(u => u.includes('/api/dev-report'));
+  if (devReportIdx !== -1) {
+    assert.ok(
+      homeIdx < devReportIdx,
+      `/api/home must be fetched before /api/dev-report; order was: ${JSON.stringify(fetchCalls)}`,
+    );
+  }
 });
 
 // ── AC2: project rows link to /project/{slug}/sprint-mgmt ────────────────────

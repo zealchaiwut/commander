@@ -46,7 +46,7 @@ import {
 // Dispatch controls removed (issue #2251). run-controls.js is now a stub
 // that forwards to preflight-warnings.js for the real warning functions.
 import {
-  smgmtRunBlockedToast, smgmtRunSprint, smgmtCancelSprint,
+  smgmtRunBlockedToast, smgmtRunSprint,
   smgmtApproveSprint, smgmtRejectSprint,
   _pfOpen, _pfReset, _pfClose, _pfFetch, _pfShowSuccess, _pfUpdateConfirmBtn,
   _pfBuildWarningsHtml, _pfBuildCycleHtml, _pfBuildFlagsHtml,
@@ -74,7 +74,6 @@ import {
   _smgmtRunningBoardBannerHtml, _smgmtBoardBannerPatch, _smgmtRunningLevelText,
   _smgmtRollupText, _smgmtTicketSize, _smgmtTicketHasEstimate, _smgmtUpdateColRollup, _smgmtTicketRowHtml,
   _smgmtRenderBacklog, _smgmtBacklogTicketHtml,
-  _smgmtApplyRerunOptimistic,
   // Ancestor row (issue #1043)
   _smgmtAncestorMergeState, _smgmtAncestorCarrySummary, _smgmtAncestorTicketsHtml,
   _smgmtAncestorRowHtml, smgmtToggleAncestor, _smgmtUpdateAncestorRow,
@@ -114,7 +113,6 @@ globalThis.smgmtOpenPreflightWarnings = smgmtOpenPreflightWarnings;
 // Run controls stubs (issue #2251 — dispatch removed; stubs keep project.html wiring intact)
 globalThis.smgmtRunBlockedToast = smgmtRunBlockedToast;
 globalThis.smgmtRunSprint = smgmtRunSprint;
-globalThis.smgmtCancelSprint = smgmtCancelSprint;
 globalThis.smgmtApproveSprint = smgmtApproveSprint;
 globalThis.smgmtRejectSprint = smgmtRejectSprint;
 globalThis._pfOpen = _pfOpen;
@@ -191,7 +189,6 @@ globalThis._smgmtUpdateColRollup = _smgmtUpdateColRollup;
 globalThis._smgmtTicketRowHtml = _smgmtTicketRowHtml;
 globalThis._smgmtRenderBacklog = _smgmtRenderBacklog;
 globalThis._smgmtBacklogTicketHtml = _smgmtBacklogTicketHtml;
-globalThis._smgmtApplyRerunOptimistic = _smgmtApplyRerunOptimistic;
 
 // Ancestor sprint rows (issue #1043)
 globalThis._smgmtAncestorMergeState = _smgmtAncestorMergeState;

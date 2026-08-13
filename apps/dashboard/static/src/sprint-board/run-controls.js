@@ -19,7 +19,6 @@ const _noopStr = () => '';
 
 export const smgmtRunBlockedToast = _noop;
 export const smgmtRunSprint = _noop;
-export const smgmtCancelSprint = _noop;
 export const smgmtApproveSprint = _noop;
 export const smgmtRejectSprint = _noop;
 export const _pfOpen = _noop;

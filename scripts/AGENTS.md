@@ -43,6 +43,7 @@ reject, lint, report.
 - `lint_ticket_spec.py` — validate issue body against the canonical template; `--issue N [--repo owner/repo]`
 - `post_test_report.py` [GH] — post structured test report as issue comment; `--issue N --report-file PATH [--gate GATE] [--gate-output PATH]` (Tester-only)
 - `log_decision.py` — append a dated ADR entry to docs/decisions/; `--slug SLUG [--context TEXT] [--decision TEXT] [--consequences TEXT] [--implemented-by STR]`
+- `retry_ticket.py` [GH] — reset a failed ticket from needs-rework back to backlog, clear failure sidecar, print /coder + /tester invocations; `--issue N [--repo owner/repo] [--dry-run]`
 
 ## Sprint Lifecycle
 
@@ -111,6 +112,7 @@ Scripts for repair, backfill, calibration, migration, cleanup, and diagnostics.
 - `seed_calibration.py` — seed estimator calibration tiers from past sprint data; `--commander-dir PATH [--record SIZE:MINUTES] [--from-sprint LABEL]`
 - `seed_test_issues.py` [GH] — seed sandbox repo with mock issues for tester isolation; `--repo REPO [--wipe] [--append] [--dry-run]`
 - `prune_test_files.py` — prune old pytest files keeping N most recently touched; `[--repo-root PATH] [--keep N] [--apply]`
+- `check_no_live_http_in_tests.py` — reject test files that make live HTTP calls against UAT_BASE_URL, UAT_PORT, or localhost literals; `[PATH]` (defaults to tests/); exits 0=clean, 1=violations
 - `deduplicate_labels.py` [GH] — detect and remove duplicate GitHub labels; `--repo REPO [--dry-run] [--ensure NAME COLOR]`
 - `copy_to_tmp.sh` — snapshot gitignored config files from all 4 clones into /tmp/commander-sync/
 - `copy_from_tmp.sh` — restore gitignored config files from /tmp/commander-sync/ into current clone

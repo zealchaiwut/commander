@@ -13,7 +13,7 @@
  */
 
 /* eslint-disable no-unused-vars */
-/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtMiniRailRestoreCached, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCancelBannerHtml, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtDagDataCache, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveCacheRepo, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtNextChildLabel, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtPrimaryRunningLabel, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowMenuOpen, _smgmtRunningViewUpdate, _smgmtSchedDepHtml, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketToSprint, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtSelectedIssues, _smgmtRowClickSelect, _smgmtUpdateSelectionUI, _smgmtLoadPlanningInsights, _smgmtLoadEstVsActual, _smgmtToggleEstVsActual, escHtml, sprintLabelDisplay, colorizeLogLine,
+/* global _blApplyFilters, _blBacklogAll, _blSyncFilterPills, _blUpdateActions, _smgmtEnsureCapData, _smgmtLoadMiniRail, _smgmtMiniRailRestoreCached, _smgmtRenderAllCapBars, _smgmtUpdateSubnav, _cachedFullRepo, _estDataCache, _slug, _smgmtActiveAgentsHtml, _smgmtAgentTagClass, _smgmtApplySort, _smgmtBulkEstimate, _smgmtBySprint, _smgmtCapacityInputHtml, _smgmtCheckEstimatorHealth, _smgmtCloseIssueOpen, _smgmtConflictsByIssue, _smgmtCtxMenuOpen, _smgmtDagDataCache, _smgmtData, _smgmtDeactivatedLabels, _smgmtDepOrderByIssue, _smgmtEstimateBadgeHtml, _smgmtEstimatorAvailable, _smgmtFilterApply, _smgmtFinishCards, _smgmtFinishedLabels, _smgmtHasCompletedTickets, _smgmtInitCapacityGauges, _smgmtInjectOutcomeBand, _smgmtIsCancelled, _smgmtKbRestoreFocus, _smgmtLabelColors, _smgmtLabelFilterToggle, _smgmtLabelFilterToggleExpand, _smgmtLastLabelIssues, _smgmtLevelsHtml, _smgmtLiveAgentBadgesHtml, _smgmtLiveCache, _smgmtLiveCacheRepo, _smgmtLiveLogLinesHtml, _smgmtLivePollRestart, _smgmtLingerRestore, _smgmtLingerStart, _smgmtIsLinger, _smgmtLingerLive, _smgmtOutcomeCache, _smgmtOutcomeLogHtml, _smgmtPrimaryRunningLabel, _smgmtReEstimate, _smgmtRepo, _smgmtRiskFlagIconsHtml, _smgmtRowMenuOpen, _smgmtRunningViewUpdate, _smgmtSchedDepHtml, _smgmtSetSprintTokenEl, _smgmtStateMeta, _smgmtTicketToSprint, _smgmtUpdateCapacityGauge, _smgmtUpdateCleanupBtn, _smgmtUpdateConflictBadge, _smgmtUpdateDepOrderBadge, _smgmtUpdateEstimateBadge, _smgmtSelectedIssues, _smgmtRowClickSelect, _smgmtUpdateSelectionUI, _smgmtLoadPlanningInsights, _smgmtLoadEstVsActual, _smgmtToggleEstVsActual, escHtml, sprintLabelDisplay, colorizeLogLine,
    _smgmtAnySprintRunning:writable, _smgmtOrderedLabels:writable, _smgmtRunningLabels:writable,
    sprintHealthStripInit */
 /* eslint-enable no-unused-vars */
@@ -671,7 +671,6 @@ export function _smgmtRender(data) {
     // cards (unified design: budget bar + dispatch-level mini-rail, no sprint-goal
     // input — the goal field was dropped). Previously they used _smgmtDraftCardHtml.
 
-    if (_smgmtIsFreshRerunSprint(label)) delete _smgmtOutcomeCache[label];
     // Linger is Running-pane only: on the Board a lingering (just-finished) sprint
     // still resolves its real ingested outcome, so the card renders as a settled
     // post-run card (rework / ready-to-merge) rather than a frozen live snapshot.
@@ -940,55 +939,6 @@ export function _smgmtLabelFilterApply() {
   });
 }
 
-export function _smgmtIsFreshRerunSprint(label) {
-  const parents = (_smgmtData && _smgmtData.sprint_parents) || {};
-  if (!parents[label]) return false;
-  const planState = ((_smgmtData && _smgmtData.sprint_plan_states) || {})[
-    label
-  ];
-  // 'draft' is the unified-lifecycle spelling; 'planning' covers legacy files.
-  return planState === "draft" || planState === "planning";
-}
-
-/** Optimistic board state after POST /rerun — child visible, parent emptied, no refresh lag. */
-export function _smgmtApplyRerunOptimistic(
-  parentLabel,
-  subLabel,
-  ticketNumbers,
-) {
-  if (!_smgmtData || !parentLabel || !subLabel) return;
-  const nums = new Set(ticketNumbers || []);
-  const issues = _smgmtData.issues || [];
-  for (const iss of issues) {
-    if (nums.has(iss.number)) iss.sprint_label = subLabel;
-  }
-  if (!_smgmtData.order) _smgmtData.order = [];
-  if (!_smgmtData.order.includes(subLabel)) {
-    const parentIdx = _smgmtData.order.indexOf(parentLabel);
-    if (parentIdx >= 0) _smgmtData.order.splice(parentIdx + 1, 0, subLabel);
-    else _smgmtData.order.push(subLabel);
-  }
-  if (!_smgmtData.sprint_parents) _smgmtData.sprint_parents = {};
-  _smgmtData.sprint_parents[subLabel] = parentLabel;
-  if (!_smgmtData.sprint_rerun_into) _smgmtData.sprint_rerun_into = {};
-  _smgmtData.sprint_rerun_into[parentLabel] = subLabel;
-  if (!_smgmtData.sprint_has_run) _smgmtData.sprint_has_run = {};
-  _smgmtData.sprint_has_run[parentLabel] = true;
-  if (!_smgmtData.sprint_plan_states) _smgmtData.sprint_plan_states = {};
-  _smgmtData.sprint_plan_states[subLabel] = "draft";
-  delete _smgmtOutcomeCache[parentLabel];
-  delete _smgmtOutcomeCache[subLabel];
-  if (_smgmtBySprint) {
-    const moved = (_smgmtBySprint[parentLabel] || []).filter((t) =>
-      nums.has(t.number),
-    );
-    _smgmtBySprint[subLabel] = [...(_smgmtBySprint[subLabel] || []), ...moved];
-    _smgmtBySprint[parentLabel] = (_smgmtBySprint[parentLabel] || []).filter(
-      (t) => !nums.has(t.number),
-    );
-  }
-}
-
 /** Bucket a sprint label for board section grouping (issue #1044). */
 export function _smgmtCardBucket(label, planStates) {
   // Aggregate path (issue #1638): server-computed bucket overrides the outcome-cache logic
@@ -1055,7 +1005,6 @@ export async function _smgmtFetchMissingOutcomes(orderedLabels, _bySprint) {
 
   for (const label of orderedLabels) {
     if (_smgmtRunningLabels.has(label)) continue;
-    if (_smgmtIsFreshRerunSprint(label)) continue;
     if (_smgmtOutcomeCache[label] !== undefined) continue;
     const card = _smgmtAggregateCards && _smgmtAggregateCards[label];
     if (!card || card.outcome == null) continue;
@@ -1354,7 +1303,6 @@ export async function _smgmtLoadFinishCards() {
   if (_smgmtAggregateCards) {
     for (const [label, card] of Object.entries(_smgmtAggregateCards)) {
       if (!card || !card.finish_card) continue;
-      if (_smgmtIsFreshRerunSprint(label)) continue;
       const cardData = card.finish_card;
       if (cardData.state === "no_data") continue;
       const branchData = card.branch_status || { exists: false };
@@ -1370,7 +1318,6 @@ export async function _smgmtLoadFinishCards() {
       : (_smgmtData.sprints || []).map((n) => `sprint-${n}`);
   await Promise.allSettled(
     order.map(async (label) => {
-      if (_smgmtIsFreshRerunSprint(label)) return;
       try {
         const [cardRes, branchRes] = await Promise.all([
           fetch(
@@ -1483,22 +1430,7 @@ export function _smgmtCardActionBtnHtml(label, {
   isRunning, isLinger, isHasRework, isPostRun,
   rerunInto, rerunChildDisplay, canRun, tickets,
 } = {}) {
-  if (isRunning) {
-    return `<button class="smgmt-cancel-btn" onclick="smgmtCancelSprint('${escHtml(label)}')">
-                  <i class="ti ti-player-stop"></i> Cancel sprint</button>`;
-  }
-  if (isLinger) {
-    return `<span class="smgmt-linger-note">Finished — snapshot kept 1h</span>`;
-  }
-  if (isHasRework && rerunInto && (tickets || []).length === 0) {
-    const _rrDisabled = _smgmtAnySprintRunning ? "disabled" : "";
-    const _rrTitle = _smgmtAnySprintRunning
-      ? 'title="Cannot run: another sprint is currently running."'
-      : "";
-    return `<button class="smgmt-run-btn" ${_rrDisabled} ${_rrTitle}
-                  onclick="smgmtRunSprint('${escHtml(rerunInto)}')">
-                  <i class="ti ti-player-play"></i> Run → ${escHtml(rerunChildDisplay || '')}</button>`;
-  }
+  if (isRunning || isLinger) return "";
   if (isHasRework || isPostRun) return "";
   if (_smgmtSignoffState(label) === "pending") return _smgmtSignoffActionsHtml(label);
   if (_smgmtAnySprintRunning) {
@@ -1549,9 +1481,6 @@ export function _smgmtCardHtml(
     if (_pref === "1") isCollapsed = true;
     else if (_pref === "0") isCollapsed = false;
   } catch (_) {}
-
-  const isFreshRerun = _smgmtIsFreshRerunSprint(label);
-  if (isFreshRerun) outcome = null;
 
   const planState = (
     ((_smgmtData && _smgmtData.sprint_plan_states) || {})[label] || ""
@@ -1725,10 +1654,9 @@ export function _smgmtCardHtml(
   const signoffBadge = _smgmtSignoffBadgeHtml(label);
   // Dispatch hints removed with dispatch controls (issue #2251).
   const blockedHint = "";
-  const parentLineage =
-    parent && !isFreshRerun
-      ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">← from ${escHtml(sprintLabelDisplay(parent))}</span>`
-      : "";
+  const parentLineage = parent
+    ? `<span class="smgmt-sprint-lineage" title="Child sprint spawned from ${escHtml(parent)}">← from ${escHtml(sprintLabelDisplay(parent))}</span>`
+    : "";
 
   const live = isRunningView
     ? (typeof _smgmtLingerLive === "function"
@@ -1809,6 +1737,13 @@ export function _smgmtCardHtml(
     ? `<span class="smgmt-stale-no-tickets-notice" title="No open tickets remain on this sprint"><i class="ti ti-alert-circle"></i> stale — no tickets</span>`
     : "";
 
+  // Pre-dispatch guidance note (issue #2310): visible only on draft sprints that
+  // have never been run and are not yet finished. The run button was removed in
+  // the shrink milestone — dispatch now happens in a Claude Code session.
+  const dispatchNoteHtml = (!isRunning && !hasLedgerRun && !finished)
+    ? `<div class="smgmt-dispatch-note"><i class="ti ti-terminal-2" aria-hidden="true"></i> Dispatch is a Claude Code session — run <code>/coder</code> then <code>/tester</code> per ticket, in dependency order.</div>`
+    : "";
+
   return `
     <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}">
       ${runningStripeHtml}
@@ -1867,6 +1802,7 @@ export function _smgmtCardHtml(
         if (!_ss) return "";
         return `<div class="sc-status-line"><i class="ti ti-clock sc-status-icon" aria-hidden="true"></i><span>${escHtml(_ss)}</span></div>`;
       })()}
+      ${dispatchNoteHtml}
       ${cancelBannerHtml}
       ${outcomeBandHtml}
       ${summaryHtml}

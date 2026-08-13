@@ -54,6 +54,7 @@ MUTATION_MARKERS = {
     "release.py": "[GH]",
     "deduplicate_labels.py": "[GH]",
     "seed_test_issues.py": "[GH]",
+    "retry_ticket.py": "[GH]",
     # DB-mutating scripts (local SQLite)
     # Note: export_to_neon.py, migrate_sprints_to_neon.py, backfill_sprint_project.py,
     # repair_sprint_collisions.py, and migrate_to_separate_dbs.py are archived (issue #2236)

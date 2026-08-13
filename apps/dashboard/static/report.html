@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dev Report — Commander</title>
+    <script>
+      try {
+        document.documentElement.setAttribute(
+          "data-theme",
+          localStorage.getItem("theme") || "dark",
+        );
+      } catch (_) {
+        document.documentElement.setAttribute("data-theme", "dark");
+      }
+    </script>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.30.0/dist/tabler-icons.min.css"
+    />
+    <link rel="stylesheet" href="/static/css/tokens.css" />
+    <style>
+      :root { --nav-h: 52px; }
+
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      button { font-family: inherit; }
+      a { color: inherit; text-decoration: none; }
+
+      :focus-visible {
+        outline: 2px solid var(--blue);
+        outline-offset: 2px;
+        border-radius: var(--radius-sm);
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        font-size: 14px;
+        min-height: 100vh;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* ── top nav ── */
+      .top-nav {
+        position: sticky;
+        top: 0;
+        z-index: var(--z-nav);
+        height: var(--nav-h);
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 24px;
+        gap: 8px;
+      }
+      .nav-back {
+        font-family: var(--mono);
+        font-size: 12px;
+        padding: 5px 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--text-muted);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        white-space: nowrap;
+        text-decoration: none;
+        transition: background 0.15s, color 0.15s, border-color 0.15s;
+      }
+      .nav-back:hover {
+        background: var(--surface-hover);
+        color: var(--text);
+        border-color: var(--text-muted);
+      }
+      .nav-sep { width: 1px; height: 18px; background: var(--border); flex-shrink: 0; }
+      .nav-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text);
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .nav-date-group {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+      }
+      .nav-btn {
+        font-family: var(--mono);
+        font-size: 12px;
+        padding: 5px 10px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: transparent;
+        color: var(--text-muted);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        white-space: nowrap;
+        transition: background 0.15s, color 0.15s, border-color 0.15s;
+      }
+      .nav-btn:hover { background: var(--surface-hover); color: var(--text); border-color: var(--text-muted); }
+      .nav-btn:disabled { opacity: 0.4; cursor: default; }
+      .nav-btn.today-active {
+        background: var(--text);
+        color: var(--bg);
+        border-color: var(--text);
+      }
+      .nav-btn.today-active:hover { opacity: 0.85; }
+      .date-pick-wrap {
+        position: relative;
+        display: inline-flex;
+      }
+      .date-pick-wrap input[type="date"] {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
+
+      /* ── page layout ── */
+      .page-body {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 32px 24px 64px;
+      }
+
+      /* ── loading / empty ── */
+      .loading-state {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 64px 24px;
+        color: var(--text-muted);
+        font-size: 14px;
+      }
+      .loading-state .ti {
+        font-size: 20px;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        padding: 64px 24px;
+        text-align: center;
+        color: var(--text-muted);
+      }
+      .empty-state .ti { font-size: 36px; color: var(--text-sub); }
+      .empty-state h2 { font-size: 16px; font-weight: 600; color: var(--text); margin-top: 4px; }
+      .empty-state p { font-size: 13px; max-width: 380px; line-height: 1.5; }
+
+      /* ── report sections ── */
+      .report-meta {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--text-sub);
+        margin-bottom: 28px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+      .report-meta span { display: inline-flex; align-items: center; gap: 4px; }
+
+      .section {
+        margin-bottom: 28px;
+      }
+      .section-title {
+        font-size: 11px;
+        font-weight: 700;
+        font-family: var(--mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .section-title .count-badge {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        padding: 1px 7px;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--text-muted);
+        font-family: var(--mono);
+      }
+      .item-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .item-row {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 9px 14px;
+        font-size: 13px;
+        color: var(--text);
+        line-height: 1.4;
+      }
+      .item-row.completed {
+        border-left: 3px solid var(--green);
+      }
+      .item-row.needs-review {
+        border-left: 3px solid var(--amber);
+      }
+      .item-row.dead-letter {
+        border-left: 3px solid var(--red);
+        color: var(--text-muted);
+      }
+
+      .project-section {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-xl);
+        padding: 16px;
+        margin-bottom: 12px;
+      }
+      .project-section-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .proj-sub-list { display: flex; flex-direction: column; gap: 4px; }
+      .proj-sub-item {
+        font-size: 12px;
+        color: var(--text-muted);
+        padding: 4px 0;
+        border-top: 1px solid var(--border);
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+      }
+      .proj-sub-item:first-child { border-top: none; }
+      .proj-sub-label {
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-sub);
+        flex-shrink: 0;
+        min-width: 60px;
+      }
+
+      .cost-footer {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--text-sub);
+        margin-top: 32px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+      }
+
+      @media (max-width: 560px) {
+        .page-body { padding: 20px 12px 48px; }
+        .nav-title { display: none; }
+        .nav-sep { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="top-nav" aria-label="Commander">
+      <a href="/" class="nav-back" aria-label="Back to projects">
+        <i class="ti ti-arrow-left" aria-hidden="true"></i> Projects
+      </a>
+      <span class="nav-sep" aria-hidden="true"></span>
+      <span class="nav-title" id="nav-title">Dev Report</span>
+      <div class="nav-date-group">
+        <button class="nav-btn" id="prev-day" title="Previous day" aria-label="Previous day">
+          <i class="ti ti-chevron-left" aria-hidden="true"></i>
+        </button>
+        <span class="date-pick-wrap">
+          <button class="nav-btn" id="date-display" aria-label="Pick a date">
+            <i class="ti ti-calendar" aria-hidden="true"></i>
+            <span id="date-label">Today</span>
+          </button>
+          <input type="date" id="date-pick" aria-label="Select report date" />
+        </span>
+        <button class="nav-btn" id="next-day" title="Next day" aria-label="Next day">
+          <i class="ti ti-chevron-right" aria-hidden="true"></i>
+        </button>
+        <button class="nav-btn today-active" id="today-btn" title="Jump to today" aria-label="Today">
+          Today
+        </button>
+      </div>
+    </nav>
+
+    <div class="page-body">
+      <div id="report-root">
+        <div class="loading-state">
+          <i class="ti ti-loader-2" aria-hidden="true"></i> Loading report…
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ── Dev Report page (issue #2290) ─────────────────────────────────────────
+
+      function esc(s) {
+        return String(s == null ? "" : s)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function _todayIso() {
+        var t = new Date();
+        return (
+          t.getFullYear() +
+          "-" +
+          String(t.getMonth() + 1).padStart(2, "0") +
+          "-" +
+          String(t.getDate()).padStart(2, "0")
+        );
+      }
+
+      function _addDays(iso, n) {
+        var d = new Date(iso + "T12:00:00Z");
+        d.setUTCDate(d.getUTCDate() + n);
+        return (
+          d.getUTCFullYear() +
+          "-" +
+          String(d.getUTCMonth() + 1).padStart(2, "0") +
+          "-" +
+          String(d.getUTCDate()).padStart(2, "0")
+        );
+      }
+
+      function _prettyDate(iso) {
+        try {
+          var d = new Date(iso + "T12:00:00Z");
+          return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+        } catch (_) { return iso; }
+      }
+
+      var _currentDate = _todayIso();
+
+      // ── Sync date controls ────────────────────────────────────────────────────
+      function _syncDateControls() {
+        var today = _todayIso();
+        var datePick = document.getElementById("date-pick");
+        var dateLabel = document.getElementById("date-label");
+        var prevBtn = document.getElementById("prev-day");
+        var nextBtn = document.getElementById("next-day");
+        var todayBtn = document.getElementById("today-btn");
+        var navTitle = document.getElementById("nav-title");
+
+        if (datePick) { datePick.max = today; datePick.value = _currentDate; }
+        if (dateLabel) dateLabel.textContent = _currentDate === today ? "Today" : _currentDate;
+        if (nextBtn) nextBtn.disabled = (_currentDate >= today);
+        if (todayBtn) {
+          todayBtn.disabled = (_currentDate === today);
+          if (_currentDate === today) todayBtn.classList.add("today-active");
+          else todayBtn.classList.remove("today-active");
+        }
+        if (navTitle) {
+          navTitle.textContent = _currentDate === today
+            ? "Dev Report – Today"
+            : "Dev Report – " + _prettyDate(_currentDate);
+        }
+      }
+
+      // ── Date navigation ───────────────────────────────────────────────────────
+      function _goToDate(iso) {
+        _currentDate = iso;
+        _syncDateControls();
+        _loadReport();
+      }
+
+      document.addEventListener("DOMContentLoaded", function () {
+        var p = document.getElementById("date-pick");
+        if (p) {
+          p.addEventListener("change", function () {
+            if (p.value) _goToDate(p.value);
+          });
+        }
+        var prev = document.getElementById("prev-day");
+        if (prev) prev.addEventListener("click", function () { _goToDate(_addDays(_currentDate, -1)); });
+
+        var next = document.getElementById("next-day");
+        if (next) next.addEventListener("click", function () {
+          var nxt = _addDays(_currentDate, 1);
+          if (nxt <= _todayIso()) _goToDate(nxt);
+        });
+
+        var todayBtn = document.getElementById("today-btn");
+        if (todayBtn) todayBtn.addEventListener("click", function () { _goToDate(_todayIso()); });
+
+        _syncDateControls();
+        _loadReport();
+      });
+
+      // ── Fetch and render report ───────────────────────────────────────────────
+      async function _loadReport() {
+        var root = document.getElementById("report-root");
+        if (!root) return;
+        root.innerHTML = '<div class="loading-state"><i class="ti ti-loader-2"></i> Loading report…</div>';
+        try {
+          var resp = await fetch("/api/dev-report?date=" + encodeURIComponent(_currentDate));
+          if (!resp.ok) {
+            root.innerHTML = _renderEmpty(_currentDate, resp.status);
+            return;
+          }
+          var data = await resp.json();
+          root.innerHTML = _renderReport(data);
+        } catch (_) {
+          root.innerHTML = _renderEmpty(_currentDate, 0);
+        }
+      }
+
+      function _renderEmpty(date, status) {
+        var today = _todayIso();
+        var msg = status === 404
+          ? (date === today
+              ? "No report has been generated yet for today."
+              : "No report found for " + esc(_prettyDate(date)) + ".")
+          : "Could not load report. The server may be unavailable.";
+        return (
+          '<div class="empty-state">' +
+          '<i class="ti ti-file-off"></i>' +
+          "<h2>No report available</h2>" +
+          "<p>" + msg + "</p>" +
+          "</div>"
+        );
+      }
+
+      function _renderReport(data) {
+        var completed = data.completed || [];
+        var needsReview = data.needs_review || [];
+        var deadLetter = data.dead_letter || [];
+        var projects = data.projects || [];
+        var generatedAt = data.generated_at || "";
+        var cost = data.cost || "";
+
+        var meta = "";
+        if (generatedAt) {
+          try {
+            var gt = new Date(generatedAt);
+            meta += '<span><i class="ti ti-clock" style="font-size:10px"></i>Generated ' +
+              gt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + "</span>";
+          } catch (_) {}
+        }
+        if (cost) meta += '<span><i class="ti ti-coin" style="font-size:10px"></i>' + esc(cost) + "</span>";
+        if (data.window_start && data.window_end) {
+          try {
+            var ws = new Date(data.window_start);
+            var we = new Date(data.window_end);
+            meta += "<span>Window: " +
+              ws.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + "–" +
+              we.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) + "</span>";
+          } catch (_) {}
+        }
+
+        var html = meta ? '<div class="report-meta">' + meta + "</div>" : "";
+
+        // Completed
+        if (completed.length) {
+          html += '<div class="section">';
+          html += '<div class="section-title"><i class="ti ti-circle-check" style="color:var(--green)"></i>Completed <span class="count-badge">' + completed.length + "</span></div>";
+          html += '<div class="item-list">';
+          completed.forEach(function (item) {
+            html += '<div class="item-row completed">' + esc(String(item)) + "</div>";
+          });
+          html += "</div></div>";
+        }
+
+        // Needs review
+        if (needsReview.length) {
+          html += '<div class="section">';
+          html += '<div class="section-title"><i class="ti ti-eye" style="color:var(--amber)"></i>Needs review <span class="count-badge">' + needsReview.length + "</span></div>";
+          html += '<div class="item-list">';
+          needsReview.forEach(function (item) {
+            html += '<div class="item-row needs-review">' + esc(String(item)) + "</div>";
+          });
+          html += "</div></div>";
+        }
+
+        // Dead letter
+        if (deadLetter.length) {
+          html += '<div class="section">';
+          html += '<div class="section-title"><i class="ti ti-trash" style="color:var(--red)"></i>Dead letter <span class="count-badge">' + deadLetter.length + "</span></div>";
+          html += '<div class="item-list">';
+          deadLetter.forEach(function (item) {
+            html += '<div class="item-row dead-letter">' + esc(String(item)) + "</div>";
+          });
+          html += "</div></div>";
+        }
+
+        // Per-project breakdown
+        if (projects.length) {
+          html += '<div class="section">';
+          html += '<div class="section-title"><i class="ti ti-folders"></i>By project <span class="count-badge">' + projects.length + "</span></div>";
+          projects.forEach(function (proj) {
+            var name = esc(proj.name || proj.slug || "Unknown");
+            html += '<div class="project-section">';
+            html += '<div class="project-section-title"><i class="ti ti-folder"></i>' + name + "</div>";
+            if (proj.completed && proj.completed.length) {
+              html += '<div class="proj-sub-list">';
+              proj.completed.forEach(function (item) {
+                html += '<div class="proj-sub-item"><span class="proj-sub-label">done</span>' + esc(String(item)) + "</div>";
+              });
+              html += "</div>";
+            }
+            html += "</div>";
+          });
+          html += "</div>";
+        }
+
+        if (!completed.length && !needsReview.length && !deadLetter.length && !projects.length) {
+          html += '<div class="empty-state"><i class="ti ti-file-description"></i><h2>Report generated</h2><p>No activity items for this period.</p></div>';
+        }
+
+        if (cost) {
+          html += '<div class="cost-footer">Cost: ' + esc(cost) + (data.cost_source ? " \xB7 " + esc(data.cost_source) : "") + "</div>";
+        }
+
+        return html;
+      }
+    </script>
+  </body>
+</html>

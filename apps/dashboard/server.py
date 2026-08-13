@@ -229,7 +229,6 @@ from routers import (  # noqa: E402
     agent_guide_router,
     api_volume_router,
     docs_router,
-    changelog_router,
     estimate_jobs_router,
     activity_router,
     analytics_router,
@@ -335,7 +334,6 @@ app.include_router(running_router)
 app.include_router(dev_report_router)
 app.include_router(docs_router)
 app.include_router(agent_guide_router)
-app.include_router(changelog_router)
 app.include_router(estimate_jobs_router)
 app.include_router(failures_router)
 app.include_router(brain_router)

@@ -9,13 +9,27 @@ AC coverage:
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from pathlib import Path
 
+import httpx
 import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 DASHBOARD_DIR = REPO_ROOT / "apps" / "dashboard"
+
+BASE_URL = os.environ.get("UAT_BASE_URL") or "http://localhost:" + os.environ.get("UAT_PORT", "8001")
+if not BASE_URL.startswith("http"):
+    raise RuntimeError(
+        "UAT_BASE_URL / UAT_PORT not set. Run the tester skill's Step 0 to resolve UAT before pytest."
+    )
+
+
+@pytest.fixture
+def client():
+    with httpx.Client(base_url=BASE_URL, timeout=10.0) as c:
+        yield c
 
 
 # ---------------------------------------------------------------------------
@@ -83,3 +97,25 @@ def test_bulk_tickets_file_exists():
     assert bulk_tickets.exists(), (
         f"routers/bulk_tickets.py was deleted. The Bulk Create UI must be retained (issue #2260 scope excludes it)."
     )
+
+
+# ---------------------------------------------------------------------------
+# AC4 — HTTP test: Bulk Create endpoint is accessible
+# ---------------------------------------------------------------------------
+
+def test_bulk_create_endpoint_accessible(client):
+    """AC4: POST /api/tickets/bulk endpoint must be accessible (202 response expected for valid input)."""
+    # Minimal valid bulk request to test endpoint availability
+    payload = {
+        "prompts": ["test ticket"],
+        "project": "zealchaiwut/commander"
+    }
+    r = client.post("/api/tickets/bulk", json=payload)
+    assert r.status_code in (202, 400, 422), (
+        f"Bulk Create endpoint returned unexpected status {r.status_code}. "
+        f"Expected 202 (accepted) or validation error (400/422). Response: {r.text}"
+    )
+    # 202 = accepted job; 422 = validation failure (also acceptable, means endpoint exists and validates)
+    if r.status_code == 202:
+        data = r.json()
+        assert "job_id" in data, "202 response must include job_id"

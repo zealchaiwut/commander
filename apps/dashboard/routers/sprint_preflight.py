@@ -385,8 +385,12 @@ def get_sprint_preflight(sprint_label: str, project: str):
         except Exception:
             pass  # DoR is advisory — don't fail preflight
 
+    ok = True
+    if dor_mode == "block" and readiness and readiness.get("not_ready"):
+        ok = False
+
     response: dict = {
-        "ok": True,
+        "ok": ok,
         "sprint_label": sprint_label,
         "project": project,
         "dag": dag_payload,

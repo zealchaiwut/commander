@@ -12,7 +12,6 @@ from .logs import router as logs_router
 from .backup import router as backup_router
 from .doctor import router as doctor_router
 from .finish_progress import router as finish_progress_router
-from .home_milestone import router as home_milestone_router
 from .log_search import router as log_search_router
 from .maintenance import router as maintenance_router
 from .milestones import router as milestones_router
@@ -69,7 +68,6 @@ __all__ = [
     "backup_router",
     "doctor_router",
     "finish_progress_router",
-    "home_milestone_router",
     "log_search_router",
     "maintenance_router",
     "milestones_router",

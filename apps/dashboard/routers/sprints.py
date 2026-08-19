@@ -78,6 +78,46 @@ def save_sprint_order(project: str, body: SprintOrderBody):
     return result
 
 
+class SprintRerunBody(BaseModel):
+    """Body for POST /api/sprints/{label}/rerun (issue #2318)."""
+
+    repo: str | None = None
+    dry_run: bool = False
+
+
+@router.post("/api/sprints/{sprint_label}/rerun")
+def rerun_sprint(sprint_label: str, body: SprintRerunBody | None = None):
+    """Reset every failed ticket in a sprint back to a dispatchable state.
+
+    Restored per the operator decision on #2314. This is **not** the rerun that
+    was deleted in #2250: it keeps the sprint's own label, imposes no ordering,
+    and never writes sprint lifecycle state (see #2311 for why each of those
+    matters). It also does not dispatch — resetting and running are separate
+    calls so a reset can be inspected before anything executes.
+    """
+    import github_client
+    from services.sprint_manager.ticket_retry import reset_sprint
+
+    payload = body or SprintRerunBody()
+    repo_root = _commander_repo_root()
+
+    try:
+        result = reset_sprint(
+            sprint_label,
+            github_client=github_client,
+            repo=payload.repo,
+            repo_root=repo_root,
+            dry_run=payload.dry_run,
+        )
+    except Exception as exc:  # surfaced to the caller rather than a bare 500
+        raise HTTPException(status_code=502, detail=f"rerun failed: {exc}") from exc
+
+    if not payload.dry_run and result.reset:
+        invalidate_board(payload.repo or "")
+
+    return result.to_dict()
+
+
 class SprintDispatchBody(BaseModel):
     """Body for POST /api/sprints/{label}/dispatch (issue #2315).
 

@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Record the test baseline a merge is checked against (issue #2316).
+
+Usage:
+    python3 scripts/record_test_baseline.py --repo zealchaiwut/viral-radar
+    python3 scripts/record_test_baseline.py --repo owner/repo --ref develop
+    python3 scripts/record_test_baseline.py --repo owner/repo --dry-run
+
+Runs the suite on `--ref` (default: develop) and writes the resulting failure
+count and failing-test ids to `.commander/baselines/<owner>-<repo>.json`.
+
+Baselines are deliberately explicit. `finish_feature.py` never infers one from
+the branch being merged — a branch that set its own baseline would always pass.
+
+Real baselines are not green: Commander's own scoped gate carries a ~25-failure
+baseline, and viral-radar's develop measured 75 failed / 954 passed. The point is
+to pin what is already broken so that only *new* breakage blocks a merge.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+SCRIPTS_DIR = Path(__file__).parent
+REPO_ROOT = SCRIPTS_DIR.parent
+
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "apps" / "dashboard"))
+
+from services.sprint_manager.merge_baseline import (  # noqa: E402
+    Baseline,
+    baseline_path,
+    parse_failed_test_ids,
+    save_baseline,
+)
+from services.sprint_manager.suite_health_gate import _parse_pytest_output  # noqa: E402
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(
+        description="Record the test baseline used by the merge check.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    p.add_argument("--repo", required=True, help="owner/repo this baseline belongs to")
+    p.add_argument("--ref", default="develop", help="git ref to measure (default: develop)")
+    p.add_argument(
+        "--pytest-args",
+        default=os.environ.get("COMMANDER_BASELINE_PYTEST_ARGS", "tests/ -q"),
+        help="arguments passed to pytest (default: 'tests/ -q')",
+    )
+    p.add_argument("--timeout", type=int, default=900, help="seconds before giving up")
+    p.add_argument("--repo-root", default=None, help="repo to run the suite in (default: cwd)")
+    p.add_argument("--dry-run", action="store_true", help="measure and print, write nothing")
+    args = p.parse_args()
+
+    run_root = Path(args.repo_root) if args.repo_root else Path.cwd()
+    print(f"Measuring {args.repo} @ {args.ref} in {run_root}…")
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", *args.pytest_args.split()],
+            cwd=run_root, capture_output=True, text=True, timeout=args.timeout,
+        )
+    except subprocess.TimeoutExpired:
+        print(
+            f"ERROR: suite exceeded {args.timeout}s. Scope it with --pytest-args "
+            "or raise --timeout; a baseline recorded from a partial run would be wrong.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    output = (proc.stdout or "") + (proc.stderr or "")
+    passed, failed, skipped = _parse_pytest_output(output)
+    failed_ids = parse_failed_test_ids(output)
+
+    if failed and not failed_ids:
+        print(
+            "WARNING: the summary reports failures but no FAILED lines were parsed. "
+            "The baseline will fall back to count-only comparison, which cannot "
+            "detect a fixed-one/broke-one swap.",
+            file=sys.stderr,
+        )
+
+    print(f"  passed={passed} failed={failed} skipped={skipped}")
+    print(f"  failing test ids captured: {len(failed_ids)}")
+
+    baseline = Baseline(
+        project=args.repo,
+        failed=failed,
+        passed=passed,
+        skipped=skipped,
+        failed_test_ids=failed_ids,
+        recorded_at=datetime.now(timezone.utc).isoformat(),
+        recorded_from_ref=args.ref,
+    )
+
+    if args.dry_run:
+        print("\n--dry-run: nothing written. Would write to:")
+        print(f"  {baseline_path(args.repo, REPO_ROOT / '.commander')}")
+        return
+
+    path = save_baseline(baseline, REPO_ROOT / ".commander")
+    print(f"\nWrote baseline to {path}")
+
+
+if __name__ == "__main__":
+    main()

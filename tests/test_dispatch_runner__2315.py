@@ -175,9 +175,33 @@ def test_runner_never_mints_labels_or_writes_lifecycle_state():
 
 
 def test_runner_does_not_sort_or_reverse_tickets():
+    """Assert on execute_run's AST, not on the file's text.
+
+    A whole-file grep for `reversed(` produces false positives — parsing the
+    agent result envelope legitimately reverses *output lines*, which has
+    nothing to do with ticket order. What must hold is that the ticket sequence
+    itself is never reordered.
+    """
+    import ast
+
     src = (REPO_ROOT / "services" / "sprint_manager" / "dispatch_runner.py").read_text()
-    for forbidden in (".sort(", "sorted(", ".reverse(", "reversed("):
-        assert forbidden not in src, f"runner must not reorder tickets: found {forbidden}"
+    tree = ast.parse(src)
+
+    fn = next(
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "execute_run"
+    )
+
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                assert node.func.id not in ("sorted", "reversed"), (
+                    f"execute_run must not reorder tickets: {node.func.id}()"
+                )
+            elif isinstance(node.func, ast.Attribute):
+                assert node.func.attr not in ("sort", "reverse"), (
+                    f"execute_run must not reorder tickets: .{node.func.attr}()"
+                )
 
 
 # --- start_run does not mutate the caller's list --------------------------

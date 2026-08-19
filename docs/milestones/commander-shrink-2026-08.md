@@ -19,6 +19,75 @@ Source: 7-agent audit, 2026-08-12
 | 3 | **Keep the Deploy tab** | `environments.py` + `deploy_actions/config_schema/render_actions/validation` retained as operator tooling. |
 | 4 | **Keep the Running view, re-feed it** | `agent_runs` is written only at `sprint_manager.py:741,796`, so the Running tab is *already blind* to manual sessions. Re-feed from the existing hooks (~200 LOC) instead of maintaining ~20k LOC of orchestration. |
 | 5 | **Cut B stands as audited** | Hand the knowledge/digest layer to lookout, gated on lookout actually gathering commander first. |
+| 6 | **Restore dispatch and rerun as endpoints** (2026-08-19, #2314) | Partially reverses decision 1 for *triggering only* — see the section below. |
+
+## Decision — dispatch triggering (2026-08-19, #2314)
+
+**Operator decision: option 1 — server-side dispatch and rerun endpoints.**
+
+`POST /api/sprints/{label}/dispatch` (#2315) and
+`POST /api/sprints/{label}/rerun` (#2318) in the dashboard. Dispatch runs the
+per-ticket coder → tester loop server-side; rerun resets failed tickets in a
+sprint back to a dispatchable state.
+
+### Scope of the reversal
+
+This **supersedes the #2311 reasoning** that "dispatch is a CLI activity now; a
+server endpoint is the wrong home for it" — **for triggering only.** Everything
+else from the shrink stands: the autonomous orchestrator, its gate pipeline, its
+fix-loop, and its sprint-branch/PR shape are **not** restored. What lands is a
+trigger and a queue consumer, not a scheduler with opinions.
+
+### Why the reversal
+
+The #2311 decision assumed an operator at the keyboard. Both Commander agent
+entry points require `--dangerously-skip-permissions`, and an assistant session
+is blocked from spawning a permission-elevated agent. Verified 2026-08-19:
+
+| Action | Result |
+|---|---|
+| `ssh` to the host | allowed |
+| `claude -p "..."` headless, default permissions | allowed |
+| `claude -p ... --dangerously-skip-permissions` | blocked by permission classifier |
+| `claude -p ... --permission-mode acceptEdits` | blocked by permission classifier |
+
+So "dispatch is a CLI activity" resolved in practice to "the operator personally
+runs every dispatch and every retry, for every ticket" — two invocations per
+ticket, ten for a five-ticket sprint. That cost was not priced into the original
+decision.
+
+`scripts/retry_ticket.py` is **not** replaced. It stays the CLI path, and the
+endpoint wraps the same functions so the two cannot drift.
+
+### Constraints carried forward verbatim from #2311
+
+- **Must not mint child sprint labels.** The old rerun created `sprint-N.1/.2/.3`,
+  fragmenting one logical sprint across four labels and breaking sign-off and PR
+  flows.
+- **Must not reorder tickets.** The old rerun reversed order and once queued a
+  delete-the-tests ticket ahead of the deletions it covered.
+- **Must not write sprint lifecycle state.** A cancelled sprint stuck at
+  `needs_rework` and same-label re-dispatch 409'd forever; reconcile would not
+  clear it.
+
+All three are asserted by tests in #2315 and #2318, on the AST rather than on
+source text.
+
+### On ticket failure
+
+Dispatch **stops**. It does not continue into dependent tickets, and it records
+which ticket failed. Recovery is a separate, explicit call — resetting and
+running are deliberately not merged, so a reset can be inspected before anything
+executes.
+
+### Sequencing
+
+#2316 (baseline-delta check) lands **before** #2315. Push-button dispatch that
+merges to develop with no objective check behind it is the combination worth
+avoiding: the gate pipeline is gone, and the tester agent merges on its own
+say-so.
+
+---
 
 ## Invariants — must not break
 

@@ -95,13 +95,11 @@ def rerun_sprint(sprint_label: str, body: SprintRerunBody | None = None):
     matters). It also does not dispatch — resetting and running are separate
     calls so a reset can be inspected before anything executes.
     """
-    from pathlib import Path
-
     import github_client
     from services.sprint_manager.ticket_retry import reset_sprint
 
     payload = body or SprintRerunBody()
-    repo_root = Path(config.__file__).resolve().parent.parent.parent
+    repo_root = _commander_repo_root()
 
     try:
         result = reset_sprint(
@@ -118,6 +116,88 @@ def rerun_sprint(sprint_label: str, body: SprintRerunBody | None = None):
         invalidate_board(payload.repo or "")
 
     return result.to_dict()
+
+
+class SprintDispatchBody(BaseModel):
+    """Body for POST /api/sprints/{label}/dispatch (issue #2315).
+
+    ``tickets`` is executed in the order given. The runner never sorts or
+    reorders it — ticket sequencing belongs to the operator (#2311).
+    """
+
+    tickets: list[int]
+    repo: str | None = None
+    cwd: str | None = None
+    baseline_note: str | None = None
+
+
+def _commander_repo_root():
+    from pathlib import Path
+
+    return Path(config.__file__).resolve().parent.parent.parent
+
+
+@router.post("/api/sprints/{sprint_label}/dispatch")
+def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
+    """Start a dispatch run for a sprint and return its handle (issue #2315).
+
+    The privileged agent spawn happens inside this service, which is the point
+    of the #2314 decision: the caller makes an ordinary API call rather than
+    elevating anything itself.
+
+    Returns immediately; poll ``GET /api/sprints/dispatch/{run_id}`` for status.
+    """
+    from pathlib import Path
+
+    from services.sprint_manager.dispatch_runner import start_run
+
+    if not body.tickets:
+        raise HTTPException(status_code=400, detail="tickets must not be empty")
+
+    repo_root = _commander_repo_root()
+    cwd = Path(body.cwd) if body.cwd else repo_root
+    if not cwd.exists():
+        raise HTTPException(status_code=400, detail=f"cwd does not exist: {cwd}")
+
+    kwargs = {}
+    if body.baseline_note:
+        kwargs["baseline_note"] = body.baseline_note
+
+    run = start_run(
+        sprint_label,
+        body.tickets,
+        repo=body.repo,
+        repo_root=repo_root,
+        cwd=cwd,
+        **kwargs,
+    )
+    return run.to_dict()
+
+
+@router.get("/api/sprints/dispatch/{run_id}")
+def get_dispatch_run(run_id: str):
+    """Live status of a dispatch run: current ticket, step, and outcomes."""
+    from services.sprint_manager.dispatch_runner import load_run
+
+    data = load_run(run_id, _commander_repo_root())
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"unknown dispatch run: {run_id}")
+    return data
+
+
+@router.post("/api/sprints/dispatch/{run_id}/stop")
+def stop_dispatch_run(run_id: str):
+    """Ask a run to stop at the next step boundary.
+
+    Not mid-step: a coder step that has already pushed and labelled SIT is a
+    consistent state, and interrupting inside one could leave a ticket
+    half-labelled.
+    """
+    from services.sprint_manager.dispatch_runner import request_stop
+
+    if not request_stop(run_id, _commander_repo_root()):
+        raise HTTPException(status_code=404, detail=f"unknown dispatch run: {run_id}")
+    return {"run_id": run_id, "stop_requested": True}
 
 
 @router.post("/api/sprints/plan-next")

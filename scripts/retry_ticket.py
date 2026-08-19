@@ -54,9 +54,21 @@ def _load_env():
             os.environ.setdefault(k.strip(), v.strip())
 
 
+from services.sprint_manager.ticket_retry import (  # noqa: E402
+    REWORK_LABEL,
+    reset_ticket,
+    sidecar_path,
+)
+
+
 def _sidecar_path(issue_num: int) -> Path:
-    """Return the path to the last-failure sidecar for an issue."""
-    return _REPO_ROOT / ".commander" / "runtime" / f"last-failure-{issue_num}.json"
+    """Return the path to the last-failure sidecar for an issue.
+
+    Thin wrapper kept for the existing tests; the implementation now lives in
+    services.sprint_manager.ticket_retry so the CLI and the /rerun endpoint
+    (#2318) share exactly one behaviour.
+    """
+    return sidecar_path(issue_num, _REPO_ROOT)
 
 
 def main():
@@ -88,7 +100,7 @@ def main():
 
     current_labels = [lbl["name"] for lbl in issue.get("labels", [])]
 
-    if "needs-rework" not in current_labels:
+    if REWORK_LABEL not in current_labels:
         if "backlog" in current_labels:
             sys.stdout.write(
                 f"#{args.issue} already has 'backlog' label (no needs-rework to clear).\n"
@@ -114,29 +126,28 @@ def main():
         sys.stdout.write(f"  /tester verify issue {args.issue}\n")
         return
 
-    # Swap the labels: remove needs-rework, add backlog.
-    # update_labels() calls `gh issue edit` directly — it does NOT touch
-    # sprint lifecycle state and does NOT mint child labels.
+    # Shared with POST /api/sprints/{label}/rerun (#2318) so the two paths
+    # cannot drift. update_labels() calls `gh issue edit` directly — it does
+    # NOT touch sprint lifecycle state and does NOT mint child labels.
+    sidecar = _sidecar_path(args.issue)
     try:
-        github_client.update_labels(
+        outcome = reset_ticket(
             args.issue,
-            add=["backlog"],
-            remove=["needs-rework"],
-            repo_name=repo,
+            github_client=github_client,
+            repo=repo,
+            repo_root=_REPO_ROOT,
+            labels=current_labels,
         )
     except Exception as e:
         sys.exit(f"Label update failed for #{args.issue}: {e}")
 
-    sys.stdout.write(f"Reset #{args.issue}: needs-rework -> backlog\n")
+    if outcome.changed:
+        sys.stdout.write(f"Reset #{args.issue}: {outcome.reason}\n")
+    else:
+        sys.stdout.write(f"#{args.issue} unchanged: {outcome.reason}\n")
 
-    # Clear the stale failure sidecar if one exists
-    sidecar = _sidecar_path(args.issue)
-    if sidecar.exists():
-        try:
-            sidecar.unlink()
-            sys.stdout.write(f"Sidecar cleared: {sidecar.relative_to(_REPO_ROOT)}\n")
-        except OSError as e:
-            sys.stderr.write(f"Warning: could not delete sidecar {sidecar}: {e}\n")
+    if outcome.sidecar_cleared:
+        sys.stdout.write(f"Sidecar cleared: {sidecar.relative_to(_REPO_ROOT)}\n")
     else:
         sys.stdout.write(f"No sidecar at {sidecar.relative_to(_REPO_ROOT)}\n")
 

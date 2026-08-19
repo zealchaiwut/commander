@@ -149,7 +149,11 @@ def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
     """
     from pathlib import Path
 
-    from services.sprint_manager.dispatch_runner import start_run
+    from services.sprint_manager.dispatch_runner import (
+        DispatchConfigError,
+        load_project_config,
+        start_run,
+    )
 
     if not body.tickets:
         raise HTTPException(status_code=400, detail="tickets must not be empty")
@@ -159,6 +163,15 @@ def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
     if not cwd.exists():
         raise HTTPException(status_code=400, detail=f"cwd does not exist: {cwd}")
 
+    # Prompt templates, per-step worktrees and the model come from the target
+    # project's .commander/sprint.yaml (issue #2325). A missing or incomplete
+    # config is a 400 here rather than a run that starts and silently does
+    # nothing — which is what happened before this was read.
+    try:
+        config = load_project_config(cwd)
+    except DispatchConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     kwargs = {}
     if body.baseline_note:
         kwargs["baseline_note"] = body.baseline_note
@@ -166,9 +179,10 @@ def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
     run = start_run(
         sprint_label,
         body.tickets,
-        repo=body.repo,
+        repo=body.repo or config.repo_name or None,
         repo_root=repo_root,
         cwd=cwd,
+        config=config,
         **kwargs,
     )
     return run.to_dict()

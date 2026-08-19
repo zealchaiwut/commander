@@ -152,6 +152,65 @@ def stop_requested(run_id: str, repo_root: Path) -> bool:
     return stop_flag_path(run_id, repo_root).exists()
 
 
+# Text an agent emits when it did not actually do the work. `claude -p` exits 0
+# in these cases, so the exit code alone cannot be trusted (issue #2324).
+_FAILURE_MARKERS = (
+    "unknown command",
+    "did you mean",
+    "no such command",
+)
+
+
+def judge_agent_result(returncode: int, stdout: str, stderr: str) -> tuple[bool, str]:
+    """Decide whether an agent run actually succeeded.
+
+    `claude -p` exits **0** when the prompt names a command that does not exist,
+    so a returncode check alone reports a no-op as a pass. Run 94914e4a8e47
+    dispatched five tickets, recorded ten passing steps, and did nothing at all.
+
+    Success is therefore read from the JSON result envelope
+    (`--output-format json` gives `is_error` / `subtype` / `result`), and
+    anything unparseable or ambiguous is treated as a **failure**. Unknown state
+    must never resolve to success: a silent green run is worse than a loud red
+    one, because nothing prompts the operator to look.
+    """
+    combined = ((stdout or "") + (stderr or "")).strip()
+    tail = combined[-2000:]
+
+    if returncode != 0:
+        return False, f"agent exited {returncode}: {tail}"
+
+    if not combined:
+        return False, "agent produced no output"
+
+    lowered = combined.lower()
+    for marker in _FAILURE_MARKERS:
+        if marker in lowered:
+            return False, f"agent did not run the requested command: {tail}"
+
+    # Parse the result envelope. The last JSON object on stdout is the result.
+    envelope = None
+    for line in reversed((stdout or "").splitlines()):
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                envelope = json.loads(line)
+                break
+            except ValueError:
+                continue
+
+    if envelope is None:
+        return False, f"could not parse an agent result envelope: {tail}"
+
+    if envelope.get("is_error"):
+        return False, f"agent reported is_error: {str(envelope.get('result'))[:800]}"
+
+    if envelope.get("subtype") and envelope.get("subtype") != "success":
+        return False, f"agent subtype {envelope.get('subtype')!r}: {tail}"
+
+    return True, str(envelope.get("result", ""))[:2000]
+
+
 def default_spawn(
     step: str,
     issue: int,
@@ -172,7 +231,12 @@ def default_spawn(
 
     try:
         proc = subprocess.run(
-            ["claude", "-p", prompt, "--dangerously-skip-permissions", "--model", model],
+            [
+                "claude", "-p", prompt,
+                "--dangerously-skip-permissions",
+                "--model", model,
+                "--output-format", "json",
+            ],
             cwd=str(cwd), env=env, capture_output=True, text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired:
@@ -180,8 +244,7 @@ def default_spawn(
     except FileNotFoundError:
         return False, "claude CLI not found on PATH"
 
-    tail = ((proc.stdout or "") + (proc.stderr or ""))[-2000:]
-    return proc.returncode == 0, tail
+    return judge_agent_result(proc.returncode, proc.stdout or "", proc.stderr or "")
 
 
 def execute_run(

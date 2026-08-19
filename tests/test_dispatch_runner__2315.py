@@ -33,7 +33,7 @@ class RecordingSpawn:
         self.calls = []
         self.fail_on = fail_on or set()
 
-    def __call__(self, step, issue, repo, *, cwd, baseline_note):
+    def __call__(self, step, issue, repo, *, cwd, baseline_note, **kw):
         self.calls.append((step, issue))
         if (step, issue) in self.fail_on:
             return False, f"{step} failed on #{issue}"
@@ -101,7 +101,7 @@ def test_progress_is_visible_mid_run(tmp_path):
     """The status file must show the in-flight ticket, not only the final state."""
     seen = {}
 
-    def spy(step, issue, repo, *, cwd, baseline_note):
+    def spy(step, issue, repo, *, cwd, baseline_note, **kw):
         snapshot = load_run("testrun", tmp_path)
         seen[(step, issue)] = (snapshot["current_issue"], snapshot["current_step"])
         return True, "ok"
@@ -116,7 +116,7 @@ def test_progress_is_visible_mid_run(tmp_path):
 def test_stop_is_honoured_at_the_next_step_boundary(tmp_path):
     calls = []
 
-    def spawn(step, issue, repo, *, cwd, baseline_note):
+    def spawn(step, issue, repo, *, cwd, baseline_note, **kw):
         calls.append((step, issue))
         # Ask to stop while the first coder step is running.
         request_stop("testrun", tmp_path)
@@ -148,7 +148,7 @@ def test_agents_are_given_the_baseline_and_no_live_http_rules():
 def test_baseline_note_is_passed_through_to_the_agent(tmp_path):
     received = {}
 
-    def spawn(step, issue, repo, *, cwd, baseline_note):
+    def spawn(step, issue, repo, *, cwd, baseline_note, **kw):
         received["note"] = baseline_note
         return True, "ok"
 

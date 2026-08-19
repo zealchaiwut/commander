@@ -152,6 +152,85 @@ def stop_requested(run_id: str, repo_root: Path) -> bool:
     return stop_flag_path(run_id, repo_root).exists()
 
 
+@dataclass
+class ProjectDispatchConfig:
+    """Per-step dispatch settings read from a project's .commander/sprint.yaml.
+
+    Cross-project dispatch cannot use commander's `/coder` and `/tester` slash
+    commands: those live in commander's own `.claude/commands/`, and a target
+    repo has no such directory. Run 94914e4a8e47 failed for exactly that reason
+    (issue #2325). Each project already declares plain prompt templates, and a
+    separate worktree per step, so read them.
+    """
+
+    repo_name: str
+    coder_prompt: str
+    tester_prompt: str
+    coder_worktree: Path
+    tester_worktree: Path
+    coder_model: Optional[str] = None
+
+    def prompt_for(self, step: str, issue_url: str) -> str:
+        template = self.coder_prompt if step == "coder" else self.tester_prompt
+        return template.replace("{issue_url}", issue_url)
+
+    def worktree_for(self, step: str) -> Path:
+        return self.coder_worktree if step == "coder" else self.tester_worktree
+
+
+class DispatchConfigError(RuntimeError):
+    """Raised when a project cannot be dispatched. Never falls back silently."""
+
+
+def load_project_config(project_root: Path) -> ProjectDispatchConfig:
+    """Load dispatch settings for a project, or fail loudly.
+
+    A missing config, template, or worktree raises. It must never degrade into
+    a default that silently does nothing — that is the failure mode #2325 exists
+    to remove.
+    """
+    import yaml
+
+    from services.sprint_manager.commander_paths import discover_commander_dir
+
+    commander_dir = discover_commander_dir(project_root)
+    path = commander_dir / "sprint.yaml"
+    if not path.exists():
+        raise DispatchConfigError(
+            f"no sprint.yaml found for {project_root} (looked in {commander_dir}) — "
+            "dispatch needs the project's prompt templates and worktrees"
+        )
+
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception as exc:
+        raise DispatchConfigError(f"could not parse {path}: {exc}") from exc
+
+    agents = data.get("agents") or {}
+    worktrees = data.get("worktrees") or {}
+    agent_config = data.get("agent_config") or {}
+
+    missing = [
+        key for key, val in (
+            ("agents.coder_prompt_template", agents.get("coder_prompt_template")),
+            ("agents.tester_prompt_template", agents.get("tester_prompt_template")),
+            ("worktrees.coder", worktrees.get("coder")),
+            ("worktrees.tester", worktrees.get("tester")),
+        ) if not val
+    ]
+    if missing:
+        raise DispatchConfigError(f"{path} is missing: {', '.join(missing)}")
+
+    return ProjectDispatchConfig(
+        repo_name=data.get("repo_name", ""),
+        coder_prompt=agents["coder_prompt_template"],
+        tester_prompt=agents["tester_prompt_template"],
+        coder_worktree=Path(worktrees["coder"]),
+        tester_worktree=Path(worktrees["tester"]),
+        coder_model=agent_config.get("coder_model"),
+    )
+
+
 # Text an agent emits when it did not actually do the work. `claude -p` exits 0
 # in these cases, so the exit code alone cannot be trusted (issue #2324).
 _FAILURE_MARKERS = (
@@ -218,12 +297,25 @@ def default_spawn(
     *,
     cwd: Path,
     baseline_note: str,
-    model: str = DEFAULT_MODEL,
+    prompt: Optional[str] = None,
+    model: Optional[str] = None,
     timeout: int = DEFAULT_AGENT_TIMEOUT,
 ) -> tuple[bool, str]:
-    """Spawn a Claude Code agent for one step. The privileged call lives here."""
-    url = f"https://github.com/{repo}/issues/{issue}"
-    prompt = f"/{step} {url}\n\n" + AGENT_PREAMBLE.format(baseline_note=baseline_note)
+    """Spawn a Claude Code agent for one step. The privileged call lives here.
+
+    ``prompt`` comes from the project's sprint.yaml. There is deliberately **no
+    fallback** to a `/coder` slash command: those exist only inside commander,
+    and falling back to one is what made run 94914e4a8e47 silently do nothing
+    across five tickets (issue #2325).
+    """
+    if not prompt:
+        raise DispatchConfigError(
+            f"no prompt template supplied for the {step} step — refusing to "
+            "guess. Check the project's .commander/sprint.yaml."
+        )
+
+    model = model or DEFAULT_MODEL
+    prompt = prompt.rstrip() + "\n\n" + AGENT_PREAMBLE.format(baseline_note=baseline_note)
 
     env = dict(os.environ)
     env["CLAUDE_AGENT_ROLE"] = step
@@ -254,6 +346,7 @@ def execute_run(
     cwd: Path,
     baseline_note: str = "run the suite and compare against the recorded baseline.",
     spawn: Optional[Callable[..., tuple[bool, str]]] = None,
+    config: Optional[ProjectDispatchConfig] = None,
 ) -> DispatchRun:
     """Run every ticket through coder then tester, in the order given.
 
@@ -280,8 +373,21 @@ def execute_run(
             run.current_step = step
             save_run(run, repo_root)
 
+            # Per-step prompt, worktree and model come from the project's
+            # sprint.yaml. coder and tester have separate clones (#2325).
+            step_cwd = config.worktree_for(step) if config else cwd
+            step_prompt = (
+                config.prompt_for(step, f"https://github.com/{run.repo}/issues/{issue}")
+                if config else None
+            )
+            step_model = config.coder_model if (config and step == "coder") else None
+
             ok, detail = spawn(
-                step, issue, run.repo, cwd=cwd, baseline_note=baseline_note
+                step, issue, run.repo,
+                cwd=step_cwd,
+                baseline_note=baseline_note,
+                prompt=step_prompt,
+                model=step_model,
             )
             run.outcomes.append(StepOutcome(issue=issue, step=step, ok=ok, detail=detail))
 
@@ -313,6 +419,7 @@ def start_run(
     cwd: Path,
     baseline_note: str = "run the suite and compare against the recorded baseline.",
     spawn: Optional[Callable[..., tuple[bool, str]]] = None,
+    config: Optional[ProjectDispatchConfig] = None,
     background: bool = True,
 ) -> DispatchRun:
     """Create a run and start it. Returns the handle immediately when backgrounded.
@@ -331,7 +438,8 @@ def start_run(
 
     if not background:
         return execute_run(
-            run, repo_root=repo_root, cwd=cwd, baseline_note=baseline_note, spawn=spawn
+            run, repo_root=repo_root, cwd=cwd, baseline_note=baseline_note,
+            spawn=spawn, config=config,
         )
 
     thread = threading.Thread(
@@ -342,6 +450,7 @@ def start_run(
             "cwd": cwd,
             "baseline_note": baseline_note,
             "spawn": spawn,
+            "config": config,
         },
         daemon=True,
         name=f"dispatch-{run.run_id}",

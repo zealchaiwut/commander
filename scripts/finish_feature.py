@@ -195,7 +195,12 @@ def _baseline_check_or_exit(issue_num: int, branch: str, target: str, repo, over
 
     project = repo or github_client.repo()
     commander_dir = _REPO_ROOT / ".commander"
-    timeout_seconds = int(os.environ.get("COMMANDER_BASELINE_TIMEOUT", "600"))
+    # 600s was below commander's own measured suite time (741.96s on develop,
+    # 2026-08-20), so the check timed out and refused every merge — a refusal on
+    # timeout is indistinguishable from a real regression to whoever reads it.
+    # 1800s leaves headroom on a suite of this size without waiting forever on a
+    # genuinely hung run; override per-project with COMMANDER_BASELINE_TIMEOUT.
+    timeout_seconds = int(os.environ.get("COMMANDER_BASELINE_TIMEOUT", "1800"))
 
     changed = _changed_files_vs_target(branch, target)
     baseline = load_baseline(project, commander_dir)

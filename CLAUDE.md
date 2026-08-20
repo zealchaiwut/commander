@@ -283,12 +283,33 @@ This is why the API path exists: the privileged spawn happens inside Commander,
 so triggering a run is an ordinary HTTP call. An assistant driving a sprint uses
 the endpoints; it cannot run the manual commands above.
 
+### Sprint-branch model (restored, #2329)
+
+Dispatch uses a sprint-branch model:
+
+```
+sprint/sprint-N          cut from develop when the sprint dispatch starts
+  └── feature/<N>-<slug> cut from the sprint branch (auto-detected via labels)
+        └── merged into sprint/sprint-N   by the tester, on pass
+sprint/sprint-N ──> develop  one PR opened when all tickets succeed
+```
+
+**scripts/start_feature.py** auto-detects `sprint/sprint-N` from the issue's
+sprint label and uses it as the base. Falls back to develop when no sprint
+branch exists.
+
+**scripts/finish_feature.py** auto-detects `sprint/sprint-N` from the issue's
+sprint label and merges into it instead of develop. `COMMANDER_MERGE_TARGET`
+overrides this when set.
+
+**Child sprint labels** (`sprint-N.1/.2/.3`) are still banned — #2311 prohibition
+stands. A sprint *branch* is not a sprint *label*.
+
 ### There are no quality gates
 
 `gates.py` and `pipeline.py` were deleted with the orchestrator. The
 `coder-no-test-edits`, pytest, lint and merge-preview gates do **not** run, and
-neither does the 3-attempt fix loop. The tester agent merges straight to
-`develop` on its own say-so.
+neither does the 3-attempt fix loop.
 
 What stands in their place:
 
@@ -298,6 +319,8 @@ What stands in their place:
    with `scripts/record_test_baseline.py --repo owner/repo` first; without one
    the check refuses by design. `COMMANDER_BASELINE_CHECK=0` disables it,
    `--override-baseline` bypasses one refusal and records the bypass on the issue.
+   The check runs against the **sprint branch** for per-ticket merges, and against
+   **develop** for the final sprint → develop PR.
 2. CI on the PR — `build`, `smoke`, `Check stale docs`.
 3. `scripts/check_no_live_http_in_tests.py`.
 

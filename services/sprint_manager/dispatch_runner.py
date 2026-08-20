@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -87,6 +88,8 @@ class DispatchRun:
     outcomes: list[StepOutcome] = field(default_factory=list)
     started_at: str = ""
     finished_at: str = ""
+    sprint_branch: Optional[str] = None  # sprint/sprint-N when branch model is active (#2329)
+    sprint_pr_number: Optional[int] = None  # PR opened from sprint branch → develop
 
     def to_dict(self) -> dict:
         return {
@@ -102,6 +105,8 @@ class DispatchRun:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "remaining": self.remaining(),
+            "sprint_branch": self.sprint_branch,
+            "sprint_pr_number": self.sprint_pr_number,
         }
 
     def remaining(self) -> list[int]:
@@ -404,6 +409,136 @@ def _default_verify(*, step: str, issue: int, repo, report: str) -> tuple[bool, 
     )
 
 
+def _gate_sprint_pr(
+    *, sprint_branch: str, target: str = "develop", repo: str, cwd: Path, **kw
+) -> tuple[bool, str]:
+    """Baseline-delta check for the sprint → develop PR (AC #2316 + #2329).
+
+    Runs the suite on the sprint branch in `cwd` and compares against the
+    recorded develop baseline.  Returns (allowed, reason).  Called by
+    _open_sprint_pr before `gh pr create` so neither merge type bypasses the
+    gate (per AC4: "the baseline-delta check runs … against develop for the
+    final sprint merge").
+
+    Kill-switch: COMMANDER_BASELINE_CHECK=0 skips and returns True.
+    """
+    from services.sprint_manager.commander_paths import discover_commander_dir
+    from services.sprint_manager.merge_baseline import (
+        check_against_baseline,
+        collection_failed,
+        load_baseline,
+        parse_failed_test_ids,
+    )
+    from services.sprint_manager.suite_health_gate import _parse_pytest_output
+
+    if os.environ.get("COMMANDER_BASELINE_CHECK", "1") == "0":
+        return True, "Baseline-delta check disabled (COMMANDER_BASELINE_CHECK=0)"
+
+    try:
+        commander_dir = discover_commander_dir(cwd)
+    except Exception as exc:
+        return False, f"could not locate .commander dir from {cwd}: {exc}"
+
+    baseline = load_baseline(repo or "", commander_dir)
+    if baseline is None:
+        # AC4 of #2329: "Neither merge may bypass it." Skipping here would be a
+        # bypass — and not a hypothetical one: per-ticket merges can be waved
+        # through with --override-baseline, so "the per-ticket gate already
+        # checked" does not hold. #2316's rule is that an unmeasured project is
+        # not a safe one, and a missing baseline refuses.
+        return False, (
+            f"no baseline recorded for {repo} — record one with "
+            f"scripts/record_test_baseline.py before the sprint PR can open"
+        )
+
+    pytest_args = (baseline.pytest_args or "tests/ -q").split()
+    # Same default as finish_feature.py. The suite measures 741.96s on this
+    # repo, so 900 sat close enough to the edge that a slow run would time out
+    # and read as a refusal.
+    timeout = int(os.environ.get("COMMANDER_BASELINE_TIMEOUT", "1800"))
+
+    try:
+        result = subprocess.run(
+            # sys.executable, not "python3": the system python3 is 3.9 on
+            # zeal-server and cannot even import this codebase. finish_feature.py
+            # already does this.
+            [sys.executable, "-m", "pytest"] + pytest_args,
+            cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+        )
+        output = (result.stdout or "") + (result.stderr or "")
+    except subprocess.TimeoutExpired:
+        return False, f"baseline-delta check timed out after {timeout}s on {sprint_branch}"
+    except Exception as exc:
+        return False, f"baseline-delta check could not run: {exc}"
+
+    failed_ids = parse_failed_test_ids(output)
+    # Use the shared parser. A local `re.search(r"(\d+) failed", output)` takes
+    # the FIRST match anywhere in the blob, and commander's suite runs pytest as
+    # a subprocess in places, so their captured output carries counts of their
+    # own. That exact inline form reported passed=5 failed=999 for a run that was
+    # 7279/2377 (issue #2331); _parse_pytest_output reads the last real summary
+    # line instead. The command run here is `pytest tests/ -q` — precisely the
+    # invocation that misparsed.
+    passed_now, failed_now, _skipped_now = _parse_pytest_output(output)
+
+    check = check_against_baseline(
+        failed_now=failed_now,
+        failing_test_ids_now=failed_ids,
+        baseline=baseline,
+        passed_now=passed_now,
+        collection_error=collection_failed(output),
+    )
+    return check.allowed, check.summary()
+
+
+def _open_sprint_pr(run: DispatchRun, *, cwd: Path) -> Optional[int]:
+    """Open a PR from sprint/sprint-N into develop (issue #2329).
+
+    Runs the baseline-delta check (_gate_sprint_pr) against develop first so
+    that neither merge type bypasses AC #2316 (AC4 of #2329).  Returns the PR
+    number on success, None when the gate refuses or on any other failure.
+    Failures are non-fatal: the sprint is done and the tickets have merged;
+    only the sprint PR is missing.
+    """
+    branch = run.sprint_branch
+    repo = run.repo
+    if not branch or not repo:
+        return None
+
+    gate_ok, _gate_msg = _gate_sprint_pr(
+        sprint_branch=branch, target="develop", repo=repo, cwd=cwd,
+    )
+    if not gate_ok:
+        return None
+
+    try:
+        label = run.sprint_label
+        result = subprocess.run(
+            [
+                "gh", "pr", "create",
+                "--repo", repo,
+                "--head", branch,
+                "--base", "develop",
+                "--title", f"Sprint {label} → develop",
+                "--body", (
+                    f"Merges all tickets from **{label}** into develop.\n\n"
+                    f"Sprint branch: `{branch}`\n"
+                    f"Dispatch run: `{run.run_id}`\n\n"
+                    f"Review and merge when ready to bring the sprint into develop."
+                ),
+            ],
+            capture_output=True, text=True, cwd=str(cwd), timeout=60,
+        )
+        if result.returncode == 0:
+            # gh pr create prints the PR URL; extract the number from the tail.
+            url = result.stdout.strip().splitlines()[-1].strip()
+            m = __import__("re").search(r"/pull/(\d+)$", url)
+            return int(m.group(1)) if m else None
+    except Exception:
+        pass
+    return None
+
+
 def execute_run(
     run: DispatchRun,
     *,
@@ -419,6 +554,9 @@ def execute_run(
     Stops on the first failed step and records which ticket failed. Dependent
     tickets are never attempted after a failure — continuing past one is how a
     broken ticket poisons the ones that build on it.
+
+    When a sprint branch is active (``run.sprint_branch`` is set), opens a PR
+    from ``sprint/sprint-N`` into ``develop`` after all tickets succeed (#2329).
     """
     spawn = spawn or default_spawn
     run.status = "running"
@@ -481,6 +619,14 @@ def execute_run(
     run.current_issue = None
     run.current_step = None
     run.finished_at = _now()
+
+    # Sprint-branch model: all tickets merged into sprint/sprint-N.  Open
+    # the one PR that brings the sprint into develop (#2329).
+    if run.sprint_branch:
+        step_cwd = config.worktree_for("coder") if config else cwd
+        pr_num = _open_sprint_pr(run, cwd=step_cwd)
+        run.sprint_pr_number = pr_num
+
     save_run(run, repo_root)
     return run
 
@@ -497,11 +643,16 @@ def start_run(
     config: Optional[ProjectDispatchConfig] = None,
     verify: Optional[Callable[..., tuple[bool, str]]] = _default_verify,
     background: bool = True,
+    sprint_branch: Optional[str] = None,
 ) -> DispatchRun:
     """Create a run and start it. Returns the handle immediately when backgrounded.
 
     ``tickets`` is used exactly as given — this function does not sort, dedupe,
     or topologically order it.
+
+    ``sprint_branch`` is set by the dispatch endpoint after creating
+    ``sprint/sprint-N`` (#2329); when set, execute_run opens a PR from the
+    sprint branch into develop after all tickets succeed.
     """
     run = DispatchRun(
         run_id=uuid.uuid4().hex[:12],
@@ -509,6 +660,7 @@ def start_run(
         tickets=list(tickets),
         repo=repo,
         started_at=_now(),
+        sprint_branch=sprint_branch,
     )
     save_run(run, repo_root)
 

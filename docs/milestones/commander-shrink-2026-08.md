@@ -20,6 +20,7 @@ Source: 7-agent audit, 2026-08-12
 | 4 | **Keep the Running view, re-feed it** | `agent_runs` is written only at `sprint_manager.py:741,796`, so the Running tab is *already blind* to manual sessions. Re-feed from the existing hooks (~200 LOC) instead of maintaining ~20k LOC of orchestration. |
 | 5 | **Cut B stands as audited** | Hand the knowledge/digest layer to lookout, gated on lookout actually gathering commander first. |
 | 6 | **Restore dispatch and rerun as endpoints** (2026-08-19, #2314) | Partially reverses decision 1 for *triggering only* — see the section below. |
+| 7 | **Restore sprint-branch model** (2026-08-20, #2329) | feature → sprint/sprint-N → develop replaces feature → develop. Sprint arrives as one reviewable PR. Child sprint labels stay banned. See the section below. |
 
 ## Decision — dispatch triggering (2026-08-19, #2314)
 
@@ -35,8 +36,9 @@ sprint back to a dispatchable state.
 This **supersedes the #2311 reasoning** that "dispatch is a CLI activity now; a
 server endpoint is the wrong home for it" — **for triggering only.** Everything
 else from the shrink stands: the autonomous orchestrator, its gate pipeline, its
-fix-loop, and its sprint-branch/PR shape are **not** restored. What lands is a
-trigger and a queue consumer, not a scheduler with opinions.
+fix-loop are **not** restored. What lands is a trigger and a queue consumer,
+not a scheduler with opinions. (The sprint-branch/PR shape is restored
+separately — see the 2026-08-20 entry below.)
 
 ### Why the reversal
 
@@ -86,6 +88,42 @@ executes.
 merges to develop with no objective check behind it is the combination worth
 avoiding: the gate pipeline is gone, and the tester agent merges on its own
 say-so.
+
+---
+
+## Decision — sprint-branch model (2026-08-20, #2329)
+
+**Operator decision: restore the sprint-branch model.**
+
+Reverses the "sprint-branch/PR shape is not restored" clause from the #2314
+decision.  The dependency problem was concrete: run `9fb3d8770bf2` on
+viral-radar sprint-7 had to stop after ticket #81 because ticket #82 depended
+on both #80 and #81, neither of which had merged to develop yet.  With a sprint
+branch, #82 branches from `sprint/sprint-7` where its dependencies already sat.
+
+### What is restored (2026-08-20)
+
+- `sprint/sprint-N` is created from develop when a sprint dispatch starts.
+- Feature branches are cut from `sprint/sprint-N` (auto-detected via issue labels).
+- Tester merges feature branches into `sprint/sprint-N`, not develop.
+- When all tickets succeed, the dispatch runner opens one PR from
+  `sprint/sprint-N` into develop.
+- The baseline-delta check (#2316) gates both merge types: sprint branch
+  for per-ticket merges, develop for the final sprint merge.
+
+### What is NOT restored
+
+- The autonomous orchestrator, its gate pipeline, its fix-loop.
+- **Child sprint labels** (`sprint-N.1/.2/.3`) — explicitly still banned.
+  A sprint *branch* is not a sprint *label*; this restores only the former.
+
+### Additive and detected, never assumed
+
+`scripts/start_feature.py` and `scripts/finish_feature.py` detect the sprint
+branch by reading the issue's labels at runtime.  When no sprint branch exists
+for an issue (projects that do not use the model), both scripts fall back to
+develop.  The sprint-branch model is therefore **opt-in per sprint**, enforced
+by whether the branch exists on the remote.
 
 ---
 

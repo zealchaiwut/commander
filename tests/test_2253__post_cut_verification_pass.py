@@ -4,7 +4,8 @@ AC coverage:
 - AC1: Key UI-surface endpoints (Bulk create, Running view, History, Settings,
        Deploy tab, Finish sprint) respond without 5xx errors after orchestrator removal
 - AC2: Three lookout contract endpoints return HTTP 200 with expected shape
-- AC3: pytest collection-error count at or below the 25-failure baseline
+- AC3: pytest collection-error count at or below 25 (this caps collection
+       ERRORS, not test failures — the suite carries ~2442 failures, see #2338)
 - AC4: Server imports without ModuleNotFoundError from deleted orchestrator modules
 """
 from __future__ import annotations
@@ -164,7 +165,12 @@ class TestLookoutContractEndpoints:
 # ── AC3: collection error count at or below baseline ──────────────────────────
 
 class TestScopedGateBaseline:
-    """AC3: pytest collection errors stay at or below the 25-failure baseline."""
+    """AC3: pytest collection errors stay at or below 25.
+
+    This caps collection ERRORS, a different metric from test failures. The
+    suite carries ~2442 failures (#2338); conflating the two is what the old
+    "25-failure baseline" wording did. The threshold below is correct.
+    """
 
     def test_collection_error_count_at_most_baseline(self):
         """AC3: collection error count ≤ 25 (sprint exit gate baseline)."""

@@ -324,9 +324,31 @@ What stands in their place:
 2. CI on the PR — `build`, `smoke`, `Check stale docs`.
 3. `scripts/check_no_live_http_in_tests.py`.
 
-Baselines are not green and are not meant to be: Commander's scoped gate carries
-~25 failures, and viral-radar's develop measured 75 failed / 954 passed on
-2026-08-19. Only *new* breakage blocks a merge.
+Baselines are not green and are not meant to be. Commander's develop measured
+**2442 failed / 6999 passed / 363 skipped** on 2026-08-20, in a bare `git
+worktree` with `pytest tests/ -q`; viral-radar's develop measured 75 failed /
+954 passed on 2026-08-19. Only *new* breakage blocks a merge.
+
+Three corrections to what this file used to say, all found in #2331 and #2329:
+
+- The figure here was **~25 failures**. That was wrong by two orders of
+  magnitude. Three test modules imported a symbol removed in the shrink, so
+  `pytest tests/ -q` aborted at collection and reported `0 passed / 0 failed` —
+  the drift accumulated with nothing to contradict it.
+- `suite_health_gate.py` is **not** a scoped subset. It runs the same full
+  `pytest --tb=no -q tests/`.
+- The suite does not hang. It completes in **~742s** (12m21s). It used to abort
+  at collection, and separately stalled 60s per test in ten modules that entered
+  the `TestClient` lifespan.
+
+**Where you measure changes the number.** `record_test_baseline.py` runs in
+`cwd`; `finish_feature.py` runs in a bare worktree with no `node_modules/`,
+`.env` or `venv/`. Develop measures 2377 in the uat clone and 2442 in a
+worktree — ~65 failures that exist only in the comparison. Record baselines
+from a worktree so both sides measure the same thing.
+
+Re-measure with `scripts/record_test_baseline.py` rather than trusting any
+number written here; it drifts.
 
 ## Running scripts on zeal-server
 

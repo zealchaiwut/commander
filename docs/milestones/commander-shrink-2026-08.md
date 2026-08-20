@@ -406,6 +406,16 @@ Plus the lookout contract endpoints (see S4-7).
 > **25-failure baseline**. `npm test` is broken on Node v26; use
 > `node --test tests/frontend/*.test.mjs` (427 tests, **24-failure baseline**).
 > Do not interpret either baseline as a regression from this work.
+>
+> **Correction, 2026-08-20 (#2331, #2338).** Both pytest claims above were
+> wrong, and were wrong when written down here. The suite was not hanging — it
+> aborted at collection, because three modules imported `_enrich_home_artifact`
+> after the shrink removed it, so it reported `0 passed / 0 failed` and the
+> ~25-failure figure had nothing to contradict it. Repaired, develop measures
+> **2442 failed / 6999 passed / 363 skipped** in ~742s. There is also no
+> "scoped" gate: `suite_health_gate.py` runs the full suite. Left in place
+> above rather than edited, because what the milestone believed at the time is
+> the point of this note.
 
 ---
 

@@ -5,9 +5,17 @@ objective stands between "tester says pass" and a merge into develop. This modul
 is the minimum replacement: one measurement, compared against a recorded baseline.
 
 Why a delta and not "tests must pass": real baselines are not green. Commander's
-own scoped health gate carries a documented ~25-failure baseline, and
-zealchaiwut/viral-radar develop measured 75 failed / 954 passed / 35 skipped on
-2026-08-19, stable across two runs. A must-be-green rule would block every merge
+develop measured 2442 failed / 6999 passed / 363 skipped on 2026-08-20 (bare
+worktree, `tests/ -q`), and zealchaiwut/viral-radar develop measured 75 failed /
+954 passed / 35 skipped on 2026-08-19.
+
+This file used to cite a "~25-failure baseline" from a "scoped health gate".
+Both were wrong: `suite_health_gate.py` runs the full suite, and the ~25 figure
+survived only because collection aborted and reported `0 passed / 0 failed`, so
+nothing contradicted it (#2331). Commander's suite is also not stable run to run
+— two worktree runs of near-identical trees measured 2442 and 2457, largely from
+live-HTTP tests timing out under load (#2339). Re-measure rather than trusting
+any figure written here. A must-be-green rule would block every merge
 on such a repo forever; a delta rule is enforceable today.
 
 The check refuses a merge when either:

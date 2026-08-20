@@ -13,7 +13,6 @@ git+gh operations; no dashboard DB or GitHub issues API writes.
 """
 from __future__ import annotations
 
-import re
 import subprocess
 from typing import Optional
 
@@ -45,15 +44,37 @@ def branch_exists_on_remote(repo: str, branch: str) -> bool:
         return False
 
 
+def _base_label_re():
+    """The canonical base sprint-label pattern (``sprint-N``, no child suffix).
+
+    Imported lazily: sprint_label_re lives under apps/dashboard, which is not on
+    sys.path for every caller of this module. backlog_triage.py resolves it the
+    same way.
+    """
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    dashboard = _Path(__file__).resolve().parent.parent.parent / "apps" / "dashboard"
+    if str(dashboard) not in _sys.path:
+        _sys.path.insert(0, str(dashboard))
+    from sprint_label_re import SPRINT_BASE_LABEL_RE
+
+    return SPRINT_BASE_LABEL_RE
+
+
 def sprint_label_for_issue(issue_data: dict) -> Optional[str]:
     """Extract the sprint label from an issue's labels list.
 
     Returns the first ``sprint-N`` label found, or None.
+
+    Uses the canonical pattern from ``apps/dashboard/sprint_label_re.py`` rather
+    than compiling its own. #2059 consolidated every sprint-label regex into that
+    module precisely so the accepted shape cannot drift between call sites, and
+    an invariant test enforces it.
     """
-    _sprint_re = re.compile(r"^sprint-\d+$")
     for lbl in issue_data.get("labels", []):
         name = lbl.get("name", "") if isinstance(lbl, dict) else str(lbl)
-        if _sprint_re.match(name):
+        if _base_label_re().match(name):
             return name
     return None
 

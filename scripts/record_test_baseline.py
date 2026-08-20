@@ -84,24 +84,28 @@ def main() -> None:
     # `finish_feature.py` measures the branch the same way, also gets zero, and
     # the delta check compares 0 to 0 and passes every merge. Refuse to write one
     # (issue #2331).
-    if collection_failed(output):
-        print(
-            "ERROR: pytest aborted during collection — no tests ran, so there is "
-            "nothing to record. Fix the collection errors below and re-run.\n",
-            file=sys.stderr,
-        )
-        for line in output.splitlines():
-            if line.startswith("ERROR ") or "during collection" in line:
-                print(f"  {line}", file=sys.stderr)
-        sys.exit(1)
-
+    # The count of executed tests is the gate. `collection_failed` only sharpens
+    # the message: matching pytest's phrases in free text cannot distinguish the
+    # suite's own status line from the same words inside a captured traceback,
+    # and commander's suite contains tests that run pytest and assert on its
+    # output (issue #2331).
     if measurement_is_empty(passed, failed):
-        print(
-            f"ERROR: the suite executed no tests (passed={passed} failed={failed} "
-            f"skipped={skipped}). A baseline of zero would make the merge check "
-            f"inert. Check --pytest-args ({args.pytest_args!r}) selects real tests.",
-            file=sys.stderr,
-        )
+        if collection_failed(output):
+            print(
+                "ERROR: pytest aborted during collection — no tests ran, so there "
+                "is nothing to record. Fix the collection errors below and re-run.\n",
+                file=sys.stderr,
+            )
+            for line in output.splitlines():
+                if line.startswith("ERROR collecting") or line.startswith("ERROR "):
+                    print(f"  {line}", file=sys.stderr)
+        else:
+            print(
+                f"ERROR: the suite executed no tests (passed={passed} failed={failed} "
+                f"skipped={skipped}). A baseline of zero would make the merge check "
+                f"inert. Check --pytest-args ({args.pytest_args!r}) selects real tests.",
+                file=sys.stderr,
+            )
         sys.exit(1)
 
     if failed and not failed_ids:

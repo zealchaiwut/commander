@@ -92,6 +92,48 @@ def test_fixture_errors_do_not_refuse_a_merge():
     assert check.allowed is True, check.reason
 
 
+# Commander's suite contains tests that run pytest as a subprocess and assert on
+# its output, so pytest's own abort banner appears *inside* their captured
+# tracebacks, indented behind an `E` marker. An unanchored phrase match read this
+# as the outer suite aborting and refused a run of 7257 passing tests.
+TRACEBACK_QUOTING_AN_ABORT = """\
+    def test_subprocess_pytest_reports_collection_error():
+        assert "Interrupted" in result.stdout
+  E           !!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+  E           assert 1 == 0
+=========================== short test summary info ============================
+2377 failed, 7257 passed, 351 skipped, 469 errors in 741.96s (0:12:21)
+"""
+
+REAL_COLLECTION_ABORT = """\
+==================================== ERRORS ====================================
+ERROR collecting tests/test_broken.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!!
+2 skipped, 3 errors in 2.25s
+"""
+
+
+def test_abort_banner_inside_a_traceback_is_not_the_suite_status():
+    """Anchoring: the phrase must start a line to count as pytest's own status."""
+    assert collection_failed(TRACEBACK_QUOTING_AN_ABORT) is False
+
+
+def test_real_collection_abort_is_still_detected():
+    assert collection_failed(REAL_COLLECTION_ABORT) is True
+
+
+def test_a_run_that_executed_tests_is_never_refused_for_quoted_abort_text():
+    """End-to-end: 7257 tests ran, so the merge must be judged on its numbers."""
+    check = check_against_baseline(
+        failed_now=2377,
+        failing_test_ids_now=[],
+        baseline=_baseline(failed=2377, passed=7257),
+        passed_now=7257,
+        collection_error=collection_failed(TRACEBACK_QUOTING_AN_ABORT),
+    )
+    assert check.allowed is True, check.reason
+
+
 def test_empty_measurement_predicate():
     assert measurement_is_empty(0, 0) is True
     assert measurement_is_empty(0, 3) is False

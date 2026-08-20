@@ -44,30 +44,28 @@ _DOCS_ONLY_SUFFIXES = (".md", ".rst", ".txt")
 _DOCS_ONLY_NAMES = ("LICENSE", "CODEOWNERS", ".gitignore")
 
 
-# A genuine collection abort, which does *not* produce a `N failed` summary —
-# pytest gives up before running anything, so a naive read of the summary reports
-# zero failures for a suite that never ran (issue #2331).
-#
-# These markers are deliberately narrow. The short summary prints `ERROR <path>`
-# for a collection error but `ERROR <path>::<test>` for a per-test fixture error,
-# and a healthy run can carry hundreds of the latter — commander's own suite
-# measured 469 errors alongside 7257 passing tests. Matching a bare `ERROR ` line
-# would flag that run as an abort and refuse every merge.
+# Markers of a genuine collection abort. Every alternative is anchored to the
+# start of a line: pytest's own status lines begin at column zero, while the same
+# phrases appearing inside a captured traceback are prefixed (`  E   !!!! ...`).
+# Commander's suite contains tests that run pytest as a subprocess and assert on
+# its output, so an unanchored phrase match reads their tracebacks as the outer
+# suite's status — which is exactly how an earlier draft of this refused a run
+# with 7257 passing tests (issue #2331).
 _COLLECTION_ERROR = re.compile(
-    r"(?:^ERROR collecting\s|"          # per-module collection error header
-    r"\d+\s+errors?\s+during\s+collection|"  # summary line
-    r"^!+\s*Interrupted:)",             # pytest gave up
+    r"^(?:ERROR collecting\s"
+    r"|!+\s*Interrupted:.*during collection"
+    r"|\d+\s+errors?\s+during\s+collection)",
     re.MULTILINE | re.IGNORECASE,
 )
 
 
 def collection_failed(output: str) -> bool:
-    """True when pytest aborted during collection instead of running the suite.
+    """True when pytest's own status lines report a collection abort.
 
-    This is the failure mode that made the #2316 gate inert: three stale test
-    modules importing a removed symbol aborted collection, both the recorded
-    baseline and the per-merge run measured `0 failed`, and the delta check
-    compared 0 to 0 and passed every merge.
+    This is a *message* helper, not the gate. Text matching alone proved too
+    fragile to gate on — see the anchoring note above. The authoritative signal
+    that nothing was measured is `measurement_is_empty`, because a genuine
+    collection abort always leaves zero tests executed.
     """
     return bool(_COLLECTION_ERROR.search(output or ""))
 
@@ -75,9 +73,9 @@ def collection_failed(output: str) -> bool:
 def measurement_is_empty(passed: int, failed: int) -> bool:
     """True when a run executed no tests, so its failure count means nothing.
 
-    A suite that collected nothing is not a passing suite. Treating `0 failed`
-    from an empty run as a real measurement is what let the gate wave merges
-    through (issue #2331).
+    This is the authoritative check. A suite that collected nothing is not a
+    passing suite, and reading `0 failed` from an empty run as success is what
+    let the #2316 gate wave every merge through (issue #2331).
     """
     return (int(passed) + int(failed)) <= 0
 
@@ -239,28 +237,22 @@ def check_against_baseline(
             skipped_check=True,
         )
 
-    # A run that collected nothing is not a green run. Both of these refuse
-    # rather than read an empty measurement as zero failures (issue #2331).
-    if collection_error:
-        return MergeCheck(
-            allowed=False,
-            reason=(
-                "pytest aborted during collection, so no tests ran — the failure "
-                "count is meaningless. Fix the collection error and re-run; a merge "
-                "cannot be judged against a suite that never executed"
-            ),
-            failed_now=failed_now,
-            new_failing_tests=ids_now,
-        )
-
-    # passed_now defaults to -1 meaning "caller did not report it", which keeps
-    # older callers working unchanged.
+    # A run that executed nothing is not a green run. The count of executed tests
+    # is the gate; `collection_error` only sharpens the wording, because matching
+    # pytest's phrases in free text is not reliable enough to refuse a merge on
+    # (issue #2331). passed_now defaults to -1 meaning "caller did not report it",
+    # which keeps older callers working unchanged.
     if passed_now >= 0 and measurement_is_empty(passed_now, failed_now):
+        detail = (
+            "pytest aborted during collection, so no tests ran"
+            if collection_error
+            else "the suite executed no tests on this branch (0 passed, 0 failed)"
+        )
         return MergeCheck(
             allowed=False,
             reason=(
-                "the suite executed no tests on this branch (0 passed, 0 failed) — "
-                "an empty run cannot show that the branch adds no failures"
+                f"{detail} — the failure count is meaningless, and an empty run "
+                f"cannot show that the branch adds no failures"
             ),
             failed_now=failed_now,
             new_failing_tests=ids_now,

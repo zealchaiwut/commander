@@ -298,6 +298,11 @@ def _run_with_branch(tickets, branch="sprint/sprint-1029", repo="owner/repo"):
 def test_sprint_pr_opened_after_all_tickets_succeed(tmp_path, monkeypatch):
     import services.sprint_manager.dispatch_runner as dr
 
+    # This test covers the PR-opening path, not the gate — tmp_path has no
+    # recorded baseline, and a missing baseline now refuses rather than skips.
+    # The gate's own behaviour is covered by the AC4 tests further down.
+    monkeypatch.setattr(dr, "_gate_sprint_pr", lambda **kw: (True, "stubbed"))
+
     gh_calls = []
 
     def fake_run(cmd, capture_output=None, text=None, cwd=None, timeout=None):
@@ -487,28 +492,175 @@ def test_dispatch_endpoint_tolerates_sprint_branch_creation_failure(tmp_path, mo
 
 # === AC4: the baseline-delta check must gate the final sprint->develop merge too ===
 
-def test_sprint_pr_opening_is_gated_by_the_baseline_delta_check(tmp_path, monkeypatch):
-    """AC: 'The baseline-delta check (#2316) runs ... against develop for the
-    final sprint merge. Neither merge may bypass it.'
+def test_sprint_pr_opening_is_gated_by_the_baseline_delta_check(monkeypatch):
+    """AC4: the gate must actually run before `gh pr create`, not merely exist.
 
-    execute_run's sprint-PR path must consult the baseline-delta gate against
-    develop before calling `gh pr create` — a gate the operator can refuse.
+    The original form of this test asserted `hasattr(dr, "_gate_sprint_pr")` and
+    stopped there — it built a fake gate and never called anything. That is the
+    source-structure check CLAUDE.md #1746 forbids: it passes against a gate that
+    is defined and never invoked. This calls the real _open_sprint_pr and watches
+    what it does.
     """
     import services.sprint_manager.dispatch_runner as dr
 
-    gate_calls = []
+    calls = {"gate": [], "pr": []}
 
-    def fake_gate(*, sprint_branch, target, repo, **kw):
-        gate_calls.append((sprint_branch, target, repo))
+    def fake_gate(*, sprint_branch, target, repo, cwd, **kw):
+        calls["gate"].append((sprint_branch, target, repo))
         return True, "ok"
 
-    # The ticket's AC requires *some* baseline-delta gate call ahead of the
-    # sprint PR. dispatch_runner must expose one for this test to observe.
-    assert hasattr(dr, "_baseline_check_sprint_merge") or hasattr(
-        dr, "_gate_sprint_pr"
-    ), (
-        "dispatch_runner does not wire the baseline-delta check into the "
-        "sprint->develop PR path: AC4 ('the baseline-delta check runs ... "
-        "against develop for the final sprint merge') is not implemented — "
-        "_open_sprint_pr calls `gh pr create` directly with no gate."
+    def fake_run(cmd, *a, **kw):
+        calls["pr"].append(cmd)
+        class R:
+            returncode = 0
+            stdout = "https://github.com/o/r/pull/42\n"
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(dr, "_gate_sprint_pr", fake_gate)
+    monkeypatch.setattr(dr.subprocess, "run", fake_run)
+
+    run = dr.DispatchRun(
+        run_id="t", sprint_label="sprint-1028", tickets=[1],
+        repo="zealchaiwut/commander",
     )
+    run.sprint_branch = "sprint/sprint-1028"
+    dr._open_sprint_pr(run, cwd=Path("."))
+
+    assert calls["gate"], "_open_sprint_pr opened a PR without consulting the gate"
+    assert calls["gate"][0][1] == "develop", "the final sprint merge must be gated against develop"
+
+
+def test_a_refusing_gate_prevents_the_sprint_pr(monkeypatch):
+    """'Neither merge may bypass it' — a refusal must stop `gh pr create`."""
+    import services.sprint_manager.dispatch_runner as dr
+
+    pr_cmds = []
+
+    monkeypatch.setattr(
+        dr, "_gate_sprint_pr",
+        lambda **kw: (False, "failure count rose from 2377 to 2400"),
+    )
+
+    def fake_run(cmd, *a, **kw):
+        pr_cmds.append(cmd)
+        raise AssertionError("gh pr create ran despite the gate refusing")
+
+    monkeypatch.setattr(dr.subprocess, "run", fake_run)
+
+    run = dr.DispatchRun(
+        run_id="t", sprint_label="sprint-1028", tickets=[1],
+        repo="zealchaiwut/commander",
+    )
+    run.sprint_branch = "sprint/sprint-1028"
+    assert dr._open_sprint_pr(run, cwd=Path(".")) is None
+    assert not pr_cmds
+
+
+def test_missing_baseline_refuses_rather_than_skipping(tmp_path, monkeypatch):
+    """A missing baseline is a refusal, not a free pass (#2316, AC4 of #2329).
+
+    The first implementation returned True here, reasoning that finish_feature.py
+    had already enforced a baseline for per-ticket merges. That does not hold —
+    per-ticket merges can be waved through with --override-baseline, leaving the
+    sprint PR ungated.
+    """
+    import services.sprint_manager.dispatch_runner as dr
+
+    monkeypatch.setattr(dr, "load_project_config", lambda *a, **k: None, raising=False)
+    monkeypatch.setenv("COMMANDER_BASELINE_CHECK", "1")
+    (tmp_path / ".commander").mkdir(parents=True)
+
+    def no_baseline(project, commander_dir):
+        return None
+
+    import services.sprint_manager.merge_baseline as mb
+    monkeypatch.setattr(mb, "load_baseline", no_baseline)
+
+    def boom(*a, **kw):
+        raise AssertionError("the suite ran despite there being no baseline to compare against")
+
+    monkeypatch.setattr(dr.subprocess, "run", boom)
+
+    allowed, reason = dr._gate_sprint_pr(
+        sprint_branch="sprint/sprint-1028", target="develop",
+        repo="zealchaiwut/commander", cwd=tmp_path,
+    )
+    assert allowed is False
+    assert "baseline" in reason.lower()
+
+
+def test_gate_reads_the_last_summary_line_not_the_first_counts(tmp_path, monkeypatch):
+    r"""The gate must not re-implement the parser fixed in #2331.
+
+    It runs `pytest tests/ -q`, the exact invocation whose output carries counts
+    from commander's own pytest-in-subprocess tests before the real summary. An
+    inline `re.search(r"(\d+) failed", out)` reported 999 for a 2377-failure run.
+    """
+    import services.sprint_manager.dispatch_runner as dr
+    import services.sprint_manager.merge_baseline as mb
+
+    baseline = mb.Baseline(
+        project="zealchaiwut/commander", failed=2377, passed=7279,
+        skipped=351, failed_test_ids=[], pytest_args="tests/ -q",
+    )
+    monkeypatch.setattr(mb, "load_baseline", lambda *a, **k: baseline)
+    (tmp_path / ".commander").mkdir(parents=True)
+
+    output = (
+        "  E           assert '5 passed, 999 failed in 1.02s' in result.stdout\n"
+        "2377 failed, 7279 passed, 351 skipped, 469 errors in 741.96s (0:12:21)\n"
+    )
+
+    seen = {}
+
+    def fake_run(cmd, *a, **kw):
+        seen["cmd"] = cmd
+        class R:
+            returncode = 1
+            stdout = output
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(dr.subprocess, "run", fake_run)
+
+    allowed, reason = dr._gate_sprint_pr(
+        sprint_branch="sprint/sprint-1028", target="develop",
+        repo="zealchaiwut/commander", cwd=tmp_path,
+    )
+    # 2377 == baseline 2377 and no new ids -> allowed. Misparsing as 999 would
+    # also "allow", so assert on the reported number, not just the verdict.
+    assert "2377" in reason, f"gate did not read the real failure count: {reason}"
+    assert "999" not in reason
+    assert allowed is True
+
+
+def test_gate_invokes_the_running_interpreter(tmp_path, monkeypatch):
+    """`python3` is 3.9 on zeal-server and cannot import this codebase."""
+    import sys as _sys
+
+    import services.sprint_manager.dispatch_runner as dr
+    import services.sprint_manager.merge_baseline as mb
+
+    monkeypatch.setattr(
+        mb, "load_baseline",
+        lambda *a, **k: mb.Baseline(project="o/r", failed=0, passed=1, pytest_args="tests/ -q"),
+    )
+    (tmp_path / ".commander").mkdir(parents=True)
+
+    seen = {}
+
+    def fake_run(cmd, *a, **kw):
+        seen["cmd"] = cmd
+        class R:
+            returncode = 0
+            stdout = "1 passed in 0.1s\n"
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(dr.subprocess, "run", fake_run)
+    dr._gate_sprint_pr(
+        sprint_branch="sprint/sprint-1028", target="develop",
+        repo="o/r", cwd=tmp_path,
+    )
+    assert seen["cmd"][0] == _sys.executable, seen["cmd"]

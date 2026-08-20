@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -421,8 +422,6 @@ def _gate_sprint_pr(
 
     Kill-switch: COMMANDER_BASELINE_CHECK=0 skips and returns True.
     """
-    import re as _re
-
     from services.sprint_manager.commander_paths import discover_commander_dir
     from services.sprint_manager.merge_baseline import (
         check_against_baseline,
@@ -430,6 +429,7 @@ def _gate_sprint_pr(
         load_baseline,
         parse_failed_test_ids,
     )
+    from services.sprint_manager.suite_health_gate import _parse_pytest_output
 
     if os.environ.get("COMMANDER_BASELINE_CHECK", "1") == "0":
         return True, "Baseline-delta check disabled (COMMANDER_BASELINE_CHECK=0)"
@@ -441,17 +441,28 @@ def _gate_sprint_pr(
 
     baseline = load_baseline(repo or "", commander_dir)
     if baseline is None:
-        # No baseline recorded: nothing to compare against, so skip the gate.
-        # Per-ticket merges (finish_feature.py) already refused on missing baseline;
-        # if those went through, the baseline was either recorded or bypassed there.
-        return True, f"no baseline recorded for {repo} — sprint-PR gate skipped"
+        # AC4 of #2329: "Neither merge may bypass it." Skipping here would be a
+        # bypass — and not a hypothetical one: per-ticket merges can be waved
+        # through with --override-baseline, so "the per-ticket gate already
+        # checked" does not hold. #2316's rule is that an unmeasured project is
+        # not a safe one, and a missing baseline refuses.
+        return False, (
+            f"no baseline recorded for {repo} — record one with "
+            f"scripts/record_test_baseline.py before the sprint PR can open"
+        )
 
     pytest_args = (baseline.pytest_args or "tests/ -q").split()
-    timeout = int(os.environ.get("COMMANDER_BASELINE_TIMEOUT", "900"))
+    # Same default as finish_feature.py. The suite measures 741.96s on this
+    # repo, so 900 sat close enough to the edge that a slow run would time out
+    # and read as a refusal.
+    timeout = int(os.environ.get("COMMANDER_BASELINE_TIMEOUT", "1800"))
 
     try:
         result = subprocess.run(
-            ["python3", "-m", "pytest"] + pytest_args,
+            # sys.executable, not "python3": the system python3 is 3.9 on
+            # zeal-server and cannot even import this codebase. finish_feature.py
+            # already does this.
+            [sys.executable, "-m", "pytest"] + pytest_args,
             cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
         )
         output = (result.stdout or "") + (result.stderr or "")
@@ -461,10 +472,14 @@ def _gate_sprint_pr(
         return False, f"baseline-delta check could not run: {exc}"
 
     failed_ids = parse_failed_test_ids(output)
-    m_f = _re.search(r"(\d+) failed", output)
-    failed_now = int(m_f.group(1)) if m_f else len(failed_ids)
-    m_p = _re.search(r"(\d+) passed", output)
-    passed_now = int(m_p.group(1)) if m_p else -1
+    # Use the shared parser. A local `re.search(r"(\d+) failed", output)` takes
+    # the FIRST match anywhere in the blob, and commander's suite runs pytest as
+    # a subprocess in places, so their captured output carries counts of their
+    # own. That exact inline form reported passed=5 failed=999 for a run that was
+    # 7279/2377 (issue #2331); _parse_pytest_output reads the last real summary
+    # line instead. The command run here is `pytest tests/ -q` — precisely the
+    # invocation that misparsed.
+    passed_now, failed_now, _skipped_now = _parse_pytest_output(output)
 
     check = check_against_baseline(
         failed_now=failed_now,

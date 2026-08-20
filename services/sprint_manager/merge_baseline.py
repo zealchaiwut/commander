@@ -44,12 +44,19 @@ _DOCS_ONLY_SUFFIXES = (".md", ".rst", ".txt")
 _DOCS_ONLY_NAMES = ("LICENSE", "CODEOWNERS", ".gitignore")
 
 
-# Collection failures produce these, and crucially do *not* produce a
-# `N failed` summary — pytest aborts before running anything, so a naive read of
-# the summary reports zero failures for a suite that never ran (issue #2331).
+# A genuine collection abort, which does *not* produce a `N failed` summary —
+# pytest gives up before running anything, so a naive read of the summary reports
+# zero failures for a suite that never ran (issue #2331).
+#
+# These markers are deliberately narrow. The short summary prints `ERROR <path>`
+# for a collection error but `ERROR <path>::<test>` for a per-test fixture error,
+# and a healthy run can carry hundreds of the latter — commander's own suite
+# measured 469 errors alongside 7257 passing tests. Matching a bare `ERROR ` line
+# would flag that run as an abort and refuse every merge.
 _COLLECTION_ERROR = re.compile(
-    r"^(?:ERROR\s+\S+|!+\s*Interrupted:.*error.*during collection.*|"
-    r"\d+ errors? during collection)",
+    r"(?:^ERROR collecting\s|"          # per-module collection error header
+    r"\d+\s+errors?\s+during\s+collection|"  # summary line
+    r"^!+\s*Interrupted:)",             # pytest gave up
     re.MULTILINE | re.IGNORECASE,
 )
 

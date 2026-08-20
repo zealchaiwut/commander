@@ -49,6 +49,19 @@ FAILED tests/test_alpha.py::test_one - AssertionError
 1 failed, 40 passed, 2 skipped in 12.31s
 """
 
+# A real commander run, trimmed. 469 per-test fixture errors alongside 7257
+# passing tests. The short summary prints `ERROR <path>::<test>` for these, which
+# looks like a collection error unless the marker is narrow enough to tell them
+# apart. An earlier draft of the guard flagged this run as an abort and would
+# have refused every merge — hence this fixture.
+HEALTHY_RUN_WITH_FIXTURE_ERRORS = """\
+=========================== short test summary info ============================
+ERROR tests/test_reconcile__superseded_chain_completion.py::test_project_scoping
+ERROR tests/test_sprints_composite_pk__1462.py::test_sprints_composite_pk__all_columns_preserved
+ERROR tests/test_sprints_composite_pk__1462.py::test_sprints_composite_pk__idempotent_no_error
+2377 failed, 7257 passed, 351 skipped, 1 deselected, 1 xfailed, 22 warnings, 469 errors in 741.96s (0:12:21)
+"""
+
 
 # ---------------------------------------------------------------------------
 # AC: a collection abort is recognised as such, not read as "zero failures"
@@ -60,6 +73,23 @@ def test_collection_failure_detected_in_real_transcript():
 
 def test_healthy_run_is_not_flagged_as_a_collection_failure():
     assert collection_failed(HEALTHY_OUTPUT) is False
+
+
+def test_per_test_fixture_errors_are_not_a_collection_abort():
+    """469 fixture errors beside 7257 passing tests is a run, not an abort."""
+    assert collection_failed(HEALTHY_RUN_WITH_FIXTURE_ERRORS) is False
+
+
+def test_fixture_errors_do_not_refuse_a_merge():
+    """The end-to-end consequence of the marker being too broad."""
+    check = check_against_baseline(
+        failed_now=2377,
+        failing_test_ids_now=[],
+        baseline=_baseline(failed=2377, passed=7257),
+        passed_now=7257,
+        collection_error=collection_failed(HEALTHY_RUN_WITH_FIXTURE_ERRORS),
+    )
+    assert check.allowed is True, check.reason
 
 
 def test_empty_measurement_predicate():

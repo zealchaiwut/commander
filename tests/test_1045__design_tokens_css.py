@@ -371,8 +371,8 @@ def test_ac7_tokens_css_http_200():
             from starlette.testclient import TestClient
         from server import app
 
-        with TestClient(app, raise_server_exceptions=False) as client:
-            r = client.get("/static/css/tokens.css")
+        client = TestClient(app, raise_server_exceptions=False)
+        r = client.get("/static/css/tokens.css")
     except Exception as exc:
         pytest.skip(f"Could not start test server: {exc}")
 

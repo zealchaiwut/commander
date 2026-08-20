@@ -349,8 +349,8 @@ class TestGetEndpointReturnsCancelledForInterruptedJob:
         server._bulk_jobs.pop(job["job_id"], None)
 
         with patch("server._bulk_jobs_dir", return_value=jobs_dir):
-            with TestClient(server.app) as client:
-                resp = client.get(f"/api/tickets/bulk/{job['job_id']}")
+            client = TestClient(server.app)
+            resp = client.get(f"/api/tickets/bulk/{job['job_id']}")
 
         assert resp.status_code == 200
         data = resp.json()
@@ -369,8 +369,8 @@ class TestGetEndpointReturnsCancelledForInterruptedJob:
         server._bulk_jobs.pop("nonexistent-job", None)
 
         with patch("server._bulk_jobs_dir", return_value=jobs_dir):
-            with TestClient(server.app) as client:
-                resp = client.get("/api/tickets/bulk/nonexistent-job")
+            client = TestClient(server.app)
+            resp = client.get("/api/tickets/bulk/nonexistent-job")
 
         assert resp.status_code == 404
 

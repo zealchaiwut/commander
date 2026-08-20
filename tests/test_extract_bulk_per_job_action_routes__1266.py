@@ -121,8 +121,7 @@ def client(tmp_path, monkeypatch):
         lambda repo_name=None: [{"name": "enhancement", "color": "84b6eb"}],
     )
 
-    with TestClient(server.app, raise_server_exceptions=False) as c:
-        yield c
+    yield TestClient(server.app, raise_server_exceptions=False)
 
 
 # ---------------------------------------------------------------------------

@@ -34,6 +34,8 @@ sys.path.insert(0, str(REPO_ROOT / "apps" / "dashboard"))
 from services.sprint_manager.merge_baseline import (  # noqa: E402
     Baseline,
     baseline_path,
+    collection_failed,
+    measurement_is_empty,
     parse_failed_test_ids,
     save_baseline,
 )
@@ -78,6 +80,30 @@ def main() -> None:
     passed, failed, skipped = _parse_pytest_output(output)
     failed_ids = parse_failed_test_ids(output)
 
+    # A baseline recorded from a suite that never ran is worse than no baseline:
+    # `finish_feature.py` measures the branch the same way, also gets zero, and
+    # the delta check compares 0 to 0 and passes every merge. Refuse to write one
+    # (issue #2331).
+    if collection_failed(output):
+        print(
+            "ERROR: pytest aborted during collection — no tests ran, so there is "
+            "nothing to record. Fix the collection errors below and re-run.\n",
+            file=sys.stderr,
+        )
+        for line in output.splitlines():
+            if line.startswith("ERROR ") or "during collection" in line:
+                print(f"  {line}", file=sys.stderr)
+        sys.exit(1)
+
+    if measurement_is_empty(passed, failed):
+        print(
+            f"ERROR: the suite executed no tests (passed={passed} failed={failed} "
+            f"skipped={skipped}). A baseline of zero would make the merge check "
+            f"inert. Check --pytest-args ({args.pytest_args!r}) selects real tests.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     if failed and not failed_ids:
         print(
             "WARNING: the summary reports failures but no FAILED lines were parsed. "
@@ -97,6 +123,7 @@ def main() -> None:
         failed_test_ids=failed_ids,
         recorded_at=datetime.now(timezone.utc).isoformat(),
         recorded_from_ref=args.ref,
+        pytest_args=args.pytest_args,
     )
 
     if args.dry_run:

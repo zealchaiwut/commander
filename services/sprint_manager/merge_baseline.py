@@ -44,6 +44,37 @@ _DOCS_ONLY_SUFFIXES = (".md", ".rst", ".txt")
 _DOCS_ONLY_NAMES = ("LICENSE", "CODEOWNERS", ".gitignore")
 
 
+# Collection failures produce these, and crucially do *not* produce a
+# `N failed` summary — pytest aborts before running anything, so a naive read of
+# the summary reports zero failures for a suite that never ran (issue #2331).
+_COLLECTION_ERROR = re.compile(
+    r"^(?:ERROR\s+\S+|!+\s*Interrupted:.*error.*during collection.*|"
+    r"\d+ errors? during collection)",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def collection_failed(output: str) -> bool:
+    """True when pytest aborted during collection instead of running the suite.
+
+    This is the failure mode that made the #2316 gate inert: three stale test
+    modules importing a removed symbol aborted collection, both the recorded
+    baseline and the per-merge run measured `0 failed`, and the delta check
+    compared 0 to 0 and passed every merge.
+    """
+    return bool(_COLLECTION_ERROR.search(output or ""))
+
+
+def measurement_is_empty(passed: int, failed: int) -> bool:
+    """True when a run executed no tests, so its failure count means nothing.
+
+    A suite that collected nothing is not a passing suite. Treating `0 failed`
+    from an empty run as a real measurement is what let the gate wave merges
+    through (issue #2331).
+    """
+    return (int(passed) + int(failed)) <= 0
+
+
 def parse_failed_test_ids(output: str) -> list[str]:
     """Return the test ids named on `FAILED ...` lines of pytest -q output.
 
@@ -63,6 +94,14 @@ class Baseline:
     failed_test_ids: list[str] = field(default_factory=list)
     recorded_at: str = ""
     recorded_from_ref: str = ""
+    # The pytest scope this baseline was measured with. The per-merge run must
+    # use the same scope or the two numbers are not comparable (issue #2331).
+    pytest_args: str = ""
+
+    @property
+    def collected(self) -> int:
+        """Tests actually executed when this baseline was recorded."""
+        return self.passed + self.failed
 
     def to_dict(self) -> dict:
         return {
@@ -73,6 +112,7 @@ class Baseline:
             "failed_test_ids": list(self.failed_test_ids),
             "recorded_at": self.recorded_at,
             "recorded_from_ref": self.recorded_from_ref,
+            "pytest_args": self.pytest_args,
         }
 
     @classmethod
@@ -85,6 +125,7 @@ class Baseline:
             failed_test_ids=list(data.get("failed_test_ids", []) or []),
             recorded_at=data.get("recorded_at", ""),
             recorded_from_ref=data.get("recorded_from_ref", ""),
+            pytest_args=data.get("pytest_args", ""),
         )
 
 
@@ -171,6 +212,8 @@ def check_against_baseline(
     failing_test_ids_now: Iterable[str],
     baseline: Optional[Baseline],
     changed_files: Optional[Iterable[str]] = None,
+    passed_now: int = -1,
+    collection_error: bool = False,
 ) -> MergeCheck:
     """Compare a suite run against the recorded baseline.
 
@@ -189,6 +232,33 @@ def check_against_baseline(
             skipped_check=True,
         )
 
+    # A run that collected nothing is not a green run. Both of these refuse
+    # rather than read an empty measurement as zero failures (issue #2331).
+    if collection_error:
+        return MergeCheck(
+            allowed=False,
+            reason=(
+                "pytest aborted during collection, so no tests ran — the failure "
+                "count is meaningless. Fix the collection error and re-run; a merge "
+                "cannot be judged against a suite that never executed"
+            ),
+            failed_now=failed_now,
+            new_failing_tests=ids_now,
+        )
+
+    # passed_now defaults to -1 meaning "caller did not report it", which keeps
+    # older callers working unchanged.
+    if passed_now >= 0 and measurement_is_empty(passed_now, failed_now):
+        return MergeCheck(
+            allowed=False,
+            reason=(
+                "the suite executed no tests on this branch (0 passed, 0 failed) — "
+                "an empty run cannot show that the branch adds no failures"
+            ),
+            failed_now=failed_now,
+            new_failing_tests=ids_now,
+        )
+
     if baseline is None:
         return MergeCheck(
             allowed=False,
@@ -197,6 +267,19 @@ def check_against_baseline(
                 "(a baseline must be explicit, never inferred from the branch being merged)"
             ),
             failed_now=failed_now,
+            new_failing_tests=ids_now,
+        )
+
+    if measurement_is_empty(baseline.passed, baseline.failed):
+        return MergeCheck(
+            allowed=False,
+            reason=(
+                f"the recorded baseline for {baseline.project} measured no tests "
+                f"(0 passed, 0 failed) — it was recorded from a suite that did not "
+                f"run. Re-record it before merging"
+            ),
+            failed_now=failed_now,
+            failed_baseline=baseline.failed,
             new_failing_tests=ids_now,
         )
 

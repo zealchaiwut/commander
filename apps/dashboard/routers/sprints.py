@@ -176,13 +176,31 @@ def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
     if body.baseline_note:
         kwargs["baseline_note"] = body.baseline_note
 
+    repo = body.repo or config.repo_name or None
+
+    # Sprint-branch model: create sprint/sprint-N from develop before
+    # dispatching tickets so feature branches have a stable base (#2329).
+    sprint_branch = None
+    if repo:
+        try:
+            from services.sprint_manager.sprint_branch import ensure_sprint_branch  # noqa: PLC0415
+            sprint_branch = ensure_sprint_branch(sprint_label, repo, cwd=str(cwd))
+        except Exception as exc:
+            # Non-fatal: projects without the sprint-branch model keep working.
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "sprint branch creation failed for %s/%s: %s",
+                repo, sprint_label, exc,
+            )
+
     run = start_run(
         sprint_label,
         body.tickets,
-        repo=body.repo or config.repo_name or None,
+        repo=repo,
         repo_root=repo_root,
         cwd=cwd,
         config=config,
+        sprint_branch=sprint_branch,
         **kwargs,
     )
     return run.to_dict()

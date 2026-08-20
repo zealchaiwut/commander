@@ -84,6 +84,17 @@ def main():
     short  = args.issue
     base   = args.base_branch
 
+    # When the caller did not override --base-branch, auto-detect the sprint
+    # branch for this issue.  Falls back to develop when no sprint branch
+    # exists so projects without the sprint-branch model keep working (#2329).
+    if base == "develop":
+        from services.sprint_manager.sprint_branch import (  # noqa: PLC0415
+            detect_sprint_branch_for_issue,
+        )
+        detected = detect_sprint_branch_for_issue(args.issue, repo_name=args.repo)
+        if detected:
+            base = detected
+
     sys.stdout.write(str(f"Issue #{short}: {title}") + "\n")
     sys.stdout.write(str(f"Branch:         {branch}") + "\n")
     sys.stdout.write(str(f"Base:           {base}") + "\n")

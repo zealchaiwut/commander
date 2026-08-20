@@ -87,6 +87,8 @@ class DispatchRun:
     outcomes: list[StepOutcome] = field(default_factory=list)
     started_at: str = ""
     finished_at: str = ""
+    sprint_branch: Optional[str] = None  # sprint/sprint-N when branch model is active (#2329)
+    sprint_pr_number: Optional[int] = None  # PR opened from sprint branch → develop
 
     def to_dict(self) -> dict:
         return {
@@ -102,6 +104,8 @@ class DispatchRun:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "remaining": self.remaining(),
+            "sprint_branch": self.sprint_branch,
+            "sprint_pr_number": self.sprint_pr_number,
         }
 
     def remaining(self) -> list[int]:
@@ -404,6 +408,45 @@ def _default_verify(*, step: str, issue: int, repo, report: str) -> tuple[bool, 
     )
 
 
+def _open_sprint_pr(run: DispatchRun, *, cwd: Path) -> Optional[int]:
+    """Open a PR from sprint/sprint-N into develop (issue #2329).
+
+    Returns the PR number on success, None on any failure.  Failures are
+    non-fatal: the sprint is done and the tickets have merged; only the
+    convenience PR is missing.
+    """
+    branch = run.sprint_branch
+    repo = run.repo
+    if not branch or not repo:
+        return None
+    try:
+        label = run.sprint_label
+        result = subprocess.run(
+            [
+                "gh", "pr", "create",
+                "--repo", repo,
+                "--head", branch,
+                "--base", "develop",
+                "--title", f"Sprint {label} → develop",
+                "--body", (
+                    f"Merges all tickets from **{label}** into develop.\n\n"
+                    f"Sprint branch: `{branch}`\n"
+                    f"Dispatch run: `{run.run_id}`\n\n"
+                    f"Review and merge when ready to bring the sprint into develop."
+                ),
+            ],
+            capture_output=True, text=True, cwd=str(cwd), timeout=60,
+        )
+        if result.returncode == 0:
+            # gh pr create prints the PR URL; extract the number from the tail.
+            url = result.stdout.strip().splitlines()[-1].strip()
+            m = __import__("re").search(r"/pull/(\d+)$", url)
+            return int(m.group(1)) if m else None
+    except Exception:
+        pass
+    return None
+
+
 def execute_run(
     run: DispatchRun,
     *,
@@ -419,6 +462,9 @@ def execute_run(
     Stops on the first failed step and records which ticket failed. Dependent
     tickets are never attempted after a failure — continuing past one is how a
     broken ticket poisons the ones that build on it.
+
+    When a sprint branch is active (``run.sprint_branch`` is set), opens a PR
+    from ``sprint/sprint-N`` into ``develop`` after all tickets succeed (#2329).
     """
     spawn = spawn or default_spawn
     run.status = "running"
@@ -481,6 +527,14 @@ def execute_run(
     run.current_issue = None
     run.current_step = None
     run.finished_at = _now()
+
+    # Sprint-branch model: all tickets merged into sprint/sprint-N.  Open
+    # the one PR that brings the sprint into develop (#2329).
+    if run.sprint_branch:
+        step_cwd = config.worktree_for("coder") if config else cwd
+        pr_num = _open_sprint_pr(run, cwd=step_cwd)
+        run.sprint_pr_number = pr_num
+
     save_run(run, repo_root)
     return run
 
@@ -497,11 +551,16 @@ def start_run(
     config: Optional[ProjectDispatchConfig] = None,
     verify: Optional[Callable[..., tuple[bool, str]]] = _default_verify,
     background: bool = True,
+    sprint_branch: Optional[str] = None,
 ) -> DispatchRun:
     """Create a run and start it. Returns the handle immediately when backgrounded.
 
     ``tickets`` is used exactly as given — this function does not sort, dedupe,
     or topologically order it.
+
+    ``sprint_branch`` is set by the dispatch endpoint after creating
+    ``sprint/sprint-N`` (#2329); when set, execute_run opens a PR from the
+    sprint branch into develop after all tickets succeed.
     """
     run = DispatchRun(
         run_id=uuid.uuid4().hex[:12],
@@ -509,6 +568,7 @@ def start_run(
         tickets=list(tickets),
         repo=repo,
         started_at=_now(),
+        sprint_branch=sprint_branch,
     )
     save_run(run, repo_root)
 

@@ -321,6 +321,24 @@ def main():
     )
     args = p.parse_args()
     target = args.target_branch
+
+    # When no explicit target was given (neither --target-branch nor
+    # COMMANDER_MERGE_TARGET), auto-detect the sprint branch for this issue
+    # so the tester merges into sprint/sprint-N rather than develop (#2329).
+    # Falls back to develop when no sprint branch exists, preserving the
+    # existing behaviour for projects that don't use sprint branches.
+    _explicit_target = (
+        args.target_branch != "develop"
+        or os.environ.get("COMMANDER_MERGE_TARGET", "").strip()
+    )
+    if not _explicit_target:
+        from services.sprint_manager.sprint_branch import (  # noqa: PLC0415
+            detect_sprint_branch_for_issue,
+        )
+        detected = detect_sprint_branch_for_issue(args.issue, repo_name=args.repo)
+        if detected:
+            target = detected
+
     structured_log.set_context(issue_num=args.issue)
     structured_log.info("feature_finish_start", f"merging feature branch for issue #{args.issue} into {target}", issue_num=args.issue)
 

@@ -53,8 +53,7 @@ def client(tmp_path, monkeypatch):
         ],
     )
 
-    with TestClient(server.app, raise_server_exceptions=False) as c:
-        yield c
+    yield TestClient(server.app, raise_server_exceptions=False)
 
 
 def _make_job(job_id, tickets=None, status="drafts_ready"):

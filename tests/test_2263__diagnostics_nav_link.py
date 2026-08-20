@@ -63,8 +63,7 @@ def test_ac1_project_html_diagnostics_link_is_in_nav():
 def client():
     from fastapi.testclient import TestClient
     from server import app
-    with TestClient(app) as c:
-        yield c
+    yield TestClient(app)
 
 
 def test_ac2_diagnostics_page_returns_200(client):

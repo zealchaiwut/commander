@@ -195,7 +195,12 @@ def _baseline_check_or_exit(issue_num: int, branch: str, target: str, repo, over
 
     project = repo or github_client.repo()
     commander_dir = _REPO_ROOT / ".commander"
-    timeout_seconds = int(os.environ.get("COMMANDER_BASELINE_TIMEOUT", "600"))
+    # 600s was below commander's own measured suite time (741.96s on develop,
+    # 2026-08-20), so the check timed out and refused every merge — a refusal on
+    # timeout is indistinguishable from a real regression to whoever reads it.
+    # 1800s leaves headroom on a suite of this size without waiting forever on a
+    # genuinely hung run; override per-project with COMMANDER_BASELINE_TIMEOUT.
+    timeout_seconds = int(os.environ.get("COMMANDER_BASELINE_TIMEOUT", "1800"))
 
     changed = _changed_files_vs_target(branch, target)
     baseline = load_baseline(project, commander_dir)
@@ -205,6 +210,17 @@ def _baseline_check_or_exit(issue_num: int, branch: str, target: str, repo, over
     if changed and is_docs_only(changed):
         sys.stdout.write("Baseline-delta check skipped: diff touches documentation only.\n")
         return
+
+    # The two sides of the comparison must measure the same thing. A baseline
+    # recorded over `tests/ -q` cannot be compared against a scoped branch run
+    # (issue #2331); warn loudly rather than compare incomparable numbers.
+    branch_args = os.environ.get("COMMANDER_BASELINE_PYTEST_ARGS", "tests/ -q")
+    if baseline is not None and baseline.pytest_args and baseline.pytest_args != branch_args:
+        sys.stderr.write(
+            f"WARNING: baseline was recorded with pytest args {baseline.pytest_args!r} "
+            f"but this run uses {branch_args!r}. The counts are not comparable — "
+            f"re-record the baseline with the same scope.\n"
+        )
 
     sys.stdout.write(f"Running suite on origin/{branch} for baseline-delta check…\n")
     output, timed_out = _run_suite_on_branch(branch, timeout_seconds)
@@ -225,12 +241,20 @@ def _baseline_check_or_exit(issue_num: int, branch: str, target: str, repo, over
         _record_override(issue_num, "suite run timed out", repo)
         return
 
-    _passed, failed, _skipped = _parse_pytest_output(output)
+    from services.sprint_manager.merge_baseline import collection_failed
+
+    passed, failed, _skipped = _parse_pytest_output(output)
+    # A run that aborted at collection reports zero failures for a suite that
+    # never executed. Passing that straight into the delta check compares 0 to 0
+    # and waves the merge through, which is what #2331 found. Report both the
+    # collection state and the pass count so the check can refuse.
     check = check_against_baseline(
         failed_now=failed,
         failing_test_ids_now=parse_failed_test_ids(output),
         baseline=baseline,
         changed_files=changed or None,
+        passed_now=passed,
+        collection_error=collection_failed(output),
     )
 
     if check.allowed:

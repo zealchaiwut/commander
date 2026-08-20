@@ -339,6 +339,46 @@ def default_spawn(
     return judge_agent_result(proc.returncode, proc.stdout or "", proc.stderr or "")
 
 
+def _default_verify(*, step: str, issue: int, repo, report: str) -> tuple[bool, str]:
+    """Real ticket verification against GitHub (issue #2328).
+
+    Kept as a module-level default so tests can inject a stub, and so a caller
+    can pass ``verify=None`` to skip verification entirely (e.g. dry runs).
+    """
+    from services.sprint_manager.ticket_verify import verify_step
+
+    def _labels(issue_num: int, repo_name):
+        import github_client
+
+        data = github_client.get_issue_live(issue_num, repo_name=repo_name)
+        return [lbl["name"] for lbl in data.get("labels", [])]
+
+    def _open_pr(issue_num: int, repo_name):
+        """Number of an open PR whose branch belongs to this issue, if any."""
+        import subprocess
+
+        try:
+            out = subprocess.run(
+                ["gh", "pr", "list", "--repo", repo_name or "", "--state", "open",
+                 "--json", "number,headRefName"],
+                capture_output=True, text=True, timeout=60,
+            )
+            if out.returncode != 0:
+                return None
+            for pr in json.loads(out.stdout or "[]"):
+                head = str(pr.get("headRefName", ""))
+                if head.startswith(f"feature/{issue_num}-") or f"-{issue_num}" == head[-len(str(issue_num)) - 1:]:
+                    return pr.get("number")
+        except Exception:
+            return None
+        return None
+
+    return verify_step(
+        step=step, issue=issue, repo=repo, report=report,
+        fetch_labels=_labels, fetch_open_pr=_open_pr,
+    )
+
+
 def execute_run(
     run: DispatchRun,
     *,
@@ -347,6 +387,7 @@ def execute_run(
     baseline_note: str = "run the suite and compare against the recorded baseline.",
     spawn: Optional[Callable[..., tuple[bool, str]]] = None,
     config: Optional[ProjectDispatchConfig] = None,
+    verify: Optional[Callable[..., tuple[bool, str]]] = _default_verify,
 ) -> DispatchRun:
     """Run every ticket through coder then tester, in the order given.
 
@@ -389,6 +430,15 @@ def execute_run(
                 prompt=step_prompt,
                 model=step_model,
             )
+
+            # An agent that ran cleanly has not necessarily moved the ticket
+            # (issue #2328). Check its verdict and the board before believing it.
+            if ok and verify is not None:
+                advanced, why = verify(step=step, issue=issue, repo=run.repo, report=detail)
+                if not advanced:
+                    ok = False
+                    detail = f"agent completed but ticket did not advance: {why}\n\n{detail}"
+
             run.outcomes.append(StepOutcome(issue=issue, step=step, ok=ok, detail=detail))
 
             if not ok:
@@ -420,6 +470,7 @@ def start_run(
     baseline_note: str = "run the suite and compare against the recorded baseline.",
     spawn: Optional[Callable[..., tuple[bool, str]]] = None,
     config: Optional[ProjectDispatchConfig] = None,
+    verify: Optional[Callable[..., tuple[bool, str]]] = _default_verify,
     background: bool = True,
 ) -> DispatchRun:
     """Create a run and start it. Returns the handle immediately when backgrounded.
@@ -439,7 +490,7 @@ def start_run(
     if not background:
         return execute_run(
             run, repo_root=repo_root, cwd=cwd, baseline_note=baseline_note,
-            spawn=spawn, config=config,
+            spawn=spawn, config=config, verify=verify,
         )
 
     thread = threading.Thread(
@@ -451,6 +502,7 @@ def start_run(
             "baseline_note": baseline_note,
             "spawn": spawn,
             "config": config,
+            "verify": verify,
         },
         daemon=True,
         name=f"dispatch-{run.run_id}",

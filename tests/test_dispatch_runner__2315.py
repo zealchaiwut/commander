@@ -50,7 +50,7 @@ def _run(tickets, tmp_path, repo="owner/repo"):
 
 def test_tickets_run_in_the_order_given(tmp_path):
     spawn = RecordingSpawn()
-    execute_run(_run([30, 10, 20], tmp_path), repo_root=tmp_path, cwd=tmp_path, spawn=spawn)
+    execute_run(_run([30, 10, 20], tmp_path), repo_root=tmp_path, cwd=tmp_path, spawn=spawn, verify=None)
 
     issues_in_order = [issue for _step, issue in spawn.calls]
     # 30 before 10 before 20 — not sorted, not reversed.
@@ -59,7 +59,7 @@ def test_tickets_run_in_the_order_given(tmp_path):
 
 def test_each_ticket_runs_coder_then_tester(tmp_path):
     spawn = RecordingSpawn()
-    execute_run(_run([7], tmp_path), repo_root=tmp_path, cwd=tmp_path, spawn=spawn)
+    execute_run(_run([7], tmp_path), repo_root=tmp_path, cwd=tmp_path, spawn=spawn, verify=None)
     assert spawn.calls == [("coder", 7), ("tester", 7)]
 
 
@@ -67,7 +67,7 @@ def test_each_ticket_runs_coder_then_tester(tmp_path):
 
 def test_failure_stops_the_run_and_records_the_ticket(tmp_path):
     spawn = RecordingSpawn(fail_on={("coder", 10)})
-    run = execute_run(_run([30, 10, 20], tmp_path), repo_root=tmp_path, cwd=tmp_path, spawn=spawn)
+    run = execute_run(_run([30, 10, 20], tmp_path), repo_root=tmp_path, cwd=tmp_path, spawn=spawn, verify=None)
 
     assert run.status == "failed"
     assert run.failed_issue == 10
@@ -77,7 +77,7 @@ def test_failure_stops_the_run_and_records_the_ticket(tmp_path):
 
 def test_tester_failure_also_stops_the_run(tmp_path):
     spawn = RecordingSpawn(fail_on={("tester", 30)})
-    run = execute_run(_run([30, 40], tmp_path), repo_root=tmp_path, cwd=tmp_path, spawn=spawn)
+    run = execute_run(_run([30, 40], tmp_path), repo_root=tmp_path, cwd=tmp_path, spawn=spawn, verify=None)
 
     assert run.status == "failed"
     assert run.failed_issue == 30
@@ -88,7 +88,7 @@ def test_tester_failure_also_stops_the_run(tmp_path):
 
 def test_status_is_persisted_and_loadable(tmp_path):
     spawn = RecordingSpawn()
-    run = execute_run(_run([5], tmp_path), repo_root=tmp_path, cwd=tmp_path, spawn=spawn)
+    run = execute_run(_run([5], tmp_path), repo_root=tmp_path, cwd=tmp_path, spawn=spawn, verify=None)
 
     data = load_run(run.run_id, tmp_path)
     assert data is not None
@@ -106,7 +106,7 @@ def test_progress_is_visible_mid_run(tmp_path):
         seen[(step, issue)] = (snapshot["current_issue"], snapshot["current_step"])
         return True, "ok"
 
-    execute_run(_run([9], tmp_path), repo_root=tmp_path, cwd=tmp_path, spawn=spy)
+    execute_run(_run([9], tmp_path), repo_root=tmp_path, cwd=tmp_path, spawn=spy, verify=None)
     assert seen[("coder", 9)] == (9, "coder")
     assert seen[("tester", 9)] == (9, "tester")
 
@@ -122,7 +122,7 @@ def test_stop_is_honoured_at_the_next_step_boundary(tmp_path):
         request_stop("testrun", tmp_path)
         return True, "ok"
 
-    run = execute_run(_run([1, 2], tmp_path), repo_root=tmp_path, cwd=tmp_path, spawn=spawn)
+    run = execute_run(_run([1, 2], tmp_path), repo_root=tmp_path, cwd=tmp_path, spawn=spawn, verify=None)
 
     assert run.status == "stopped"
     # The in-flight step completed; the next one never started.
@@ -154,7 +154,7 @@ def test_baseline_note_is_passed_through_to_the_agent(tmp_path):
 
     execute_run(
         _run([1], tmp_path), repo_root=tmp_path, cwd=tmp_path,
-        baseline_note="75 failed / 954 passed", spawn=spawn,
+        baseline_note="75 failed / 954 passed", spawn=spawn, verify=None,
     )
     assert received["note"] == "75 failed / 954 passed"
 
@@ -211,7 +211,7 @@ def test_start_run_preserves_the_given_ticket_list(tmp_path):
     tickets = [3, 1, 2]
     run = start_run(
         "sprint-1027", tickets, repo="owner/repo", repo_root=tmp_path,
-        cwd=tmp_path, spawn=spawn, background=False,
+        cwd=tmp_path, spawn=spawn, verify=None, background=False,
     )
     assert run.tickets == [3, 1, 2]
     assert tickets == [3, 1, 2], "caller's list must not be mutated"

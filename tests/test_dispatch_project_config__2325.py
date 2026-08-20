@@ -154,7 +154,7 @@ def test_execute_run_uses_per_step_prompt_and_worktree(tmp_path):
 
     execute_run(
         DispatchRun(run_id="r1", sprint_label="sprint-7", tickets=[80], repo="o/r"),
-        repo_root=tmp_path, cwd=tmp_path, spawn=spawn, config=cfg,
+        repo_root=tmp_path, cwd=tmp_path, spawn=spawn, verify=None, config=cfg,
     )
 
     coder, tester = seen
@@ -181,7 +181,7 @@ def test_preamble_still_reaches_the_agent(tmp_path):
 
     execute_run(
         DispatchRun(run_id="r2", sprint_label="s", tickets=[1], repo="o/r"),
-        repo_root=tmp_path, cwd=tmp_path, spawn=spawn, config=cfg,
+        repo_root=tmp_path, cwd=tmp_path, spawn=spawn, verify=None, config=cfg,
         baseline_note="75 failed / 954 passed",
     )
     # execute_run passes the raw template; default_spawn appends the preamble.

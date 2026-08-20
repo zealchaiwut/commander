@@ -83,18 +83,52 @@ def load_gate_result(sprint_label: str, sprints_dir: Path) -> Optional[SuiteHeal
         return None
 
 
+# pytest's final summary is the last line carrying counts and a duration, e.g.
+#   2377 failed, 7257 passed, 351 skipped, 469 errors in 741.96s (0:12:21)
+#   === 1 failed, 2 passed in 0.51s ===
+# The trailing `in <N>s` is what distinguishes it from prose that merely mentions
+# counts.
+_SUMMARY_LINE = re.compile(
+    r"^[=\s]*(?=.*\b\d+\s+(?:passed|failed|error|skipped))"
+    r".*\bin\s+\d+(?:\.\d+)?\s*s\b",
+    re.IGNORECASE,
+)
+
+
 def _parse_pytest_output(output: str) -> tuple[int, int, int]:
-    """Parse pytest -q stdout for passed/failed/skipped counts."""
+    """Parse pytest stdout for passed/failed/skipped counts.
+
+    Reads the *last* summary line rather than the first count anywhere in the
+    output. Commander's suite contains tests that run pytest as a subprocess and
+    assert on its output, so their captured text carries pytest-shaped counts of
+    its own. Scanning the whole blob with `re.search` returned the first of those
+    instead of the run's real totals — it reported `5 passed / 999 failed` for a
+    run that was actually `7257 passed / 2377 failed`, which would have made the
+    baseline-delta check refuse every merge (issue #2331).
+    """
     passed = failed = skipped = 0
-    m = re.search(r"(\d+)\s+passed", output)
-    if m:
-        passed = int(m.group(1))
-    m = re.search(r"(\d+)\s+failed", output)
-    if m:
-        failed = int(m.group(1))
-    m = re.search(r"(\d+)\s+skipped", output)
-    if m:
-        skipped = int(m.group(1))
+
+    summary = ""
+    for line in reversed((output or "").splitlines()):
+        if _SUMMARY_LINE.match(line.strip()):
+            summary = line
+            break
+
+    # No recognisable summary (e.g. a collection abort) — fall back to scanning
+    # the whole output so behaviour is no worse than before.
+    haystack = summary or (output or "")
+
+    for name, setter in (("passed", "p"), ("failed", "f"), ("skipped", "s")):
+        m = re.search(rf"(\d+)\s+{name}\b", haystack)
+        if not m:
+            continue
+        if setter == "p":
+            passed = int(m.group(1))
+        elif setter == "f":
+            failed = int(m.group(1))
+        else:
+            skipped = int(m.group(1))
+
     return passed, failed, skipped
 
 

@@ -22,6 +22,9 @@ for _p in (str(REPO_ROOT), str(REPO_ROOT / "apps" / "dashboard")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from services.sprint_manager.suite_health_gate import (  # noqa: E402
+    _parse_pytest_output,
+)
 from services.sprint_manager.merge_baseline import (  # noqa: E402
     Baseline,
     check_against_baseline,
@@ -275,3 +278,51 @@ def test_recorder_writes_nothing_for_a_refused_measurement(broken_tree: Path):
         capture_output=True, text=True, timeout=180, cwd=str(REPO_ROOT),
     )
     assert target.exists() == existed_before, "a refused measurement was still written"
+
+
+# ---------------------------------------------------------------------------
+# AC: the summary parser reads the run's real totals, not the first counts it
+# finds. Commander's suite runs pytest as a subprocess in places, so its captured
+# output carries pytest-shaped counts that are not this run's.
+# ---------------------------------------------------------------------------
+
+def test_parser_reads_the_last_summary_not_the_first_counts():
+    """The measured regression: 5/999 reported for a 7257/2377 run."""
+    output = (
+        "  E           5 passed, 999 failed in 1.02s\n"
+        "  E           assert 1 == 0\n"
+        "2377 failed, 7257 passed, 351 skipped, 1 deselected, 1 xfailed, "
+        "22 warnings, 469 errors in 741.96s (0:12:21)\n"
+    )
+    passed, failed, skipped = _parse_pytest_output(output)
+    assert (passed, failed, skipped) == (7257, 2377, 351)
+
+
+def test_parser_handles_a_decorated_summary_line():
+    assert _parse_pytest_output("=== 1 failed, 2 passed in 0.51s ===") == (2, 1, 0)
+
+
+def test_parser_handles_an_all_passing_run():
+    assert _parse_pytest_output("53 passed in 0.33s") == (53, 0, 0)
+
+
+def test_parser_falls_back_when_there_is_no_summary_line():
+    """A collection abort has no summary; the fallback must not invent counts."""
+    passed, failed, skipped = _parse_pytest_output(COLLECTION_ERROR_OUTPUT)
+    assert passed == 0 and failed == 0
+
+
+def test_parsed_counts_drive_the_refusal_end_to_end():
+    """A misparsed run must not be able to refuse a healthy branch."""
+    output = (
+        "  E           5 passed, 999 failed in 1.02s\n"
+        "2377 failed, 7257 passed, 351 skipped in 741.96s (0:12:21)\n"
+    )
+    passed, failed, _ = _parse_pytest_output(output)
+    check = check_against_baseline(
+        failed_now=failed,
+        failing_test_ids_now=[],
+        baseline=_baseline(failed=2377, passed=7257),
+        passed_now=passed,
+    )
+    assert check.allowed is True, check.reason

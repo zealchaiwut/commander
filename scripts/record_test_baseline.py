@@ -12,9 +12,16 @@ count and failing-test ids to `.commander/baselines/<owner>-<repo>.json`.
 Baselines are deliberately explicit. `finish_feature.py` never infers one from
 the branch being merged — a branch that set its own baseline would always pass.
 
-Real baselines are not green: Commander's own scoped gate carries a ~25-failure
-baseline, and viral-radar's develop measured 75 failed / 954 passed. The point is
-to pin what is already broken so that only *new* breakage blocks a merge.
+Real baselines are not green: Commander's develop measured 2442 failed / 6999
+passed / 363 skipped on 2026-08-20 (bare worktree, `tests/ -q`), and
+viral-radar's develop measured 75 failed / 954 passed. The point is to pin what
+is already broken so that only *new* breakage blocks a merge.
+
+Measure where the check measures. `finish_feature.py` runs the suite in a bare
+`git worktree`, which has no `node_modules/`, `.env` or `venv/`; this script runs
+wherever you point `--repo-root`. Develop measures 2377 in the uat clone and 2442
+in a worktree, so recording from a working clone injects ~65 phantom failures into
+every comparison (#2329). Pass `--repo-root <worktree>`.
 """
 from __future__ import annotations
 

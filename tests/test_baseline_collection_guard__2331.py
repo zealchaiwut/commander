@@ -326,3 +326,48 @@ def test_parsed_counts_drive_the_refusal_end_to_end():
         passed_now=passed,
     )
     assert check.allowed is True, check.reason
+
+
+# ---------------------------------------------------------------------------
+# AC: the baseline records the ref it actually measured
+# ---------------------------------------------------------------------------
+
+def test_recorder_records_the_measured_ref_not_the_claimed_one(tmp_path: Path):
+    """`--ref` is a label; the script measures the working tree, not that ref.
+
+    Recording the claimed ref stamped a baseline `develop` that was measured on a
+    feature branch — the "a branch sets its own baseline" case merge_baseline.py
+    exists to prevent.
+    """
+    tree = tmp_path / "repo"
+    (tree / "tests").mkdir(parents=True)
+    (tree / "tests" / "test_ok.py").write_text(
+        "def test_passes():\n    assert True\n", encoding="utf-8"
+    )
+    for cmd in (
+        ["git", "init", "-q", "-b", "not-develop"],
+        ["git", "config", "user.email", "t@example.com"],
+        ["git", "config", "user.name", "t"],
+        ["git", "add", "-A"],
+        ["git", "commit", "-q", "-m", "init"],
+    ):
+        subprocess.run(cmd, cwd=str(tree), check=True, capture_output=True)
+
+    out = tmp_path / "out"
+    out.mkdir()
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "record_test_baseline.py"),
+            "--repo", "zealchaiwut/ref-label-2331",
+            "--repo-root", str(tree),
+            "--ref", "develop",
+            "--dry-run",
+        ],
+        capture_output=True, text=True, timeout=180, cwd=str(REPO_ROOT),
+    )
+    combined = proc.stdout + proc.stderr
+    assert "not-develop" in combined, (
+        "the recorder reported the claimed ref instead of the measured one\n"
+        f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+    )

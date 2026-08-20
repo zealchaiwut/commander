@@ -231,6 +231,33 @@ def load_project_config(project_root: Path) -> ProjectDispatchConfig:
     )
 
 
+def build_agent_env(step: str, issue: int) -> dict:
+    """Environment for a dispatched `claude -p` subprocess.
+
+    Strips ANTHROPIC_API_KEY so the CLI authenticates via the Claude.ai
+    subscription rather than metered API billing. CLAUDE.md's pricing table says
+    coder and tester runs are subscription-funded and cost $0.00; inheriting the
+    key silently contradicts that. Six other agent-spawning call sites already do
+    this — startup.py, backlog_triage.py, estimate_issue.py, model_routing.py,
+    fill_acceptance_criteria.py and sprint_estimator.py — and dispatch was the
+    only one that did not (issue #2334).
+
+    The symptom when it is inherited: `claude -p` exits with api_error_status 400
+    and "Credit balance is too low", because the configured key is unfunded. That
+    is the benign outcome — a funded key would have billed every dispatched agent
+    against a policy that says they are free, with no signal anywhere.
+
+    Returns a copy; the parent process environment is never modified.
+    """
+    env = dict(os.environ)
+    env.pop("ANTHROPIC_API_KEY", None)
+    # Hook telemetry attributes the session from these; without them a run lands
+    # unattributed and the Running view cannot show it.
+    env["CLAUDE_AGENT_ROLE"] = step
+    env["CLAUDE_AGENT_ISSUE"] = str(issue)
+    return env
+
+
 # Text an agent emits when it did not actually do the work. `claude -p` exits 0
 # in these cases, so the exit code alone cannot be trusted (issue #2324).
 _FAILURE_MARKERS = (
@@ -317,9 +344,7 @@ def default_spawn(
     model = model or DEFAULT_MODEL
     prompt = prompt.rstrip() + "\n\n" + AGENT_PREAMBLE.format(baseline_note=baseline_note)
 
-    env = dict(os.environ)
-    env["CLAUDE_AGENT_ROLE"] = step
-    env["CLAUDE_AGENT_ISSUE"] = str(issue)
+    env = build_agent_env(step, issue)
 
     try:
         proc = subprocess.run(

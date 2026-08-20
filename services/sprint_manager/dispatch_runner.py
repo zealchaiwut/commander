@@ -408,17 +408,94 @@ def _default_verify(*, step: str, issue: int, repo, report: str) -> tuple[bool, 
     )
 
 
+def _gate_sprint_pr(
+    *, sprint_branch: str, target: str = "develop", repo: str, cwd: Path, **kw
+) -> tuple[bool, str]:
+    """Baseline-delta check for the sprint → develop PR (AC #2316 + #2329).
+
+    Runs the suite on the sprint branch in `cwd` and compares against the
+    recorded develop baseline.  Returns (allowed, reason).  Called by
+    _open_sprint_pr before `gh pr create` so neither merge type bypasses the
+    gate (per AC4: "the baseline-delta check runs … against develop for the
+    final sprint merge").
+
+    Kill-switch: COMMANDER_BASELINE_CHECK=0 skips and returns True.
+    """
+    import re as _re
+
+    from services.sprint_manager.commander_paths import discover_commander_dir
+    from services.sprint_manager.merge_baseline import (
+        check_against_baseline,
+        collection_failed,
+        load_baseline,
+        parse_failed_test_ids,
+    )
+
+    if os.environ.get("COMMANDER_BASELINE_CHECK", "1") == "0":
+        return True, "Baseline-delta check disabled (COMMANDER_BASELINE_CHECK=0)"
+
+    try:
+        commander_dir = discover_commander_dir(cwd)
+    except Exception as exc:
+        return False, f"could not locate .commander dir from {cwd}: {exc}"
+
+    baseline = load_baseline(repo or "", commander_dir)
+    if baseline is None:
+        # No baseline recorded: nothing to compare against, so skip the gate.
+        # Per-ticket merges (finish_feature.py) already refused on missing baseline;
+        # if those went through, the baseline was either recorded or bypassed there.
+        return True, f"no baseline recorded for {repo} — sprint-PR gate skipped"
+
+    pytest_args = (baseline.pytest_args or "tests/ -q").split()
+    timeout = int(os.environ.get("COMMANDER_BASELINE_TIMEOUT", "900"))
+
+    try:
+        result = subprocess.run(
+            ["python3", "-m", "pytest"] + pytest_args,
+            cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+        )
+        output = (result.stdout or "") + (result.stderr or "")
+    except subprocess.TimeoutExpired:
+        return False, f"baseline-delta check timed out after {timeout}s on {sprint_branch}"
+    except Exception as exc:
+        return False, f"baseline-delta check could not run: {exc}"
+
+    failed_ids = parse_failed_test_ids(output)
+    m_f = _re.search(r"(\d+) failed", output)
+    failed_now = int(m_f.group(1)) if m_f else len(failed_ids)
+    m_p = _re.search(r"(\d+) passed", output)
+    passed_now = int(m_p.group(1)) if m_p else -1
+
+    check = check_against_baseline(
+        failed_now=failed_now,
+        failing_test_ids_now=failed_ids,
+        baseline=baseline,
+        passed_now=passed_now,
+        collection_error=collection_failed(output),
+    )
+    return check.allowed, check.summary()
+
+
 def _open_sprint_pr(run: DispatchRun, *, cwd: Path) -> Optional[int]:
     """Open a PR from sprint/sprint-N into develop (issue #2329).
 
-    Returns the PR number on success, None on any failure.  Failures are
-    non-fatal: the sprint is done and the tickets have merged; only the
-    convenience PR is missing.
+    Runs the baseline-delta check (_gate_sprint_pr) against develop first so
+    that neither merge type bypasses AC #2316 (AC4 of #2329).  Returns the PR
+    number on success, None when the gate refuses or on any other failure.
+    Failures are non-fatal: the sprint is done and the tickets have merged;
+    only the sprint PR is missing.
     """
     branch = run.sprint_branch
     repo = run.repo
     if not branch or not repo:
         return None
+
+    gate_ok, _gate_msg = _gate_sprint_pr(
+        sprint_branch=branch, target="develop", repo=repo, cwd=cwd,
+    )
+    if not gate_ok:
+        return None
+
     try:
         label = run.sprint_label
         result = subprocess.run(

@@ -44,10 +44,11 @@ from services.sprint_manager.merge_baseline import (  # noqa: E402
     baseline_path,
     collection_failed,
     measurement_is_empty,
+    parse_errored_test_ids,
     parse_failed_test_ids,
     save_baseline,
 )
-from services.sprint_manager.suite_health_gate import _parse_pytest_output  # noqa: E402
+from services.sprint_manager.suite_health_gate import _parse_pytest_output_ex  # noqa: E402
 
 
 def _git_describe_ref(root: Path) -> str:
@@ -128,8 +129,9 @@ def main() -> None:
         sys.exit(1)
 
     output = (proc.stdout or "") + (proc.stderr or "")
-    passed, failed, skipped = _parse_pytest_output(output)
+    passed, failed, skipped, errors = _parse_pytest_output_ex(output)
     failed_ids = parse_failed_test_ids(output)
+    error_ids = parse_errored_test_ids(output)
 
     # A baseline recorded from a suite that never ran is worse than no baseline:
     # `finish_feature.py` measures the branch the same way, also gets zero, and
@@ -167,15 +169,18 @@ def main() -> None:
             file=sys.stderr,
         )
 
-    print(f"  passed={passed} failed={failed} skipped={skipped}")
+    print(f"  passed={passed} failed={failed} skipped={skipped} errors={errors}")
     print(f"  failing test ids captured: {len(failed_ids)}")
+    print(f"  erroring test ids captured: {len(error_ids)}")
 
     baseline = Baseline(
         project=args.repo,
         failed=failed,
         passed=passed,
         skipped=skipped,
+        errored=errors,
         failed_test_ids=failed_ids,
+        errored_test_ids=error_ids,
         recorded_at=datetime.now(timezone.utc).isoformat(),
         recorded_from_ref=measured_ref,
         pytest_args=args.pytest_args,

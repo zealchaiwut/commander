@@ -95,8 +95,8 @@ _SUMMARY_LINE = re.compile(
 )
 
 
-def _parse_pytest_output(output: str) -> tuple[int, int, int]:
-    """Parse pytest stdout for passed/failed/skipped counts.
+def _parse_pytest_output_ex(output: str) -> tuple[int, int, int, int]:
+    """Parse pytest stdout for passed/failed/skipped/error counts.
 
     Reads the *last* summary line rather than the first count anywhere in the
     output. Commander's suite contains tests that run pytest as a subprocess and
@@ -105,8 +105,11 @@ def _parse_pytest_output(output: str) -> tuple[int, int, int]:
     instead of the run's real totals — it reported `5 passed / 999 failed` for a
     run that was actually `7257 passed / 2377 failed`, which would have made the
     baseline-delta check refuse every merge (issue #2331).
+
+    The `errors` count covers both per-test fixture errors and collection errors,
+    both of which appear in the same summary line as `N errors` (issue #2336).
     """
-    passed = failed = skipped = 0
+    passed = failed = skipped = errors = 0
 
     summary = ""
     for line in reversed((output or "").splitlines()):
@@ -129,6 +132,20 @@ def _parse_pytest_output(output: str) -> tuple[int, int, int]:
         else:
             skipped = int(m.group(1))
 
+    m = re.search(r"(\d+)\s+errors?\b", haystack)
+    if m:
+        errors = int(m.group(1))
+
+    return passed, failed, skipped, errors
+
+
+def _parse_pytest_output(output: str) -> tuple[int, int, int]:
+    """Parse pytest stdout for passed/failed/skipped counts.
+
+    Backward-compatible wrapper around _parse_pytest_output_ex. Use
+    _parse_pytest_output_ex when the error count is also needed (issue #2336).
+    """
+    passed, failed, skipped, _ = _parse_pytest_output_ex(output)
     return passed, failed, skipped
 
 

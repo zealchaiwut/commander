@@ -190,9 +190,10 @@ def _baseline_check_or_exit(issue_num: int, branch: str, target: str, repo, over
     from services.sprint_manager.merge_baseline import (
         check_against_baseline,
         load_baseline,
+        parse_errored_test_ids,
         parse_failed_test_ids,
     )
-    from services.sprint_manager.suite_health_gate import _parse_pytest_output
+    from services.sprint_manager.suite_health_gate import _parse_pytest_output_ex
 
     # Kill switch. The check refuses when no baseline is recorded, which is the
     # right default for an unmeasured project but would block every merge on a
@@ -255,7 +256,7 @@ def _baseline_check_or_exit(issue_num: int, branch: str, target: str, repo, over
 
     from services.sprint_manager.merge_baseline import collection_failed
 
-    passed, failed, _skipped = _parse_pytest_output(output)
+    passed, failed, _skipped, errored = _parse_pytest_output_ex(output)
     # A run that aborted at collection reports zero failures for a suite that
     # never executed. Passing that straight into the delta check compares 0 to 0
     # and waves the merge through, which is what #2331 found. Report both the
@@ -267,6 +268,8 @@ def _baseline_check_or_exit(issue_num: int, branch: str, target: str, repo, over
         changed_files=changed or None,
         passed_now=passed,
         collection_error=collection_failed(output),
+        errored_now=errored,
+        erroring_test_ids_now=parse_errored_test_ids(output),
     )
 
     if check.allowed:

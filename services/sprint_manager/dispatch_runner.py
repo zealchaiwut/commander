@@ -427,9 +427,10 @@ def _gate_sprint_pr(
         check_against_baseline,
         collection_failed,
         load_baseline,
+        parse_errored_test_ids,
         parse_failed_test_ids,
     )
-    from services.sprint_manager.suite_health_gate import _parse_pytest_output
+    from services.sprint_manager.suite_health_gate import _parse_pytest_output_ex
 
     if os.environ.get("COMMANDER_BASELINE_CHECK", "1") == "0":
         return True, "Baseline-delta check disabled (COMMANDER_BASELINE_CHECK=0)"
@@ -472,14 +473,15 @@ def _gate_sprint_pr(
         return False, f"baseline-delta check could not run: {exc}"
 
     failed_ids = parse_failed_test_ids(output)
+    error_ids = parse_errored_test_ids(output)
     # Use the shared parser. A local `re.search(r"(\d+) failed", output)` takes
     # the FIRST match anywhere in the blob, and commander's suite runs pytest as
     # a subprocess in places, so their captured output carries counts of their
     # own. That exact inline form reported passed=5 failed=999 for a run that was
-    # 7279/2377 (issue #2331); _parse_pytest_output reads the last real summary
+    # 7279/2377 (issue #2331); _parse_pytest_output_ex reads the last real summary
     # line instead. The command run here is `pytest tests/ -q` — precisely the
     # invocation that misparsed.
-    passed_now, failed_now, _skipped_now = _parse_pytest_output(output)
+    passed_now, failed_now, _skipped_now, errored_now = _parse_pytest_output_ex(output)
 
     check = check_against_baseline(
         failed_now=failed_now,
@@ -487,6 +489,8 @@ def _gate_sprint_pr(
         baseline=baseline,
         passed_now=passed_now,
         collection_error=collection_failed(output),
+        errored_now=errored_now,
+        erroring_test_ids_now=error_ids,
     )
     return check.allowed, check.summary()
 

@@ -53,13 +53,18 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, List, Optional
 
 BASELINE_DIRNAME = "baselines"
 
 # `pytest -q` summary lines, e.g.
 #   FAILED tests/test_foo.py::test_bar - AssertionError: ...
 _FAILED_LINE = re.compile(r"^FAILED\s+(\S+?)(?:\s+-\s+.*)?$", re.MULTILINE)
+
+# `pytest -q` error summary lines, e.g.
+#   ERROR tests/test_foo.py::test_bar - fixture 'x' not found
+#   ERROR tests/test_foo.py  (collection error — whole module)
+_ERROR_LINE = re.compile(r"^ERROR\s+(\S+?)(?:\s+-\s+.*)?$", re.MULTILINE)
 
 # Paths that cannot change test outcomes, so a diff touching only these skips the
 # check. Deliberately conservative: anything not listed here is treated as code.
@@ -111,6 +116,16 @@ def parse_failed_test_ids(output: str) -> list[str]:
     return sorted({m.group(1) for m in _FAILED_LINE.finditer(output or "")})
 
 
+def parse_errored_test_ids(output: str) -> list[str]:
+    """Return the test ids named on `ERROR ...` lines of pytest -q output.
+
+    Captures both per-test fixture errors (e.g. `ERROR tests/foo.py::test_bar`)
+    and collection errors (e.g. `ERROR tests/foo.py`).  Returns them sorted and
+    de-duplicated so comparisons are order-independent (issue #2336).
+    """
+    return sorted({m.group(1) for m in _ERROR_LINE.finditer(output or "")})
+
+
 @dataclass
 class Baseline:
     """A recorded, explicit expectation of how bad the suite currently is."""
@@ -119,7 +134,12 @@ class Baseline:
     failed: int
     passed: int = 0
     skipped: int = 0
+    errored: int = 0
     failed_test_ids: list[str] = field(default_factory=list)
+    # None means "not recorded" (baseline written before issue #2336).  An empty
+    # list means "recorded, but zero errors".  check_against_baseline skips the
+    # error check when this is None so old baselines behave as before.
+    errored_test_ids: Optional[List[str]] = None
     recorded_at: str = ""
     recorded_from_ref: str = ""
     # The pytest scope this baseline was measured with. The per-merge run must
@@ -137,7 +157,9 @@ class Baseline:
             "fail": self.failed,
             "pass": self.passed,
             "skip": self.skipped,
+            "errored": self.errored,
             "failed_test_ids": list(self.failed_test_ids),
+            "errored_test_ids": list(self.errored_test_ids or []),
             "recorded_at": self.recorded_at,
             "recorded_from_ref": self.recorded_from_ref,
             "pytest_args": self.pytest_args,
@@ -145,12 +167,19 @@ class Baseline:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Baseline":
+        # errored_test_ids absent → None (old baseline, skip error check).
+        # errored_test_ids present → list (new baseline, apply error check).
+        errored_ids: Optional[List[str]] = (
+            list(data["errored_test_ids"]) if "errored_test_ids" in data else None
+        )
         return cls(
             project=data.get("project", ""),
             failed=int(data.get("fail", 0)),
             passed=int(data.get("pass", 0)),
             skipped=int(data.get("skip", 0)),
+            errored=int(data.get("errored", 0)),
             failed_test_ids=list(data.get("failed_test_ids", []) or []),
+            errored_test_ids=errored_ids,
             recorded_at=data.get("recorded_at", ""),
             recorded_from_ref=data.get("recorded_from_ref", ""),
             pytest_args=data.get("pytest_args", ""),
@@ -164,8 +193,11 @@ class MergeCheck:
     allowed: bool
     reason: str
     new_failing_tests: list[str] = field(default_factory=list)
+    new_erroring_tests: list[str] = field(default_factory=list)
     failed_now: int = 0
     failed_baseline: int = 0
+    errored_now: int = 0
+    errored_baseline: int = 0
     skipped_check: bool = False
 
     def summary(self) -> str:
@@ -181,10 +213,18 @@ class MergeCheck:
             f"Baseline-delta check REFUSED this merge: {self.reason}",
             f"Failing now: {self.failed_now}. Baseline: {self.failed_baseline}.",
         ]
+        if self.errored_now or self.errored_baseline:
+            lines.append(
+                f"Erroring now: {self.errored_now}. Baseline: {self.errored_baseline}."
+            )
         if self.new_failing_tests:
             lines.append("")
             lines.append("Tests failing that were not failing in the baseline:")
             lines.extend(f"  - {t}" for t in self.new_failing_tests)
+        if self.new_erroring_tests:
+            lines.append("")
+            lines.append("Tests erroring that were not erroring in the baseline:")
+            lines.extend(f"  - {t}" for t in self.new_erroring_tests)
         return "\n".join(lines)
 
 
@@ -242,13 +282,15 @@ def check_against_baseline(
     changed_files: Optional[Iterable[str]] = None,
     passed_now: int = -1,
     collection_error: bool = False,
+    errored_now: int = 0,
+    erroring_test_ids_now: Iterable[str] = (),
 ) -> MergeCheck:
     """Compare a suite run against the recorded baseline.
 
     Refuses when the failure count rises, or when any test fails that was not
-    failing in the baseline. A missing baseline refuses rather than waves the
-    merge through: an unmeasured project is not a safe one, and recording a
-    baseline is a one-line operation.
+    failing in the baseline; and likewise for errors (issue #2336).  A missing
+    baseline refuses rather than waves the merge through: an unmeasured project
+    is not a safe one, and recording a baseline is a one-line operation.
     """
     ids_now = sorted(set(failing_test_ids_now or []))
 
@@ -332,9 +374,49 @@ def check_against_baseline(
             failed_baseline=baseline.failed,
         )
 
+    # Error checks mirror the two failure conditions above.  Skipped when the
+    # baseline was written before issue #2336 added error tracking (signalled by
+    # errored_test_ids=None) so old baselines behave exactly as before.
+    if baseline.errored_test_ids is not None:
+        errored_ids_now = sorted(set(erroring_test_ids_now or []))
+        baseline_errored_ids = set(baseline.errored_test_ids)
+        new_erroring = (
+            sorted(set(errored_ids_now) - baseline_errored_ids)
+            if baseline_errored_ids
+            else []
+        )
+
+        if errored_now > (baseline.errored or 0):
+            return MergeCheck(
+                allowed=False,
+                reason=f"error count rose from {baseline.errored} to {errored_now}",
+                new_erroring_tests=new_erroring or errored_ids_now,
+                errored_now=errored_now,
+                errored_baseline=baseline.errored or 0,
+                failed_now=failed_now,
+                failed_baseline=baseline.failed,
+            )
+
+        if new_erroring:
+            return MergeCheck(
+                allowed=False,
+                reason=(
+                    f"{len(new_erroring)} test(s) erroring that were not erroring in the "
+                    f"baseline (count unchanged at {errored_now} — a pre-existing error "
+                    f"was fixed while a new one appeared)"
+                ),
+                new_erroring_tests=new_erroring,
+                errored_now=errored_now,
+                errored_baseline=baseline.errored or 0,
+                failed_now=failed_now,
+                failed_baseline=baseline.failed,
+            )
+
     return MergeCheck(
         allowed=True,
         reason="no new failures",
         failed_now=failed_now,
         failed_baseline=baseline.failed,
+        errored_now=errored_now,
+        errored_baseline=baseline.errored or 0,
     )

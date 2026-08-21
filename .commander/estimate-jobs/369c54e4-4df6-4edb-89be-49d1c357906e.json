@@ -1,0 +1,1 @@
+{"job_id": "369c54e4-4df6-4edb-89be-49d1c357906e", "type": "issue_estimate", "issue_id": 42, "repo": "test/repo", "status": "failed", "result": null, "created_at": "2026-08-21T09:21:05.418536+00:00", "error": "Could not fetch issue #42: Command '['gh', 'api', 'repos/test/repo/issues/42']' returned non-zero exit status 1."}

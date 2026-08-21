@@ -152,18 +152,23 @@ class Baseline:
         return self.passed + self.failed
 
     def to_dict(self) -> dict:
-        return {
+        d: dict = {
             "project": self.project,
             "fail": self.failed,
             "pass": self.passed,
             "skip": self.skipped,
             "errored": self.errored,
             "failed_test_ids": list(self.failed_test_ids),
-            "errored_test_ids": list(self.errored_test_ids or []),
             "recorded_at": self.recorded_at,
             "recorded_from_ref": self.recorded_from_ref,
             "pytest_args": self.pytest_args,
         }
+        # Only write errored_test_ids when explicitly recorded.  Absent means
+        # "old baseline" and keeps the None sentinel intact after a round-trip,
+        # so check_against_baseline skips the error check for pre-#2336 baselines.
+        if self.errored_test_ids is not None:
+            d["errored_test_ids"] = list(self.errored_test_ids)
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> "Baseline":

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -80,8 +81,15 @@ def main() -> None:
     p.add_argument("--ref", default="develop", help="git ref to measure (default: develop)")
     p.add_argument(
         "--pytest-args",
-        default=os.environ.get("COMMANDER_BASELINE_PYTEST_ARGS", "tests/ -q"),
-        help="arguments passed to pytest (default: 'tests/ -q')",
+        default=os.environ.get("COMMANDER_BASELINE_PYTEST_ARGS", 'tests/ -q -m "not live_http"'),
+        help=(
+            "arguments passed to pytest "
+            "(default: 'tests/ -q -m \"not live_http\"'). "
+            "The live_http marker is applied by conftest.py to all files in "
+            "tests/.live-http-allowlist. Excluding them makes baseline counts "
+            "deterministic across consecutive runs of the same ref (issue #2339). "
+            "Both this script and finish_feature.py must use the same scope."
+        ),
     )
     p.add_argument("--timeout", type=int, default=900, help="seconds before giving up")
     p.add_argument("--repo-root", default=None, help="repo to run the suite in (default: cwd)")
@@ -108,7 +116,7 @@ def main() -> None:
 
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", "pytest", *args.pytest_args.split()],
+            [sys.executable, "-m", "pytest", *shlex.split(args.pytest_args)],
             cwd=run_root, capture_output=True, text=True, timeout=args.timeout,
         )
     except subprocess.TimeoutExpired:

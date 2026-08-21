@@ -46,6 +46,12 @@ _LIVE_SERVER_TEST_MODULES = frozenset({
     "test_bulk_move_new_sprint_clear_selection__1760",  # no self-skip: BASE_URL fallback "http://localhost:" passes startswith("http"), so tests fail with httpx.ConnectError without this guard
     "test_create_ticket_json__2070",
     "test_dev_report_api__1960",
+    # Fixed in #2339: these files previously called _uat_available()/_server_reachable() at
+    # module scope in pytestmark; the calls are now inside autouse fixtures (no collection-time
+    # I/O), but we also guard here so a server that drops mid-suite doesn't flip these from
+    # skip to fail when the socket check at collection time happened to succeed.
+    "test_modal_height_cap__1766",
+    "test_logging_rotation_guard__818",
 })
 
 # Unconditional pytest.skip() meta-tests — dead noise that never asserts anything.
@@ -57,11 +63,36 @@ _PERMANENTLY_DESELECTED_NODEIDS = frozenset({
 })
 
 
+def _load_live_http_allowlist() -> frozenset:
+    """Return the set of basenames in tests/.live-http-allowlist (issue #2339).
+
+    Used to tag allowlisted files with the `live_http` marker so the merge gate
+    can exclude them with `-m 'not live_http'`, making baseline counts deterministic
+    across consecutive runs of the same ref (no live-HTTP flakiness).
+    """
+    allowlist_path = _REPO_ROOT / "tests" / ".live-http-allowlist"
+    if not allowlist_path.exists():
+        return frozenset()
+    names: set[str] = set()
+    for line in allowlist_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            names.add(Path(stripped).stem)  # stem = filename without .py
+    return frozenset(names)
+
+
+_LIVE_HTTP_ALLOWLIST_STEMS = _load_live_http_allowlist()
+
+
 def pytest_collection_modifyitems(config, items):
     """Skip UAT live-server tests when the server is not reachable.
 
     Also permanently deselects known unconditional-skip meta-tests that are dead
     noise in the suite (issue #1925).
+
+    Tags all files in tests/.live-http-allowlist with the `live_http` marker
+    (issue #2339) so the baseline recorder and merge gate can exclude them with
+    `-m 'not live_http'`, making suite counts deterministic across runs.
 
     Prevents the sprint manager's pytest gate from failing due to a missing
     server rather than a code defect.  The tester agent sets UAT_BASE_URL
@@ -76,17 +107,23 @@ def pytest_collection_modifyitems(config, items):
         deselected_set = set(_PERMANENTLY_DESELECTED_NODEIDS)
         items[:] = [item for item in items if item.nodeid not in deselected_set]
 
-    # Skip live-server tests when UAT is unreachable
-    live_items = [
-        item for item in items
-        if any(m in str(item.fspath) for m in _LIVE_SERVER_TEST_MODULES)
-    ]
-    if not live_items:
-        return
-    if _uat_server_reachable():
-        return
-    skip = _pytest.mark.skip(
+    live_http_mark = _pytest.mark.live_http
+    server_skip = _pytest.mark.skip(
         reason="UAT server not reachable — set UAT_BASE_URL/UAT_PORT to run live-server tests"
     )
-    for item in live_items:
-        item.add_marker(skip)
+    server_reachable = None  # lazily evaluated below
+
+    for item in items:
+        stem = Path(str(item.fspath)).stem
+        in_allowlist = stem in _LIVE_HTTP_ALLOWLIST_STEMS
+
+        # Tag every allowlisted file with `live_http` so `-m 'not live_http'` deselects them.
+        if in_allowlist:
+            item.add_marker(live_http_mark)
+
+        # Skip live-server tests from specific modules when UAT is unreachable.
+        if stem in _LIVE_SERVER_TEST_MODULES:
+            if server_reachable is None:
+                server_reachable = _uat_server_reachable()
+            if not server_reachable:
+                item.add_marker(server_skip)

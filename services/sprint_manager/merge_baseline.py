@@ -12,11 +12,9 @@ worktree, `tests/ -q`), and zealchaiwut/viral-radar develop measured 75 failed /
 This file used to cite a "~25-failure baseline" from a "scoped health gate".
 Both were wrong: `suite_health_gate.py` runs the full suite, and the ~25 figure
 survived only because collection aborted and reported `0 passed / 0 failed`, so
-nothing contradicted it (#2331). Commander's suite is also not stable run to run
-— two worktree runs of near-identical trees measured 2442 and 2457, largely from
-live-HTTP tests timing out under load (#2339). Re-measure rather than trusting
-any figure written here. A must-be-green rule would block every merge
-on such a repo forever; a delta rule is enforceable today.
+nothing contradicted it (#2331). Re-measure rather than trusting any figure
+written here. A must-be-green rule would block every merge on such a repo
+forever; a delta rule is enforceable today.
 
 The check refuses a merge when either:
 
@@ -30,6 +28,23 @@ unchanged and would sail through.
 Baselines are explicit and recorded per project. They are never inferred at merge
 time from the branch being merged, which would let a branch establish its own
 baseline and pass trivially.
+
+## Live-HTTP tests and determinism (issue #2339)
+
+106 test files in tests/.live-http-allowlist make live HTTP calls to a running
+UAT server. Two worktree runs of near-identical trees measured 2442 and 2457
+failures — a difference of ~15 attributable to live-HTTP tests timing out under
+suite load, not code regressions. A merge gate driven by flaky live-HTTP counts
+is not objective.
+
+Decision: the default COMMANDER_BASELINE_PYTEST_ARGS in both record_test_baseline.py
+and finish_feature.py is now `tests/ -q -m "not live_http"`. The root conftest.py
+applies the `live_http` marker to every file in tests/.live-http-allowlist, so
+`-m "not live_http"` deselects all 106 files on both sides of the comparison.
+
+Tolerance with live_http excluded: two consecutive runs of the same ref on the
+same machine should agree to within ±5 failures. Any wider spread indicates a
+non-HTTP flake in the remaining suite that should be investigated separately.
 """
 from __future__ import annotations
 

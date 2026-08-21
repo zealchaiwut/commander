@@ -21,6 +21,7 @@ Run from the git root of the repository (NOT from dashboard/).
 """
 import argparse
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -147,7 +148,11 @@ def _run_suite_on_branch(branch: str, timeout_seconds: int) -> tuple[str, bool]:
     """
     import tempfile
 
-    pytest_args = os.environ.get("COMMANDER_BASELINE_PYTEST_ARGS", "tests/ -q").split()
+    # Default excludes live_http tests so baseline counts are stable across runs (#2339).
+    # Use shlex.split so quoted expressions like -m "not live_http" parse correctly.
+    pytest_args = shlex.split(
+        os.environ.get("COMMANDER_BASELINE_PYTEST_ARGS", 'tests/ -q -m "not live_http"')
+    )
     tmpdir = tempfile.mkdtemp(prefix="commander-baseline-")
     wt = str(Path(tmpdir) / "wt")
     try:
@@ -214,7 +219,8 @@ def _baseline_check_or_exit(issue_num: int, branch: str, target: str, repo, over
     # The two sides of the comparison must measure the same thing. A baseline
     # recorded over `tests/ -q` cannot be compared against a scoped branch run
     # (issue #2331); warn loudly rather than compare incomparable numbers.
-    branch_args = os.environ.get("COMMANDER_BASELINE_PYTEST_ARGS", "tests/ -q")
+    # Default excludes live_http tests so baseline and per-merge run are comparable (#2339).
+    branch_args = os.environ.get("COMMANDER_BASELINE_PYTEST_ARGS", 'tests/ -q -m "not live_http"')
     if baseline is not None and baseline.pytest_args and baseline.pytest_args != branch_args:
         sys.stderr.write(
             f"WARNING: baseline was recorded with pytest args {baseline.pytest_args!r} "

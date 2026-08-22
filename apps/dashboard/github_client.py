@@ -939,6 +939,45 @@ def list_open_uat_issues(repo_name: str | None = None, sprint: int | None = None
     return _json(*args)
 
 
+def list_open_uat_issues_by_sprint_label(sprint_label: str, repo_name: str | None = None) -> list[dict]:
+    """List open UAT issues for a sprint label, including child labels (sprint-N.1, .2, .3).
+
+    Signing off sprint-1022 includes tickets labeled sprint-1022.1, sprint-1022.2, etc.
+    """
+    r = _r(repo_name)
+    mirror = _mirror_issues(r)
+    if mirror is not None:
+        out = []
+        for iss in mirror:
+            if iss.get("state") != "open":
+                continue
+            names = {lbl.get("name") for lbl in iss.get("labels") or [] if isinstance(lbl, dict)}
+            if "UAT" not in names:
+                continue
+            if not (sprint_label in names or any(n.startswith(sprint_label + ".") for n in names)):
+                continue
+            out.append({
+                "number": iss["number"],
+                "title": iss.get("title", ""),
+                "url": iss.get("url", ""),
+            })
+        return out
+    args = [
+        "issue", "list", "--repo", r,
+        "--label", "UAT",
+        "--state", "open",
+        "--json", "number,title,url,labels",
+        "--limit", "200",
+    ]
+    all_issues = _json(*args)
+    out = []
+    for iss in all_issues:
+        names = {lbl.get("name") for lbl in iss.get("labels") or [] if isinstance(lbl, dict)}
+        if sprint_label in names or any(n.startswith(sprint_label + ".") for n in names):
+            out.append({"number": iss["number"], "title": iss.get("title", ""), "url": iss.get("url", "")})
+    return out
+
+
 # ── write operations ──────────────────────────────────────────────────────────
 
 def _state_machine():

@@ -288,11 +288,23 @@ def get_running_sprint(project: str):
 
 
 @router.post("/api/projects/{owner}/{repo_name}/approve-batch")
-async def approve_batch(owner: str, repo_name: str):
+async def approve_batch(owner: str, repo_name: str, dry_run: bool = False):
+    """Close all open UAT issues in the repo.
+
+    Use dry_run=true to preview what would be closed without taking action.
+    Prefer the per-sprint endpoint (POST /api/sprints/{label}/uat-signoff) for
+    targeted sign-off — this endpoint has no sprint filter and closes everything.
+    """
     repo = f"{owner}/{repo_name}"
     srv = _server()
     try:
         issues = srv.github_client.list_open_uat_issues(repo_name=repo)
+        if dry_run:
+            return {
+                "dry_run": True,
+                "would_approve": [{"number": i["number"], "title": i.get("title", "")} for i in issues],
+                "count": len(issues),
+            }
         approved = []
         for issue in issues:
             srv.github_client.approve_issue(issue["number"], repo_name=repo)

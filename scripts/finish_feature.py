@@ -36,6 +36,12 @@ load_dotenv(_DASHBOARD_DIR / ".env")
 import github_client  # noqa: E402  (deferred: sys.path set above)
 from services.run_id import mint_run_id  # noqa: E402
 from services.logging import log as structured_log  # noqa: E402
+# Bound once, here, as a module object rather than re-resolved through
+# sys.modules on every call: tests patch attributes on the module they hold,
+# and a deferred `from ... import name` inside main() silently picks up a
+# *different* module object once anything purges services.* from sys.modules
+# (issue #2337).
+from services.sprint_manager import sprint_branch  # noqa: E402
 
 
 def _run(*cmd) -> str:
@@ -338,10 +344,9 @@ def main():
         or os.environ.get("COMMANDER_MERGE_TARGET", "").strip()
     )
     if not _explicit_target:
-        from services.sprint_manager.sprint_branch import (  # noqa: PLC0415
-            detect_sprint_branch_for_issue,
+        detected = sprint_branch.detect_sprint_branch_for_issue(
+            args.issue, repo_name=args.repo,
         )
-        detected = detect_sprint_branch_for_issue(args.issue, repo_name=args.repo)
         if detected:
             target = detected
 

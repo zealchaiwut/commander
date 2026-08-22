@@ -8,6 +8,39 @@ mocked/monkeypatched boundary. Tests exercise real code paths (ensure_sprint_bra
 detect_sprint_branch_for_issue, start_feature.main(), finish_feature.main(),
 dispatch_runner.execute_run, routers.sprints.dispatch_sprint) rather than
 asserting on source text.
+
+Test-order pollution (issue #2337)
+----------------------------------
+Three tests here used to pass in isolation and fail under `pytest tests/ -q`.
+The polluter is `tests/test_643__editable_env_paths.py::client_ctx`, whose
+fixture body does::
+
+    for mod in list(sys.modules.keys()):
+        if mod in ("server", "projects") or mod.startswith("services."):
+            sys.modules.pop(mod, None)
+
+That purge drops `services.sprint_manager.sprint_branch` and
+`services.sprint_manager.dispatch_runner`, which this module bound at collection
+time.  Any *later* `from services.sprint_manager... import ...` then builds a
+fresh module object, so a monkeypatch applied to the object this module holds is
+invisible to the code under test.
+
+How it was found (repeatable in ~2 minutes, not 12):
+
+1. Run `pytest <every test file that touches sys.modules> tests/test_sprint_branch_model__2329.py`
+   with `--continue-on-collection-errors` — that 127-file subset reproduces the
+   three failures.
+2. Load a throwaway plugin that snapshots `id()` of the canary modules in
+   `pytest_runtest_setup`/`teardown` and logs the first test after which one
+   changes.  It names the polluter directly; bisecting halves does not, because
+   more than one file has this purge shape.
+3. Confirm with the two-file minimum: `pytest tests/test_643__editable_env_paths.py
+   tests/test_sprint_branch_model__2329.py`.
+
+The fix is to hold module *objects* rather than re-resolve names through
+sys.modules: `scripts/start_feature.py` and `scripts/finish_feature.py` import
+`sprint_branch` at module scope, and the execute_run-driven tests below use the
+module `execute_run` itself was bound from.
 """
 from __future__ import annotations
 
@@ -28,6 +61,16 @@ from services.sprint_manager.dispatch_runner import (  # noqa: E402
     DispatchRun,
     execute_run,
 )
+
+# The exact module object `execute_run` above resolves its globals in.
+#
+# Re-importing by name inside a test (`import services.sprint_manager.dispatch_runner
+# as dr`) is NOT guaranteed to be that same object: tests/test_643__editable_env_paths.py's
+# `client_ctx` fixture purges every `services.*` key from sys.modules, so a later
+# `import` rebuilds a *fresh* module and any patch applied to it lands somewhere the
+# already-bound `execute_run` never reads.  Holding the module directly makes the
+# execute_run-driven tests below independent of sys.modules state (issue #2337).
+dispatch_runner = sys.modules[execute_run.__module__]
 
 
 def _load(name: str, relpath: str):
@@ -296,7 +339,7 @@ def _run_with_branch(tickets, branch="sprint/sprint-1029", repo="owner/repo"):
 
 
 def test_sprint_pr_opened_after_all_tickets_succeed(tmp_path, monkeypatch):
-    import services.sprint_manager.dispatch_runner as dr
+    dr = dispatch_runner  # the module execute_run reads (#2337)
 
     # This test covers the PR-opening path, not the gate — tmp_path has no
     # recorded baseline, and a missing baseline now refuses rather than skips.
@@ -333,7 +376,7 @@ def test_sprint_pr_opened_after_all_tickets_succeed(tmp_path, monkeypatch):
 
 
 def test_sprint_pr_not_opened_when_a_ticket_fails(tmp_path, monkeypatch):
-    import services.sprint_manager.dispatch_runner as dr
+    dr = dispatch_runner  # the module execute_run reads (#2337)
 
     def _boom(*a, **k):
         raise AssertionError("must not open a PR when the sprint run failed")
@@ -352,7 +395,7 @@ def test_sprint_pr_not_opened_when_a_ticket_fails(tmp_path, monkeypatch):
 
 
 def test_no_pr_opened_when_no_sprint_branch(tmp_path, monkeypatch):
-    import services.sprint_manager.dispatch_runner as dr
+    dr = dispatch_runner  # the module execute_run reads (#2337)
 
     def _boom(*a, **k):
         raise AssertionError("must not touch gh when there is no sprint branch")
@@ -373,7 +416,7 @@ def test_no_pr_opened_when_no_sprint_branch(tmp_path, monkeypatch):
 
 def test_sprint_pr_flow_never_issues_a_label_command(tmp_path, monkeypatch):
     """Per #2311: opening the sprint->develop PR must never mint a child label."""
-    import services.sprint_manager.dispatch_runner as dr
+    dr = dispatch_runner  # the module execute_run reads (#2337)
 
     gh_calls = []
 

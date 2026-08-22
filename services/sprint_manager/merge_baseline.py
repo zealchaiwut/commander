@@ -443,7 +443,11 @@ def check_against_baseline(
 
     return MergeCheck(
         allowed=True,
-        reason="no new failures",
+        reason=(
+            "no new failures or errors"
+            if baseline.errored_test_ids is not None
+            else "no new failures (this baseline predates error tracking)"
+        ),
         failed_now=failed_now,
         failed_baseline=baseline.failed,
         errored_now=errored_now,

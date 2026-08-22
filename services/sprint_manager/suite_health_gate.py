@@ -95,7 +95,50 @@ _SUMMARY_LINE = re.compile(
 )
 
 
-def _parse_pytest_output_ex(output: str) -> tuple[int, int, int, int]:
+class PytestCounts(tuple):
+    """``(passed, failed, skipped)`` that also carries ``errors``.
+
+    #2336 needed the parser to report pytest's fourth category. Returning a
+    plain 4-tuple would have silently changed the meaning of every existing
+    ``passed, failed, skipped = _parse_pytest_output(...)`` unpack, and the
+    obvious alternative — a second ``_parse_pytest_output_ex`` alongside the
+    original — leaves a blind variant in the tree that a future caller can pick
+    by accident. That is precisely how this gate went blind three times already
+    (#2331, and this ticket). So there is one parser, it always measures all
+    four categories, and the error count rides along as an attribute:
+
+        passed, failed, skipped = _parse_pytest_output(out)   # unchanged
+        counts = _parse_pytest_output(out); counts.errors     # new
+
+    Iteration, indexing and equality stay three-wide on purpose, so
+    ``_parse_pytest_output(out) == (2, 1, 0)`` still means what it always did.
+    """
+
+    def __new__(cls, passed: int, failed: int, skipped: int, errors: int = 0):
+        self = super().__new__(cls, (passed, failed, skipped))
+        self.errors = errors
+        return self
+
+    @property
+    def passed(self) -> int:
+        return self[0]
+
+    @property
+    def failed(self) -> int:
+        return self[1]
+
+    @property
+    def skipped(self) -> int:
+        return self[2]
+
+    def __repr__(self) -> str:  # errors would otherwise be invisible in a log
+        return (
+            f"PytestCounts(passed={self[0]}, failed={self[1]}, "
+            f"skipped={self[2]}, errors={self.errors})"
+        )
+
+
+def _parse_pytest_output(output: str) -> PytestCounts:
     """Parse pytest stdout for passed/failed/skipped/error counts.
 
     Reads the *last* summary line rather than the first count anywhere in the
@@ -106,8 +149,14 @@ def _parse_pytest_output_ex(output: str) -> tuple[int, int, int, int]:
     run that was actually `7257 passed / 2377 failed`, which would have made the
     baseline-delta check refuse every merge (issue #2331).
 
-    The `errors` count covers both per-test fixture errors and collection errors,
-    both of which appear in the same summary line as `N errors` (issue #2336).
+    `errors` covers both per-test fixture errors and collection errors; pytest
+    reports them as a category of their own (`469 errors`) on the same summary
+    line, never folded into `failed`. It is read from that identified line for
+    the same reason the other three are — a whole-output scan would pick up a
+    nested run's counts (issue #2336).
+
+    Returns a `PytestCounts`, which unpacks as the historical
+    `(passed, failed, skipped)` triple and exposes `.errors`.
     """
     passed = failed = skipped = errors = 0
 
@@ -132,21 +181,12 @@ def _parse_pytest_output_ex(output: str) -> tuple[int, int, int, int]:
         else:
             skipped = int(m.group(1))
 
+    # `error` and `errors` both occur — pytest singularises at 1.
     m = re.search(r"(\d+)\s+errors?\b", haystack)
     if m:
         errors = int(m.group(1))
 
-    return passed, failed, skipped, errors
-
-
-def _parse_pytest_output(output: str) -> tuple[int, int, int]:
-    """Parse pytest stdout for passed/failed/skipped counts.
-
-    Backward-compatible wrapper around _parse_pytest_output_ex. Use
-    _parse_pytest_output_ex when the error count is also needed (issue #2336).
-    """
-    passed, failed, skipped, _ = _parse_pytest_output_ex(output)
-    return passed, failed, skipped
+    return PytestCounts(passed, failed, skipped, errors)
 
 
 def _append_to_log(sprint_label: str, result: SuiteHealthResult) -> None:

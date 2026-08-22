@@ -48,7 +48,7 @@ from services.sprint_manager.merge_baseline import (  # noqa: E402
     parse_failed_test_ids,
     save_baseline,
 )
-from services.sprint_manager.suite_health_gate import _parse_pytest_output_ex  # noqa: E402
+from services.sprint_manager.suite_health_gate import _parse_pytest_output  # noqa: E402
 
 
 def _git_describe_ref(root: Path) -> str:
@@ -129,7 +129,10 @@ def main() -> None:
         sys.exit(1)
 
     output = (proc.stdout or "") + (proc.stderr or "")
-    passed, failed, skipped, errors = _parse_pytest_output_ex(output)
+    counts = _parse_pytest_output(output)
+    passed, failed, skipped, errors = (
+        counts.passed, counts.failed, counts.skipped, counts.errors
+    )
     failed_ids = parse_failed_test_ids(output)
     error_ids = parse_errored_test_ids(output)
 

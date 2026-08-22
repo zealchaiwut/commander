@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 import threading
@@ -430,7 +431,7 @@ def _gate_sprint_pr(
         parse_errored_test_ids,
         parse_failed_test_ids,
     )
-    from services.sprint_manager.suite_health_gate import _parse_pytest_output_ex
+    from services.sprint_manager.suite_health_gate import _parse_pytest_output
 
     if os.environ.get("COMMANDER_BASELINE_CHECK", "1") == "0":
         return True, "Baseline-delta check disabled (COMMANDER_BASELINE_CHECK=0)"
@@ -452,7 +453,11 @@ def _gate_sprint_pr(
             f"scripts/record_test_baseline.py before the sprint PR can open"
         )
 
-    pytest_args = (baseline.pytest_args or "tests/ -q").split()
+    # shlex, not str.split: since #2339 a recorded baseline carries
+    # `tests/ -q -m "not live_http"`, and str.split would hand pytest the
+    # three fragments `-m`, `"not`, `live_http"` — a broken -m expression that
+    # aborts the run, which this gate would then report as a refusal.
+    pytest_args = shlex.split(baseline.pytest_args or 'tests/ -q -m "not live_http"')
     # Same default as finish_feature.py. The suite measures 741.96s on this
     # repo, so 900 sat close enough to the edge that a slow run would time out
     # and read as a refusal.
@@ -478,10 +483,13 @@ def _gate_sprint_pr(
     # the FIRST match anywhere in the blob, and commander's suite runs pytest as
     # a subprocess in places, so their captured output carries counts of their
     # own. That exact inline form reported passed=5 failed=999 for a run that was
-    # 7279/2377 (issue #2331); _parse_pytest_output_ex reads the last real summary
+    # 7279/2377 (issue #2331); _parse_pytest_output reads the last real summary
     # line instead. The command run here is `pytest tests/ -q` — precisely the
     # invocation that misparsed.
-    passed_now, failed_now, _skipped_now, errored_now = _parse_pytest_output_ex(output)
+    _counts = _parse_pytest_output(output)
+    passed_now, failed_now, errored_now = (
+        _counts.passed, _counts.failed, _counts.errors
+    )
 
     check = check_against_baseline(
         failed_now=failed_now,

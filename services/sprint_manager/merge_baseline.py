@@ -16,14 +16,23 @@ nothing contradicted it (#2331). Re-measure rather than trusting any figure
 written here. A must-be-green rule would block every merge on such a repo
 forever; a delta rule is enforceable today.
 
-The check refuses a merge when either:
+The check refuses a merge when any of these holds:
 
-  * the failure count rises above the baseline, or
-  * a test fails that was not failing in the baseline.
+  * the failure count rises above the baseline,
+  * a test fails that was not failing in the baseline,
+  * the error count rises above the baseline, or
+  * a test errors that was not erroring in the baseline.
 
-The second condition matters because a count comparison alone is blind to a swap
-— one pre-existing failure getting fixed while a new one appears leaves the count
-unchanged and would sail through.
+The second and fourth conditions matter because a count comparison alone is blind
+to a swap — one pre-existing failure getting fixed while a new one appears leaves
+the count unchanged and would sail through.
+
+The error conditions are the third and fourth because pytest reports errors as a
+category of its own, never folded into `failed` (issue #2336). Commander's develop
+carried 469 of them entirely outside this gate: a branch that broke a fixture and
+turned 100 passing tests into `ERROR` left `failed` untouched, so neither failure
+condition fired and the merge was allowed. Errors are now compared the same way
+failures are.
 
 Baselines are explicit and recorded per project. They are never inferred at merge
 time from the branch being merged, which would let a branch establish its own
@@ -61,10 +70,15 @@ BASELINE_DIRNAME = "baselines"
 #   FAILED tests/test_foo.py::test_bar - AssertionError: ...
 _FAILED_LINE = re.compile(r"^FAILED\s+(\S+?)(?:\s+-\s+.*)?$", re.MULTILINE)
 
-# `pytest -q` error summary lines, e.g.
+# `pytest -q` short-summary error lines, e.g.
 #   ERROR tests/test_foo.py::test_bar - fixture 'x' not found
 #   ERROR tests/test_foo.py  (collection error — whole module)
-_ERROR_LINE = re.compile(r"^ERROR\s+(\S+?)(?:\s+-\s+.*)?$", re.MULTILINE)
+# `ERROR collecting <path>` is pytest's *progress* line for the same event and
+# names no test id, so it is excluded rather than recorded as a test called
+# "collecting".
+_ERROR_LINE = re.compile(
+    r"^ERROR\s+(?!collecting\b)(\S+?)(?:\s+-\s+.*)?$", re.MULTILINE
+)
 
 # Paths that cannot change test outcomes, so a diff touching only these skips the
 # check. Deliberately conservative: anything not listed here is treated as code.
@@ -210,10 +224,16 @@ class MergeCheck:
         if self.skipped_check:
             return f"Baseline-delta check skipped: {self.reason}"
         if self.allowed:
-            return (
+            msg = (
                 f"Baseline-delta check passed: {self.failed_now} failing vs "
                 f"baseline {self.failed_baseline}."
             )
+            if self.errored_now or self.errored_baseline:
+                msg += (
+                    f" {self.errored_now} erroring vs baseline "
+                    f"{self.errored_baseline}."
+                )
+            return msg
         lines = [
             f"Baseline-delta check REFUSED this merge: {self.reason}",
             f"Failing now: {self.failed_now}. Baseline: {self.failed_baseline}.",
@@ -364,6 +384,8 @@ def check_against_baseline(
             new_failing_tests=new_failures or ids_now,
             failed_now=failed_now,
             failed_baseline=baseline.failed,
+            errored_now=errored_now,
+            errored_baseline=baseline.errored or 0,
         )
 
     if new_failures:
@@ -377,6 +399,8 @@ def check_against_baseline(
             new_failing_tests=new_failures,
             failed_now=failed_now,
             failed_baseline=baseline.failed,
+            errored_now=errored_now,
+            errored_baseline=baseline.errored or 0,
         )
 
     # Error checks mirror the two failure conditions above.  Skipped when the

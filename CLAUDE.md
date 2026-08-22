@@ -375,6 +375,7 @@ Two traps that cost real time:
 - `scripts/resync_issues_mirror.py` — force full GitHub → SQLite issues-mirror resync (manual repair when mirror is stale)
 - `scripts/record_test_baseline.py` — record the test baseline the merge check compares against; `--repo owner/repo [--ref develop] [--pytest-args ...] [--dry-run]`
 - `scripts/retry_ticket.py` — reset a failed ticket (needs-rework → backlog), clear failure sidecar, print `/coder` + `/tester` invocations; `--issue N [--repo owner/repo] [--dry-run]`
+- `scripts/provision_global_hooks.py` — register Commander telemetry hooks in `~/.claude/settings.json` so the Running view receives events from any repo's worktree (not just commander's own). Run once per machine after cloning. `[--commander-dir <path>] [--dry-run]`
 
 ## Issue Estimator
 

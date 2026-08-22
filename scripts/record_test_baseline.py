@@ -7,7 +7,11 @@ Usage:
     python3 scripts/record_test_baseline.py --repo owner/repo --dry-run
 
 Runs the suite on `--ref` (default: develop) and writes the resulting failure
-count and failing-test ids to `.commander/baselines/<owner>-<repo>.json`.
+and error counts, plus the failing- and erroring-test ids, to
+`.commander/baselines/<owner>-<repo>.json`. pytest reports errors as a category
+of their own — a broken fixture turns tests into `ERROR`, not `FAILED` — so a
+baseline that records only failures leaves that whole class of breakage outside
+the merge gate (issue #2336).
 
 Baselines are deliberately explicit. `finish_feature.py` never infers one from
 the branch being merged — a branch that set its own baseline would always pass.
@@ -169,6 +173,14 @@ def main() -> None:
             "WARNING: the summary reports failures but no FAILED lines were parsed. "
             "The baseline will fall back to count-only comparison, which cannot "
             "detect a fixed-one/broke-one swap.",
+            file=sys.stderr,
+        )
+
+    if errors and not error_ids:
+        print(
+            "WARNING: the summary reports errors but no ERROR lines were parsed. "
+            "The baseline will fall back to count-only comparison for errors, "
+            "which cannot detect a fixed-one/broke-one swap.",
             file=sys.stderr,
         )
 

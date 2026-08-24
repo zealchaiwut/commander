@@ -32,8 +32,7 @@ os.environ.setdefault("DB_PATH", "/tmp/commander-test-1772.db")
 def client():
     from fastapi.testclient import TestClient
     import server as srv
-    with TestClient(srv.app, raise_server_exceptions=False) as c:
-        yield c
+    yield TestClient(srv.app, raise_server_exceptions=False)
 
 
 # ---------------------------------------------------------------------------

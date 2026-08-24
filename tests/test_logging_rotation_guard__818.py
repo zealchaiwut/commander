@@ -33,7 +33,12 @@ def _server_reachable() -> bool:
 
 
 _SKIP_REASON = "UAT server not reachable — set UAT_BASE_URL or UAT_PORT"
-pytestmark = pytest.mark.skipif(not _server_reachable(), reason=_SKIP_REASON)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _require_uat():
+    if not _server_reachable():
+        pytest.skip(_SKIP_REASON)
 
 
 @pytest.fixture

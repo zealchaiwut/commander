@@ -22,6 +22,12 @@ load_dotenv(_DASHBOARD_DIR / ".env")
 import github_client
 from services.run_id import mint_run_id
 from services.logging import log as structured_log
+# Bound once, here, as a module object rather than re-resolved through
+# sys.modules on every call: tests patch attributes on the module they hold,
+# and a deferred `from ... import name` inside main() silently picks up a
+# *different* module object once anything purges services.* from sys.modules
+# (issue #2337).
+from services.sprint_manager import sprint_branch
 
 
 def _run(*cmd) -> str:
@@ -83,6 +89,16 @@ def main():
     branch = f"feature/{args.issue}-{slug}"
     short  = args.issue
     base   = args.base_branch
+
+    # When the caller did not override --base-branch, auto-detect the sprint
+    # branch for this issue.  Falls back to develop when no sprint branch
+    # exists so projects without the sprint-branch model keep working (#2329).
+    if base == "develop":
+        detected = sprint_branch.detect_sprint_branch_for_issue(
+            args.issue, repo_name=args.repo,
+        )
+        if detected:
+            base = detected
 
     sys.stdout.write(str(f"Issue #{short}: {title}") + "\n")
     sys.stdout.write(str(f"Branch:         {branch}") + "\n")

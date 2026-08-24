@@ -151,22 +151,22 @@ class TestSingleTicketEstimationRunsOnce:
             # Intercept background_tasks.add_task by monkey-patching at test level
             # We check the endpoint schedules the estimator exactly once by tracking
             # how many times create_issue is called and verifying a single estimation trigger.
-            with TestClient(app, raise_server_exceptions=False) as client:
-                # Patch add_task on the BackgroundTasks instance during the request
-                from fastapi import BackgroundTasks
-                original_add_task_method = BackgroundTasks.add_task
-                estimator_task_count = []
+            client = TestClient(app, raise_server_exceptions=False)
+            # Patch add_task on the BackgroundTasks instance during the request
+            from fastapi import BackgroundTasks
+            original_add_task_method = BackgroundTasks.add_task
+            estimator_task_count = []
 
-                def mock_add_task(self, func, *args, **kwargs):
-                    if callable(func) and getattr(func, "__name__", "") == "_run_estimator_for_issue":
-                        estimator_task_count.append(1)
-                    return original_add_task_method(self, func, *args, **kwargs)
+            def mock_add_task(self, func, *args, **kwargs):
+                if callable(func) and getattr(func, "__name__", "") == "_run_estimator_for_issue":
+                    estimator_task_count.append(1)
+                return original_add_task_method(self, func, *args, **kwargs)
 
-                with patch.object(BackgroundTasks, "add_task", mock_add_task):
-                    resp = client.post(
-                        "/api/tickets/create",
-                        data={"title": "Test ticket", "body": "Body", "project": "test/repo"},
-                    )
+            with patch.object(BackgroundTasks, "add_task", mock_add_task):
+                resp = client.post(
+                    "/api/tickets/create",
+                    data={"title": "Test ticket", "body": "Body", "project": "test/repo"},
+                )
 
         assert resp.status_code == 201, f"Expected 201, got {resp.status_code}: {resp.text}"
         assert len(estimator_task_count) == 1, (
@@ -245,8 +245,8 @@ class TestNoEstimationOnRefresh:
 
         with patch("server.github_client.list_all_open_issues", return_value=[]) as mock_issues, \
              patch("server._ei_run_estimator") as mock_run:
-            with TestClient(app, raise_server_exceptions=False) as client:
-                client.get("/api/issues")
+            client = TestClient(app, raise_server_exceptions=False)
+            client.get("/api/issues")
 
         mock_run.assert_not_called()
 
@@ -257,8 +257,8 @@ class TestNoEstimationOnRefresh:
 
         with patch("server._ei_run_estimator") as mock_run, \
              patch("server.github_client.list_open_issues_with_body", return_value=[]):
-            with TestClient(app, raise_server_exceptions=False) as client:
-                client.get("/api/sprint-management/issues?project=test/repo")
+            client = TestClient(app, raise_server_exceptions=False)
+            client.get("/api/sprint-management/issues?project=test/repo")
 
         mock_run.assert_not_called()
 
@@ -340,11 +340,11 @@ class TestExistingEstimatesPreserved:
             )
             mock_cmd_dir.return_value = mock_dir
 
-            with TestClient(app, raise_server_exceptions=False) as client:
-                resp = client.post(
-                    "/api/issues/42/estimate?repo=test/repo",
-                    headers={"Content-Type": "application/json"},
-                )
+            client = TestClient(app, raise_server_exceptions=False)
+            resp = client.post(
+                "/api/issues/42/estimate?repo=test/repo",
+                headers={"Content-Type": "application/json"},
+            )
 
         assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
         assert len(label_apply_calls) == 1, (

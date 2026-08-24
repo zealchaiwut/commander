@@ -16,14 +16,14 @@ def _uat_available() -> bool:
     try:
         httpx.get(BASE_URL + "/", timeout=2.0)
         return True
-    except httpx.ConnectError:
+    except Exception:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not _uat_available(),
-    reason=f"UAT server not available at {BASE_URL}",
-)
+@pytest.fixture(scope="module", autouse=True)
+def _require_uat():
+    if not _uat_available():
+        pytest.skip(f"UAT server not available at {BASE_URL}")
 
 
 @pytest.fixture

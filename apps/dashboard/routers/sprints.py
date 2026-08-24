@@ -78,6 +78,160 @@ def save_sprint_order(project: str, body: SprintOrderBody):
     return result
 
 
+class SprintRerunBody(BaseModel):
+    """Body for POST /api/sprints/{label}/rerun (issue #2318)."""
+
+    repo: str | None = None
+    dry_run: bool = False
+
+
+@router.post("/api/sprints/{sprint_label}/rerun")
+def rerun_sprint(sprint_label: str, body: SprintRerunBody | None = None):
+    """Reset every failed ticket in a sprint back to a dispatchable state.
+
+    Restored per the operator decision on #2314. This is **not** the rerun that
+    was deleted in #2250: it keeps the sprint's own label, imposes no ordering,
+    and never writes sprint lifecycle state (see #2311 for why each of those
+    matters). It also does not dispatch — resetting and running are separate
+    calls so a reset can be inspected before anything executes.
+    """
+    import github_client
+    from services.sprint_manager.ticket_retry import reset_sprint
+
+    payload = body or SprintRerunBody()
+    repo_root = _commander_repo_root()
+
+    try:
+        result = reset_sprint(
+            sprint_label,
+            github_client=github_client,
+            repo=payload.repo,
+            repo_root=repo_root,
+            dry_run=payload.dry_run,
+        )
+    except Exception as exc:  # surfaced to the caller rather than a bare 500
+        raise HTTPException(status_code=502, detail=f"rerun failed: {exc}") from exc
+
+    if not payload.dry_run and result.reset:
+        invalidate_board(payload.repo or "")
+
+    return result.to_dict()
+
+
+class SprintDispatchBody(BaseModel):
+    """Body for POST /api/sprints/{label}/dispatch (issue #2315).
+
+    ``tickets`` is executed in the order given. The runner never sorts or
+    reorders it — ticket sequencing belongs to the operator (#2311).
+    """
+
+    tickets: list[int]
+    repo: str | None = None
+    cwd: str | None = None
+    baseline_note: str | None = None
+
+
+def _commander_repo_root():
+    from pathlib import Path
+
+    return Path(config.__file__).resolve().parent.parent.parent
+
+
+@router.post("/api/sprints/{sprint_label}/dispatch")
+def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
+    """Start a dispatch run for a sprint and return its handle (issue #2315).
+
+    The privileged agent spawn happens inside this service, which is the point
+    of the #2314 decision: the caller makes an ordinary API call rather than
+    elevating anything itself.
+
+    Returns immediately; poll ``GET /api/sprints/dispatch/{run_id}`` for status.
+    """
+    from pathlib import Path
+
+    from services.sprint_manager.dispatch_runner import (
+        DispatchConfigError,
+        load_project_config,
+        start_run,
+    )
+
+    if not body.tickets:
+        raise HTTPException(status_code=400, detail="tickets must not be empty")
+
+    repo_root = _commander_repo_root()
+    cwd = Path(body.cwd) if body.cwd else repo_root
+    if not cwd.exists():
+        raise HTTPException(status_code=400, detail=f"cwd does not exist: {cwd}")
+
+    # Prompt templates, per-step worktrees and the model come from the target
+    # project's .commander/sprint.yaml (issue #2325). A missing or incomplete
+    # config is a 400 here rather than a run that starts and silently does
+    # nothing — which is what happened before this was read.
+    try:
+        config = load_project_config(cwd)
+    except DispatchConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    kwargs = {}
+    if body.baseline_note:
+        kwargs["baseline_note"] = body.baseline_note
+
+    repo = body.repo or config.repo_name or None
+
+    # Sprint-branch model: create sprint/sprint-N from develop before
+    # dispatching tickets so feature branches have a stable base (#2329).
+    sprint_branch = None
+    if repo:
+        try:
+            from services.sprint_manager.sprint_branch import ensure_sprint_branch  # noqa: PLC0415
+            sprint_branch = ensure_sprint_branch(sprint_label, repo, cwd=str(cwd))
+        except Exception as exc:
+            # Non-fatal: projects without the sprint-branch model keep working.
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "sprint branch creation failed for %s/%s: %s",
+                repo, sprint_label, exc,
+            )
+
+    run = start_run(
+        sprint_label,
+        body.tickets,
+        repo=repo,
+        repo_root=repo_root,
+        cwd=cwd,
+        config=config,
+        sprint_branch=sprint_branch,
+        **kwargs,
+    )
+    return run.to_dict()
+
+
+@router.get("/api/sprints/dispatch/{run_id}")
+def get_dispatch_run(run_id: str):
+    """Live status of a dispatch run: current ticket, step, and outcomes."""
+    from services.sprint_manager.dispatch_runner import load_run
+
+    data = load_run(run_id, _commander_repo_root())
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"unknown dispatch run: {run_id}")
+    return data
+
+
+@router.post("/api/sprints/dispatch/{run_id}/stop")
+def stop_dispatch_run(run_id: str):
+    """Ask a run to stop at the next step boundary.
+
+    Not mid-step: a coder step that has already pushed and labelled SIT is a
+    consistent state, and interrupting inside one could leave a ticket
+    half-labelled.
+    """
+    from services.sprint_manager.dispatch_runner import request_stop
+
+    if not request_stop(run_id, _commander_repo_root()):
+        raise HTTPException(status_code=404, detail=f"unknown dispatch run: {run_id}")
+    return {"run_id": run_id, "stop_requested": True}
+
+
 @router.post("/api/sprints/plan-next")
 def plan_next_sprint(body: PlanNextSprintBody):
     """Draft the next sprint from the active milestone's backlog (issue #861).

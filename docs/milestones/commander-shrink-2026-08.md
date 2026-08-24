@@ -19,6 +19,113 @@ Source: 7-agent audit, 2026-08-12
 | 3 | **Keep the Deploy tab** | `environments.py` + `deploy_actions/config_schema/render_actions/validation` retained as operator tooling. |
 | 4 | **Keep the Running view, re-feed it** | `agent_runs` is written only at `sprint_manager.py:741,796`, so the Running tab is *already blind* to manual sessions. Re-feed from the existing hooks (~200 LOC) instead of maintaining ~20k LOC of orchestration. |
 | 5 | **Cut B stands as audited** | Hand the knowledge/digest layer to lookout, gated on lookout actually gathering commander first. |
+| 6 | **Restore dispatch and rerun as endpoints** (2026-08-19, #2314) | Partially reverses decision 1 for *triggering only* — see the section below. |
+| 7 | **Restore sprint-branch model** (2026-08-20, #2329) | feature → sprint/sprint-N → develop replaces feature → develop. Sprint arrives as one reviewable PR. Child sprint labels stay banned. See the section below. |
+
+## Decision — dispatch triggering (2026-08-19, #2314)
+
+**Operator decision: option 1 — server-side dispatch and rerun endpoints.**
+
+`POST /api/sprints/{label}/dispatch` (#2315) and
+`POST /api/sprints/{label}/rerun` (#2318) in the dashboard. Dispatch runs the
+per-ticket coder → tester loop server-side; rerun resets failed tickets in a
+sprint back to a dispatchable state.
+
+### Scope of the reversal
+
+This **supersedes the #2311 reasoning** that "dispatch is a CLI activity now; a
+server endpoint is the wrong home for it" — **for triggering only.** Everything
+else from the shrink stands: the autonomous orchestrator, its gate pipeline, its
+fix-loop are **not** restored. What lands is a trigger and a queue consumer,
+not a scheduler with opinions. (The sprint-branch/PR shape is restored
+separately — see the 2026-08-20 entry below.)
+
+### Why the reversal
+
+The #2311 decision assumed an operator at the keyboard. Both Commander agent
+entry points require `--dangerously-skip-permissions`, and an assistant session
+is blocked from spawning a permission-elevated agent. Verified 2026-08-19:
+
+| Action | Result |
+|---|---|
+| `ssh` to the host | allowed |
+| `claude -p "..."` headless, default permissions | allowed |
+| `claude -p ... --dangerously-skip-permissions` | blocked by permission classifier |
+| `claude -p ... --permission-mode acceptEdits` | blocked by permission classifier |
+
+So "dispatch is a CLI activity" resolved in practice to "the operator personally
+runs every dispatch and every retry, for every ticket" — two invocations per
+ticket, ten for a five-ticket sprint. That cost was not priced into the original
+decision.
+
+`scripts/retry_ticket.py` is **not** replaced. It stays the CLI path, and the
+endpoint wraps the same functions so the two cannot drift.
+
+### Constraints carried forward verbatim from #2311
+
+- **Must not mint child sprint labels.** The old rerun created `sprint-N.1/.2/.3`,
+  fragmenting one logical sprint across four labels and breaking sign-off and PR
+  flows.
+- **Must not reorder tickets.** The old rerun reversed order and once queued a
+  delete-the-tests ticket ahead of the deletions it covered.
+- **Must not write sprint lifecycle state.** A cancelled sprint stuck at
+  `needs_rework` and same-label re-dispatch 409'd forever; reconcile would not
+  clear it.
+
+All three are asserted by tests in #2315 and #2318, on the AST rather than on
+source text.
+
+### On ticket failure
+
+Dispatch **stops**. It does not continue into dependent tickets, and it records
+which ticket failed. Recovery is a separate, explicit call — resetting and
+running are deliberately not merged, so a reset can be inspected before anything
+executes.
+
+### Sequencing
+
+#2316 (baseline-delta check) lands **before** #2315. Push-button dispatch that
+merges to develop with no objective check behind it is the combination worth
+avoiding: the gate pipeline is gone, and the tester agent merges on its own
+say-so.
+
+---
+
+## Decision — sprint-branch model (2026-08-20, #2329)
+
+**Operator decision: restore the sprint-branch model.**
+
+Reverses the "sprint-branch/PR shape is not restored" clause from the #2314
+decision.  The dependency problem was concrete: run `9fb3d8770bf2` on
+viral-radar sprint-7 had to stop after ticket #81 because ticket #82 depended
+on both #80 and #81, neither of which had merged to develop yet.  With a sprint
+branch, #82 branches from `sprint/sprint-7` where its dependencies already sat.
+
+### What is restored (2026-08-20)
+
+- `sprint/sprint-N` is created from develop when a sprint dispatch starts.
+- Feature branches are cut from `sprint/sprint-N` (auto-detected via issue labels).
+- Tester merges feature branches into `sprint/sprint-N`, not develop.
+- When all tickets succeed, the dispatch runner opens one PR from
+  `sprint/sprint-N` into develop.
+- The baseline-delta check (#2316) gates both merge types: sprint branch
+  for per-ticket merges, develop for the final sprint merge.
+
+### What is NOT restored
+
+- The autonomous orchestrator, its gate pipeline, its fix-loop.
+- **Child sprint labels** (`sprint-N.1/.2/.3`) — explicitly still banned.
+  A sprint *branch* is not a sprint *label*; this restores only the former.
+
+### Additive and detected, never assumed
+
+`scripts/start_feature.py` and `scripts/finish_feature.py` detect the sprint
+branch by reading the issue's labels at runtime.  When no sprint branch exists
+for an issue (projects that do not use the model), both scripts fall back to
+develop.  The sprint-branch model is therefore **opt-in per sprint**, enforced
+by whether the branch exists on the remote.
+
+---
 
 ## Invariants — must not break
 
@@ -299,6 +406,16 @@ Plus the lookout contract endpoints (see S4-7).
 > **25-failure baseline**. `npm test` is broken on Node v26; use
 > `node --test tests/frontend/*.test.mjs` (427 tests, **24-failure baseline**).
 > Do not interpret either baseline as a regression from this work.
+>
+> **Correction, 2026-08-20 (#2331, #2338).** Both pytest claims above were
+> wrong, and were wrong when written down here. The suite was not hanging — it
+> aborted at collection, because three modules imported `_enrich_home_artifact`
+> after the shrink removed it, so it reported `0 passed / 0 failed` and the
+> ~25-failure figure had nothing to contradict it. Repaired, develop measures
+> **2442 failed / 6999 passed / 363 skipped** in ~742s. There is also no
+> "scoped" gate: `suite_health_gate.py` runs the full suite. Left in place
+> above rather than edited, because what the milestone believed at the time is
+> the point of this note.
 
 ---
 

@@ -78,8 +78,7 @@ def test_ac2_bundle_excludes_sched_toggle():
 def client():
     from fastapi.testclient import TestClient
     from apps.dashboard.server import app
-    with TestClient(app, raise_server_exceptions=False) as c:
-        yield c
+    yield TestClient(app, raise_server_exceptions=False)
 
 
 def test_ac3_scheduler_config_get_returns_404(client):

@@ -11,7 +11,6 @@
 test_1065__logs_tab_accessible_filter_chips.py
 test_1066__analytics_redesign.py
 test_1424__xl_split_suggestions_uat.py
-test_1845__tester_verification.py
 test_1851__analytics_status_token_tables.py
 test_1856__analytics_tab_promotion.py
 test_1860_uat__http.py

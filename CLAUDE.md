@@ -239,9 +239,131 @@ both layouts.
 To migrate an existing flat project to nested:
 `scripts/migrate_project_layout.py <project-name>`
 
+## Dispatch — how sprints actually run
+
+The autonomous orchestrator was deleted in the 2026-08 shrink. Dispatch is a
+per-ticket `/coder` → `/tester` loop. Two ways to trigger it:
+
+**Via the API** (preferred, issues #2314/#2315):
+
+```
+POST /api/sprints/{label}/dispatch   {"tickets": [80, 81], "repo": "owner/repo"}
+GET  /api/sprints/dispatch/{run_id}          live status
+POST /api/sprints/dispatch/{run_id}/stop     stop at the next step boundary
+POST /api/sprints/{label}/rerun              reset failed tickets (#2318)
+```
+
+Tickets run **in the order given** — the runner never sorts or reorders. It
+stops on the first failed step rather than continuing into dependent tickets.
+Rerun does **not** dispatch; resetting and running are separate calls so a reset
+can be inspected first.
+
+**By hand**, one ticket at a time:
+
+```bash
+export CLAUDE_AGENT_ROLE=coder CLAUDE_AGENT_ISSUE=<N>
+claude -p "/coder <issue-url>" --dangerously-skip-permissions
+claude -p "/tester verify issue <N>" --dangerously-skip-permissions
+```
+
+### An assistant session cannot dispatch by hand
+
+Both agent entry points require `--dangerously-skip-permissions`, and a Claude
+Code session is blocked from spawning a permission-elevated agent. Measured
+2026-08-19:
+
+| Action | Result |
+|---|---|
+| `ssh` to the host | allowed |
+| `claude -p "..."` headless, default permissions | allowed |
+| `claude -p ... --dangerously-skip-permissions` | **blocked by permission classifier** |
+| `claude -p ... --permission-mode acceptEdits` | **blocked by permission classifier** |
+
+This is why the API path exists: the privileged spawn happens inside Commander,
+so triggering a run is an ordinary HTTP call. An assistant driving a sprint uses
+the endpoints; it cannot run the manual commands above.
+
+### Sprint-branch model (restored, #2329)
+
+Dispatch uses a sprint-branch model:
+
+```
+sprint/sprint-N          cut from develop when the sprint dispatch starts
+  └── feature/<N>-<slug> cut from the sprint branch (auto-detected via labels)
+        └── merged into sprint/sprint-N   by the tester, on pass
+sprint/sprint-N ──> develop  one PR opened when all tickets succeed
+```
+
+**scripts/start_feature.py** auto-detects `sprint/sprint-N` from the issue's
+sprint label and uses it as the base. Falls back to develop when no sprint
+branch exists.
+
+**scripts/finish_feature.py** auto-detects `sprint/sprint-N` from the issue's
+sprint label and merges into it instead of develop. `COMMANDER_MERGE_TARGET`
+overrides this when set.
+
+**Child sprint labels** (`sprint-N.1/.2/.3`) are still banned — #2311 prohibition
+stands. A sprint *branch* is not a sprint *label*.
+
+### There are no quality gates
+
+`gates.py` and `pipeline.py` were deleted with the orchestrator. The
+`coder-no-test-edits`, pytest, lint and merge-preview gates do **not** run, and
+neither does the 3-attempt fix loop.
+
+What stands in their place:
+
+1. **The baseline-delta check** (#2316) in `finish_feature.py` — runs the suite
+   on the feature branch and refuses the merge if the failure count rises, or if
+   a test fails that was not failing in the recorded baseline. Record a baseline
+   with `scripts/record_test_baseline.py --repo owner/repo` first; without one
+   the check refuses by design. `COMMANDER_BASELINE_CHECK=0` disables it,
+   `--override-baseline` bypasses one refusal and records the bypass on the issue.
+   The check runs against the **sprint branch** for per-ticket merges, and against
+   **develop** for the final sprint → develop PR.
+2. CI on the PR — `build`, `smoke`, `Check stale docs`.
+3. `scripts/check_no_live_http_in_tests.py`.
+
+Baselines are not green and are not meant to be. Commander's develop measured
+**2442 failed / 6999 passed / 363 skipped** on 2026-08-20, in a bare `git
+worktree` with `pytest tests/ -q`; viral-radar's develop measured 75 failed /
+954 passed on 2026-08-19. Only *new* breakage blocks a merge.
+
+Three corrections to what this file used to say, all found in #2331 and #2329:
+
+- The figure here was **~25 failures**. That was wrong by two orders of
+  magnitude. Three test modules imported a symbol removed in the shrink, so
+  `pytest tests/ -q` aborted at collection and reported `0 passed / 0 failed` —
+  the drift accumulated with nothing to contradict it.
+- `suite_health_gate.py` is **not** a scoped subset. It runs the same full
+  `pytest --tb=no -q tests/`.
+- The suite does not hang. It completes in **~742s** (12m21s). It used to abort
+  at collection, and separately stalled 60s per test in ten modules that entered
+  the `TestClient` lifespan.
+
+**Where you measure changes the number.** `record_test_baseline.py` runs in
+`cwd`; `finish_feature.py` runs in a bare worktree with no `node_modules/`,
+`.env` or `venv/`. Develop measures 2377 in the uat clone and 2442 in a
+worktree — ~65 failures that exist only in the comparison. Record baselines
+from a worktree so both sides measure the same thing.
+
+Re-measure with `scripts/record_test_baseline.py` rather than trusting any
+number written here; it drifts.
+
+## Running scripts on zeal-server
+
+Two traps that cost real time:
+
+- **System `python3` is 3.9.6.** `scripts/create_ticket.py` dies with
+  `TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'` on
+  `str | None`. Use the venv interpreter:
+  `~/dev/commander/prd/venv/bin/python scripts/create_ticket.py ...`
+- **`gh` is not on the non-interactive PATH.** Prefix `PATH=/usr/local/bin:$PATH`
+  or scripts die with `FileNotFoundError: 'gh'`.
+
 ## Useful Scripts
 
-- `scripts/create_ticket.py` — file a new issue with template
+- `scripts/create_ticket.py` — file a new issue with template. **No `--repo` flag**: set `GITHUB_REPO=owner/repo` in the environment for cross-repo creation, or the issue silently lands on the repo detected from `git remote`. Needs Python ≥3.10 (see the zeal-server note above).
 - `scripts/update_ticket.py` — change labels (in-progress, sit, uat, blocked)
 - `scripts/comment_ticket.py` — add comment to issue
 - `scripts/post_test_report.py` — tester uses this for structured reports
@@ -251,6 +373,7 @@ To migrate an existing flat project to nested:
 - `scripts/migrate_project_layout.py` — migrate flat project to nested layout
 - `scripts/migrate_add_uat.py` — add UAT clone to an existing project
 - `scripts/resync_issues_mirror.py` — force full GitHub → SQLite issues-mirror resync (manual repair when mirror is stale)
+- `scripts/record_test_baseline.py` — record the test baseline the merge check compares against; `--repo owner/repo [--ref develop] [--pytest-args ...] [--dry-run]`
 - `scripts/retry_ticket.py` — reset a failed ticket (needs-rework → backlog), clear failure sidecar, print `/coder` + `/tester` invocations; `--issue N [--repo owner/repo] [--dry-run]`
 
 ## Issue Estimator

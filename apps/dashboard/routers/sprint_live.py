@@ -643,7 +643,7 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
                 if iss.get("coder_started_at") and not iss.get("tester_finished_at"):
                     agent_name = "tester" if iss.get("tester_started_at") else "coder"
                     agent_model = iss.get("coder_model") if agent_name == "coder" else None
-                    active_agent = {"name": agent_name, "model": agent_model, "pid": None}
+                    active_agent = {"name": agent_name, "model": agent_model, "pid": None, "ticket": None}
                     break
         except Exception:
             pass
@@ -655,7 +655,7 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
             if active_agent:
                 active_agent["pid"] = pid_val
             else:
-                active_agent = {"name": "coder", "model": None, "pid": pid_val}
+                active_agent = {"name": "coder", "model": None, "pid": pid_val, "ticket": None}
         except Exception:
             pass
 

@@ -44,7 +44,7 @@ class ActiveAgent(BaseModel):
 
 class ActiveAgentEntry(BaseModel):
     name: str
-    ticket: TicketRef
+    ticket: Optional[TicketRef] = None
     pid: Optional[int] = None
 
 

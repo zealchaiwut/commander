@@ -576,11 +576,35 @@ python3 "$MAIN_REPO/scripts/post_test_report.py" \
 
 **Merging by any other path will skip the UAT label entirely and constitutes a workflow failure.** If you find yourself considering a direct merge for any reason, halt immediately and report the situation rather than proceeding.
 
+#### SYNCHRONOUS CALL — no background / notification semantics (issue #2344)
+
+`finish_feature.py` is a **synchronous, blocking call**. Your turn must block until
+it exits and you have captured its exit code. There is no later turn, no notification,
+and no background-job mechanism that will inform you when it finishes.
+
+**Specifically:**
+- Run `finish_feature.py` with the Bash tool (NOT `run_in_background: true`).
+- Capture `FINISH_EXIT_CODE=$?` immediately after the call, in the same shell block.
+- Do NOT use `ScheduleWakeup`, background Bash flags, or any other deferral mechanism
+  to "wait for" the merge. These exist only in interactive loop sessions and have no
+  effect in headless `claude -p` dispatch — the process will simply exit, the merge
+  will never land, and `dispatch_runner.py`'s `verify()` will correctly fail the run.
+- Do NOT report the ticket as promoted until you have a **0 exit code in hand**.
+
 If `READY_FOR_UAT` (pytest exit code 0, all tests pass, contract PASS or n/a):
 ```bash
-# Merges to target branch, pushes, labels UAT, deletes branch — all in one step
+# Synchronous, blocking call — captures exit code in the same shell block
 cd "$MAIN_REPO" && python3 scripts/finish_feature.py --issue <N>
+FINISH_EXIT_CODE=$?
+echo "finish_feature.py exit code: $FINISH_EXIT_CODE"
+if [ "$FINISH_EXIT_CODE" -ne 0 ]; then
+  echo "ERROR: finish_feature.py failed — merge did not land. Do NOT report as promoted." >&2
+fi
 ```
+
+After this block, check `FINISH_EXIT_CODE`:
+- `0` → merge landed; set `Merge executed: yes` in the report and proceed.
+- non-zero → merge failed; set `Merge executed: no — finish_feature.py exited $FINISH_EXIT_CODE`; move label to `blocked` and post the report with the error.
 
 **MANDATORY — human-in-the-loop gate:**
 - `finish_feature.py` applies the **UAT** label and keeps the issue **OPEN**. That is the correct end state. (When finish_feature is called by the sprint_manager dispatch loop it sets `COMMANDER_SPRINT_RUNNING`; finish_feature skips the label change in that case and sprint_manager applies it instead. In a manual `/tester` session `COMMANDER_SPRINT_RUNNING` is unset and finish_feature applies UAT directly.)
@@ -703,3 +727,13 @@ See `CLAUDE.md` § MCP Tools: code-review-graph.
 - **Never run this skill against PRD.** Step 0 refuses port 8000. For generic repos,
   `ENVIRONMENT=uat` in `.env` is the guard. For Commander, the guard is the `uat/`
   sibling clone on port 8001 — `COMMANDER_UAT_OK` also accepts legacy `ENVIRONMENT=prd`.
+- **Headless dispatch has no notification mechanism.** When dispatched via `claude -p`
+  (headless), there is no "later turn" and no harness notification — the process runs
+  once and exits. Session tooling such as `ScheduleWakeup` is meaningless in this
+  context: calling it will not defer or resume anything. Any tool or pattern that
+  implies "I'll wait to be notified when X finishes" is only valid in interactive
+  `/loop` sessions. In headless dispatch, every operation (including `finish_feature.py`)
+  must complete synchronously and its result must be observed **before** the tester
+  reports its outcome. Exiting under the belief that a notification will arrive is a
+  silent failure — `dispatch_runner.py`'s `verify()` will catch the stalled ticket and
+  fail the run (issue #2344).

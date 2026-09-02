@@ -44,20 +44,21 @@ def client_ctx(tmp_path):
         }}
     ]))
 
-    for mod in list(sys.modules.keys()):
-        if mod in ("server", "projects") or mod.startswith("services."):
-            sys.modules.pop(mod, None)
+    # Purge for a fresh import, then restore services.* so later tests keep the
+    # module objects they bound at collection time (issues #2337 / #2345).
+    from _sys_modules_guard import temporary_module_purge
 
-    import server as srv
-    import projects as projects_module
+    with temporary_module_purge("server", "projects", prefixes=("services.",)):
+        import server as srv
+        import projects as projects_module
 
-    # Point projects module at our temp file
-    projects_module.PROJECTS_FILE = projects_file
+        # Point projects module at our temp file
+        projects_module.PROJECTS_FILE = projects_file
 
-    from fastapi.testclient import TestClient
-    with patch.object(srv, "projects_module", projects_module):
-        client = TestClient(srv.app, raise_server_exceptions=False)
-        yield client, srv, projects_module, projects_file
+        from fastapi.testclient import TestClient
+        with patch.object(srv, "projects_module", projects_module):
+            client = TestClient(srv.app, raise_server_exceptions=False)
+            yield client, srv, projects_module, projects_file
 
 
 # ── AC1: Editable path inputs exist in project.html ──────────────────────────

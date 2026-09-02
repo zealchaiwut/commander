@@ -4802,8 +4802,92 @@ ${listing}`
   var _noop = () => {
   };
   var _noopStr = () => "";
-  var smgmtRunBlockedToast = _noop;
-  var smgmtRunSprint = _noop;
+  var _dispatchInFlight = /* @__PURE__ */ new Set();
+  function smgmtRunBlockedToast() {
+    if (typeof globalThis._smgmtShowToast === "function") {
+      globalThis._smgmtShowToast("Another sprint is already running");
+    }
+  }
+  async function smgmtRunSprint(label) {
+    if (!label)
+      return;
+    if (_dispatchInFlight.has(label)) {
+      if (typeof globalThis._smgmtShowToast === "function") {
+        globalThis._smgmtShowToast(`Dispatch already running for ${label}`);
+      }
+      return;
+    }
+    const repo = typeof globalThis._smgmtRepo === "function" ? globalThis._smgmtRepo() || "" : "";
+    if (!repo) {
+      if (typeof globalThis._smgmtShowToast === "function") {
+        globalThis._smgmtShowToast("No project selected");
+      }
+      return;
+    }
+    _dispatchInFlight.add(label);
+    _setRunBtnBusy(label, true);
+    let res;
+    try {
+      res = await fetch(`/api/sprints/${encodeURIComponent(label)}/dispatch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tickets: [], all: true, repo })
+      });
+    } catch (e) {
+      _dispatchInFlight.delete(label);
+      _setRunBtnBusy(label, false);
+      if (typeof globalThis._smgmtShowToast === "function") {
+        globalThis._smgmtShowToast("Dispatch failed: " + e.message);
+      }
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      _dispatchInFlight.delete(label);
+      _setRunBtnBusy(label, false);
+      const detail = typeof data.detail === "string" ? data.detail : data.detail ? JSON.stringify(data.detail) : "HTTP " + res.status;
+      if (typeof globalThis._smgmtShowToast === "function") {
+        globalThis._smgmtShowToast("Dispatch failed: " + detail);
+      }
+      return;
+    }
+    if (typeof globalThis._smgmtShowToast === "function") {
+      const n = (data.tickets || []).length;
+      globalThis._smgmtShowToast(
+        `Dispatch started for ${label}` + (data.run_id ? ` (${data.run_id})` : "") + (n ? ` \xB7 ${n} ticket${n === 1 ? "" : "s"}` : "")
+      );
+    }
+    setTimeout(() => {
+      _dispatchInFlight.delete(label);
+      _setRunBtnBusy(label, false);
+    }, 8e3);
+    if (typeof globalThis.loadSprintMgmt === "function") {
+      try {
+        await globalThis.loadSprintMgmt();
+      } catch (_) {
+      }
+    }
+  }
+  function _setRunBtnBusy(label, busy) {
+    try {
+      const card = document.getElementById("smgmt-card-" + label);
+      if (!card)
+        return;
+      const btn = card.querySelector(".smgmt-run-btn");
+      if (!btn)
+        return;
+      if (busy) {
+        btn.disabled = true;
+        btn.classList.add("smgmt-run-btn--busy");
+        btn.setAttribute("aria-busy", "true");
+      } else {
+        btn.disabled = false;
+        btn.classList.remove("smgmt-run-btn--busy");
+        btn.removeAttribute("aria-busy");
+      }
+    } catch (_) {
+    }
+  }
   var smgmtApproveSprint = _noop;
   var smgmtRejectSprint = _noop;
   var _pfOpen = _noop;
@@ -6010,6 +6094,7 @@ ${listing}`
     }
     return "";
   }
+  var _NON_DISPATCHABLE_LABELS = /* @__PURE__ */ new Set(["UAT", "UAT-approved", "released"]);
   function _smgmtCardActionBtnHtml(label, {
     isRunning,
     isLinger,
@@ -6038,6 +6123,12 @@ ${listing}`
                   onclick="smgmtRunSprint('${escHtml(label)}')">
                   <i class="ti ti-player-play"></i> Run Sprint</button>`;
   }
+  function _smgmtHasDispatchableTickets(tickets) {
+    return tickets.some((t) => {
+      const names = (t.labels || []).map((l) => l.name);
+      return !names.some((n) => _NON_DISPATCHABLE_LABELS.has(n));
+    });
+  }
   function _smgmtCardHtml(label, n, tickets, outcome, isNext, parent, finished) {
     const isRunning = _smgmtRunningLabels.has(label);
     const isLinger = false;
@@ -6064,10 +6155,20 @@ ${listing}`
     const isAwaitingMerge = isReadyToMerge || finished && !isRunning && !isHasRework && !planBlocksPostRun;
     const showRunningChrome = isRunningView && !isAwaitingMerge;
     const isPostRun = !isRunningView && !planBlocksPostRun && hasLedgerRun;
-    const actionBtn = !isRunning && !isLinger && !isHasRework && !isPostRun && !finished ? `<button class="smgmt-preflight-warnings-btn" type="button"
+    const canRun = _smgmtHasDispatchableTickets(tickets || []);
+    const runBtnHtml = !isRunning && !isLinger && !isHasRework && !isPostRun && !finished ? _smgmtCardActionBtnHtml(label, {
+      isRunning,
+      isLinger,
+      isHasRework,
+      isPostRun,
+      canRun,
+      tickets
+    }) : "";
+    const preflightBtn = !isRunning && !isLinger && !isHasRework && !isPostRun && !finished ? `<button class="smgmt-preflight-warnings-btn" type="button"
               title="View preflight warnings for this sprint"
               onclick="smgmtOpenPreflightWarnings('${escHtml(label)}')">
          <i class="ti ti-alert-circle"></i> Preflight</button>` : "";
+    const actionBtn = `${runBtnHtml}${preflightBtn}`;
     const isOutcomeCompleted = isReadyToMerge || isHasRework || outcomeState === "completed";
     const finishHidden = isOutcomeCompleted || isPostRun && !outcome ? "" : "hidden";
     const finishDisabled = isReadyToMerge && tickets.length === 0 ? "disabled" : "";
@@ -6175,7 +6276,7 @@ ${listing}`
          <i class="ti ti-sort-ascending-2"></i> Apply DAG Order</button>` : "";
     const isStaleNoTickets = !isRunning && !!(_smgmtData && _smgmtData._staleNoTicketLabels instanceof Set && _smgmtData._staleNoTicketLabels.has(label));
     const staleNoticeHtml = isStaleNoTickets ? `<span class="smgmt-stale-no-tickets-notice" title="No open tickets remain on this sprint"><i class="ti ti-alert-circle"></i> stale \u2014 no tickets</span>` : "";
-    const dispatchNoteHtml = !isRunning && !hasLedgerRun && !finished ? `<div class="smgmt-dispatch-note"><i class="ti ti-terminal-2" aria-hidden="true"></i> Dispatch is a Claude Code session \u2014 run <code>/coder</code> then <code>/tester</code> per ticket, in dependency order.</div>` : "";
+    const dispatchNoteHtml = !isRunning && !hasLedgerRun && !finished ? `<div class="smgmt-dispatch-note"><i class="ti ti-player-play" aria-hidden="true"></i> Use <strong>Run Sprint</strong> to start <code>POST /api/sprints/{label}/dispatch</code> (resolves open tickets for this label). Overnight: <code>/overnight</code> then poll status.</div>` : "";
     return `
     <div class="smgmt-sprint-card sc-v5${outcomeCardClass}${runningClass}${collapsedClass}" id="smgmt-card-${escHtml(label)}">
       ${runningStripeHtml}

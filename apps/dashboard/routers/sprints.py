@@ -436,8 +436,6 @@ async def complete_after_dispatch_endpoint(
             )
         return True, "merged"
 
-    finish_holder: dict = {"result": None}
-
     async def _run_finish(sprint_pr_url: str):
         from routers.sprint_finish import FinishSprintBody, finish_sprint_flat
 

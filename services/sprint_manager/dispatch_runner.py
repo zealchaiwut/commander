@@ -457,13 +457,13 @@ def _gate_sprint_pr(
     # and read as a refusal.
     timeout = int(os.environ.get("COMMANDER_BASELINE_TIMEOUT", "1800"))
 
+    # Process-group kill on timeout so nested pytest grandchildren cannot
+    # survive as PPID-1 orphans (issue #2345).
+    from services.sprint_manager.pytest_runner import run_pytest
+
     try:
-        result = subprocess.run(
-            # sys.executable, not "python3": the system python3 is 3.9 on
-            # zeal-server and cannot even import this codebase. finish_feature.py
-            # already does this.
-            [sys.executable, "-m", "pytest"] + pytest_args,
-            cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+        result = run_pytest(
+            pytest_args, cwd=str(cwd), timeout=timeout,
         )
         output = (result.stdout or "") + (result.stderr or "")
     except subprocess.TimeoutExpired:

@@ -247,6 +247,7 @@ no letters or spaces.
 
 ### 409 sprint-already-running
 
-Only one sprint may run per project at a time. Check the running sprint with
-`GET /api/sprints/history` and cancel it via `DELETE /api/sprints/run/{sprint_label}`
-before starting a new one.
+Only one sprint may run per project at a time. Check `GET /api/running?project=`
+and stop an API dispatch with `POST /api/sprints/dispatch/{run_id}/stop` (or
+overnight with `POST /api/sprints/overnight/{overnight_id}/stop`) before starting
+a new one. `DELETE /api/sprints/run/{label}` was removed with the orchestrator.

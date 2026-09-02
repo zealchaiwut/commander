@@ -1,13 +1,18 @@
-"""Pydantic response models for Hermes-critical endpoints (issue #2066).
+"""Pydantic response models for Hermes-critical endpoints (issue #2066 / #2358).
 
 Covers:
-  POST /api/sprints/run
+  POST /api/sprints/{label}/dispatch   (preferred; replaces deleted /api/sprints/run)
+  POST /api/sprints/{label}/overnight  (#2354)
   GET  /api/sprints/{sprint_label}/live
   GET  /api/dev-report
   POST /api/tickets/draft
   POST /api/tickets/create
   GET  /api/failures
   GET  /api/board
+
+``SprintRunResponse`` below documented the deleted ``POST /api/sprints/run``
+shape — kept only so old clients deserialising archived payloads do not break;
+do not treat it as a live route (#2358).
 
 Any-typed fields are justified inline where used.
 """
@@ -18,15 +23,46 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict
 
 
-# ── POST /api/sprints/run (202) ───────────────────────────────────────────────
+# ── POST /api/sprints/run (DELETED) — archived response shape only (#2358) ────
 
 class SprintRunResponse(BaseModel):
+    """Deprecated: ``POST /api/sprints/run`` was deleted in the shrink.
+
+    Use ``POST /api/sprints/{label}/dispatch`` or ``…/overnight`` instead.
+    """
+
     ok: bool
     sprint_label: str
     pid: int
     log: str
     migrated_count: int
     migrate_from: Optional[list[int]] = None
+
+
+# ── POST /api/sprints/{label}/dispatch (200) ──────────────────────────────────
+
+class SprintDispatchResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    run_id: str
+    sprint_label: str
+    tickets: list[int] = []
+    status: str = "queued"
+    repo: Optional[str] = None
+
+
+# ── POST /api/sprints/{label}/overnight (200) ─────────────────────────────────
+
+class SprintOvernightResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    overnight_id: str
+    sprint_label: str
+    tickets: list[int] = []
+    status: str = "queued"
+    phase: str = "queued"
+    max_retries: int = 2
+    dispatch_run_ids: list[str] = []
 
 
 # ── GET /api/sprints/{sprint_label}/live (200) ────────────────────────────────

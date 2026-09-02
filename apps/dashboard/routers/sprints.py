@@ -294,6 +294,102 @@ def stop_dispatch_run(run_id: str):
     return {"run_id": run_id, "stop_requested": True}
 
 
+class SprintOvernightBody(BaseModel):
+    """Body for POST /api/sprints/{label}/overnight (issue #2354).
+
+    ``max_retries`` is the number of retries *after* the first failed dispatch
+    (default 2). ``max_retries: 0`` exhausts immediately on first failure.
+    Empty ``tickets`` resolves open issues for the label (#2353).
+    """
+
+    tickets: list[int] = []
+    all: bool = True
+    max_retries: int = 2
+    repo: str | None = None
+    cwd: str | None = None
+    baseline_note: str | None = None
+
+
+@router.post("/api/sprints/{sprint_label}/overnight")
+def overnight_sprint(sprint_label: str, body: SprintOvernightBody):
+    """Start an overnight babysitter: dispatch, reset, re-dispatch (#2354).
+
+    Returns immediately with ``overnight_id``. Poll
+    ``GET /api/sprints/overnight/{overnight_id}``. Stop with
+    ``POST /api/sprints/overnight/{overnight_id}/stop``.
+    """
+    from pathlib import Path
+
+    import github_client
+    from services.sprint_manager.dispatch_runner import (
+        DispatchConfigError,
+        load_project_config,
+    )
+    from services.sprint_manager.overnight_runner import start_overnight
+
+    repo_root = _commander_repo_root()
+    cwd = Path(body.cwd) if body.cwd else repo_root
+    if not cwd.exists():
+        raise HTTPException(status_code=400, detail=f"cwd does not exist: {cwd}")
+
+    try:
+        config = load_project_config(cwd)
+    except DispatchConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    repo = body.repo or config.repo_name or None
+    # Reuse dispatch resolution (empty / all → open issues for label).
+    dispatch_body = SprintDispatchBody(
+        tickets=list(body.tickets),
+        all=body.all if not body.tickets else False,
+        repo=repo,
+        cwd=str(cwd),
+        baseline_note=body.baseline_note,
+    )
+    tickets = _resolve_dispatch_tickets(sprint_label, dispatch_body, repo=repo)
+
+    if body.max_retries < 0:
+        raise HTTPException(status_code=400, detail="max_retries must be >= 0")
+
+    run = start_overnight(
+        sprint_label,
+        tickets,
+        repo=repo,
+        repo_root=repo_root,
+        cwd=cwd,
+        max_retries=body.max_retries,
+        config=config,
+        github_client=github_client,
+        background=True,
+    )
+    return run.to_dict()
+
+
+@router.get("/api/sprints/overnight/{overnight_id}")
+def get_overnight_run(overnight_id: str):
+    """Status of an overnight babysitter run (#2354)."""
+    from services.sprint_manager.overnight_runner import load_overnight
+
+    data = load_overnight(overnight_id, _commander_repo_root())
+    if data is None:
+        raise HTTPException(
+            status_code=404, detail=f"unknown overnight run: {overnight_id}"
+        )
+    return data
+
+
+@router.post("/api/sprints/overnight/{overnight_id}/stop")
+def stop_overnight_run(overnight_id: str):
+    """Stop an overnight run at the next dispatch/retry boundary (#2354)."""
+    from services.sprint_manager.overnight_runner import request_stop
+
+    if not request_stop(overnight_id, _commander_repo_root()):
+        raise HTTPException(
+            status_code=404, detail=f"unknown overnight run: {overnight_id}"
+        )
+    return {"overnight_id": overnight_id, "stop_requested": True}
+
+
 @router.post("/api/sprints/plan-next")
 def plan_next_sprint(body: PlanNextSprintBody):
     """Draft the next sprint from the active milestone's backlog (issue #861).

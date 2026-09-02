@@ -609,6 +609,7 @@ def test_missing_baseline_refuses_rather_than_skipping(tmp_path, monkeypatch):
     sprint PR ungated.
     """
     import services.sprint_manager.dispatch_runner as dr
+    import services.sprint_manager.pytest_runner as pr
 
     monkeypatch.setattr(dr, "load_project_config", lambda *a, **k: None, raising=False)
     monkeypatch.setenv("COMMANDER_BASELINE_CHECK", "1")
@@ -623,7 +624,7 @@ def test_missing_baseline_refuses_rather_than_skipping(tmp_path, monkeypatch):
     def boom(*a, **kw):
         raise AssertionError("the suite ran despite there being no baseline to compare against")
 
-    monkeypatch.setattr(dr.subprocess, "run", boom)
+    monkeypatch.setattr(pr, "run_pytest", boom)
 
     allowed, reason = dr._gate_sprint_pr(
         sprint_branch="sprint/sprint-1028", target="develop",
@@ -642,6 +643,7 @@ def test_gate_reads_the_last_summary_line_not_the_first_counts(tmp_path, monkeyp
     """
     import services.sprint_manager.dispatch_runner as dr
     import services.sprint_manager.merge_baseline as mb
+    import services.sprint_manager.pytest_runner as pr
 
     baseline = mb.Baseline(
         project="zealchaiwut/commander", failed=2377, passed=7279,
@@ -657,15 +659,16 @@ def test_gate_reads_the_last_summary_line_not_the_first_counts(tmp_path, monkeyp
 
     seen = {}
 
-    def fake_run(cmd, *a, **kw):
-        seen["cmd"] = cmd
+    def fake_run(args, *, cwd, timeout=None, env=None, isolate_db=True):
+        seen["args"] = args
+        seen["cwd"] = cwd
         class R:
             returncode = 1
             stdout = output
             stderr = ""
         return R()
 
-    monkeypatch.setattr(dr.subprocess, "run", fake_run)
+    monkeypatch.setattr(pr, "run_pytest", fake_run)
 
     allowed, reason = dr._gate_sprint_pr(
         sprint_branch="sprint/sprint-1028", target="develop",
@@ -679,11 +682,14 @@ def test_gate_reads_the_last_summary_line_not_the_first_counts(tmp_path, monkeyp
 
 
 def test_gate_invokes_the_running_interpreter(tmp_path, monkeypatch):
-    """`python3` is 3.9 on zeal-server and cannot import this codebase."""
-    import sys as _sys
+    """Gate drives pytest via run_pytest with the baseline's pytest args.
 
+    ``run_pytest`` itself always prefixes with ``sys.executable`` (#2345);
+    this test asserts the gate still passes the baseline args through.
+    """
     import services.sprint_manager.dispatch_runner as dr
     import services.sprint_manager.merge_baseline as mb
+    import services.sprint_manager.pytest_runner as pr
 
     monkeypatch.setattr(
         mb, "load_baseline",
@@ -693,17 +699,20 @@ def test_gate_invokes_the_running_interpreter(tmp_path, monkeypatch):
 
     seen = {}
 
-    def fake_run(cmd, *a, **kw):
-        seen["cmd"] = cmd
+    def fake_run(args, *, cwd, timeout=None, env=None, isolate_db=True):
+        seen["args"] = list(args)
+        seen["cwd"] = cwd
+        seen["timeout"] = timeout
         class R:
             returncode = 0
             stdout = "1 passed in 0.1s\n"
             stderr = ""
         return R()
 
-    monkeypatch.setattr(dr.subprocess, "run", fake_run)
+    monkeypatch.setattr(pr, "run_pytest", fake_run)
     dr._gate_sprint_pr(
         sprint_branch="sprint/sprint-1028", target="develop",
         repo="o/r", cwd=tmp_path,
     )
-    assert seen["cmd"][0] == _sys.executable, seen["cmd"]
+    assert seen.get("args") == ["tests/", "-q"], seen
+    assert seen.get("cwd") == str(tmp_path)

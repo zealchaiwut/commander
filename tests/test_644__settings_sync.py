@@ -103,32 +103,31 @@ def client_ctx(tmp_path, settings_repo_ctx):
 
     sync_status_file = tmp_path / "settings.last_synced"
 
-    for mod in list(sys.modules):
-        if mod in ("server",) or mod.startswith("services."):
-            sys.modules.pop(mod, None)
+    from _sys_modules_guard import temporary_module_purge
 
-    import server as srv
+    with temporary_module_purge("server", prefixes=("services.",)):
+        import server as srv
 
-    from fastapi.testclient import TestClient
-    with patch.object(srv, "_settings_repo", settings_repo):
-        with patch.object(srv, "_SYNC_SETTINGS_AVAILABLE", True, create=True):
-            with patch.object(srv, "_SYNC_STATUS_FILE", sync_status_file, create=True):
-                with patch.object(srv.projects_module, "load_projects", return_value=[
-                    {
-                        "repo": "owner/myproject",
-                        "name": "My Project",
-                        "icon": "ti-cpu",
-                        "color": "blue",
-                        "tracked": True,
-                        "environments": {
-                            "prd": "/local/machine/path/prd",
-                        },
-                    }
-                ]):
-                    with patch.object(srv, "_PROJECTS_FILE",
-                                      projects_file, create=True):
-                        client = TestClient(srv.app, raise_server_exceptions=False)
-                        yield client, srv, settings_repo, projects_file, sync_status_file
+        from fastapi.testclient import TestClient
+        with patch.object(srv, "_settings_repo", settings_repo):
+            with patch.object(srv, "_SYNC_SETTINGS_AVAILABLE", True, create=True):
+                with patch.object(srv, "_SYNC_STATUS_FILE", sync_status_file, create=True):
+                    with patch.object(srv.projects_module, "load_projects", return_value=[
+                        {
+                            "repo": "owner/myproject",
+                            "name": "My Project",
+                            "icon": "ti-cpu",
+                            "color": "blue",
+                            "tracked": True,
+                            "environments": {
+                                "prd": "/local/machine/path/prd",
+                            },
+                        }
+                    ]):
+                        with patch.object(srv, "_PROJECTS_FILE",
+                                          projects_file, create=True):
+                            client = TestClient(srv.app, raise_server_exceptions=False)
+                            yield client, srv, settings_repo, projects_file, sync_status_file
 
 
 # ── AC1: Upload direction diff endpoint ──────────────────────────────────────

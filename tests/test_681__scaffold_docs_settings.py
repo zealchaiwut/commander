@@ -53,20 +53,19 @@ def client_ctx(tmp_path):
     proj_root = projects_base / "test-proj"
     proj_root.mkdir()
 
-    for mod in list(sys.modules.keys()):
-        if mod in ("server", "projects") or mod.startswith("services."):
-            sys.modules.pop(mod, None)
+    from _sys_modules_guard import temporary_module_purge
 
-    import server as srv
-    import projects as projects_module
+    with temporary_module_purge("server", "projects", prefixes=("services.",)):
+        import server as srv
+        import projects as projects_module
 
-    projects_module.PROJECTS_FILE = projects_file
+        projects_module.PROJECTS_FILE = projects_file
 
-    from fastapi.testclient import TestClient
-    with patch.object(srv, "projects_module", projects_module), \
-         patch.object(srv, "_PROJECTS_BASE", projects_base):
-        client = TestClient(srv.app, raise_server_exceptions=False)
-        yield client, srv, projects_module, projects_base, proj_root
+        from fastapi.testclient import TestClient
+        with patch.object(srv, "projects_module", projects_module), \
+             patch.object(srv, "_PROJECTS_BASE", projects_base):
+            client = TestClient(srv.app, raise_server_exceptions=False)
+            yield client, srv, projects_module, projects_base, proj_root
 
 
 @pytest.fixture()
@@ -233,20 +232,19 @@ def test_check_rejects_project_root_outside_projects_base(tmp_path):
     link = projects_base / "escape-proj"
     os.symlink(outside, link)
 
-    for mod in list(sys.modules.keys()):
-        if mod in ("server", "projects") or mod.startswith("services."):
-            sys.modules.pop(mod, None)
+    from _sys_modules_guard import temporary_module_purge
 
-    import server as srv
-    import projects as projects_module
+    with temporary_module_purge("server", "projects", prefixes=("services.",)):
+        import server as srv
+        import projects as projects_module
 
-    projects_module.PROJECTS_FILE = projects_file
+        projects_module.PROJECTS_FILE = projects_file
 
-    from fastapi.testclient import TestClient
-    with patch.object(srv, "projects_module", projects_module), \
-         patch.object(srv, "_PROJECTS_BASE", projects_base):
-        client = TestClient(srv.app, raise_server_exceptions=False)
-        resp = client.get("/api/projects/escape-proj/docs/scaffold/check")
+        from fastapi.testclient import TestClient
+        with patch.object(srv, "projects_module", projects_module), \
+             patch.object(srv, "_PROJECTS_BASE", projects_base):
+            client = TestClient(srv.app, raise_server_exceptions=False)
+            resp = client.get("/api/projects/escape-proj/docs/scaffold/check")
 
     assert resp.status_code in (400, 403), (
         f"Expected 400/403 for symlink escape outside projects_base, got {resp.status_code}: {resp.text}"
@@ -271,23 +269,22 @@ def test_apply_rejects_project_root_outside_projects_base(tmp_path):
     link = projects_base / "escape-proj"
     os.symlink(outside, link)
 
-    for mod in list(sys.modules.keys()):
-        if mod in ("server", "projects") or mod.startswith("services."):
-            sys.modules.pop(mod, None)
+    from _sys_modules_guard import temporary_module_purge
 
-    import server as srv
-    import projects as projects_module
+    with temporary_module_purge("server", "projects", prefixes=("services.",)):
+        import server as srv
+        import projects as projects_module
 
-    projects_module.PROJECTS_FILE = projects_file
+        projects_module.PROJECTS_FILE = projects_file
 
-    from fastapi.testclient import TestClient
-    with patch.object(srv, "projects_module", projects_module), \
-         patch.object(srv, "_PROJECTS_BASE", projects_base):
-        client = TestClient(srv.app, raise_server_exceptions=False)
-        resp = client.post(
-            "/api/projects/escape-proj/docs/scaffold/apply",
-            json={"confirm": True},
-        )
+        from fastapi.testclient import TestClient
+        with patch.object(srv, "projects_module", projects_module), \
+             patch.object(srv, "_PROJECTS_BASE", projects_base):
+            client = TestClient(srv.app, raise_server_exceptions=False)
+            resp = client.post(
+                "/api/projects/escape-proj/docs/scaffold/apply",
+                json={"confirm": True},
+            )
 
     assert resp.status_code in (400, 403), (
         f"Expected 400/403 for symlink escape outside projects_base, got {resp.status_code}: {resp.text}"

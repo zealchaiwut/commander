@@ -148,20 +148,20 @@ def client_ctx(tmp_path):
          "environments": {"prd": str(env_dir)}}
     ]))
 
-    for mod in list(sys.modules.keys()):
-        in_scope = ("server", "projects", "env_file", "routers")
-        if (mod in in_scope or mod.startswith("services.")
-                or mod.startswith("routers.")):
-            sys.modules.pop(mod, None)
+    from _sys_modules_guard import temporary_module_purge
 
-    import server as srv
-    import projects as projects_module
-    projects_module.PROJECTS_FILE = projects_file
+    with temporary_module_purge(
+        "server", "projects", "env_file", "routers",
+        prefixes=("services.", "routers."),
+    ):
+        import server as srv
+        import projects as projects_module
+        projects_module.PROJECTS_FILE = projects_file
 
-    from fastapi.testclient import TestClient
-    with patch.object(srv, "projects_module", projects_module):
-        client = TestClient(srv.app, raise_server_exceptions=False)
-        yield client, srv, projects_module, env_dir
+        from fastapi.testclient import TestClient
+        with patch.object(srv, "projects_module", projects_module):
+            client = TestClient(srv.app, raise_server_exceptions=False)
+            yield client, srv, projects_module, env_dir
 
 
 def test_get_env_vars_returns_pairs_in_order(client_ctx):

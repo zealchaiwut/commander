@@ -390,6 +390,115 @@ def stop_overnight_run(overnight_id: str):
     return {"overnight_id": overnight_id, "stop_requested": True}
 
 
+class CompleteAfterDispatchBody(BaseModel):
+    """Body for POST /api/sprints/{label}/complete-after-dispatch (#2357).
+
+    ``uat_signoff`` default false: merge the sprint→develop PR only.
+    When true, runs the existing Finish path (merge + close UAT issues).
+    ``preview`` / ``dry_run`` reports the plan without mutating.
+    """
+
+    project: str
+    uat_signoff: bool = False
+    preview: bool = False
+    dry_run: bool = False
+
+
+@router.post("/api/sprints/{sprint_label}/complete-after-dispatch")
+async def complete_after_dispatch_endpoint(
+    sprint_label: str,
+    body: CompleteAfterDispatchBody,
+):
+    """Merge the sprint PR opened by a green dispatch; optional UAT finish (#2357)."""
+    from pathlib import Path
+
+    import github_client
+    from project_resolver import resolve_project_path as _project_root_path
+    from services.sprint_manager.complete_after_dispatch import complete_after_dispatch
+
+    project_root = Path(_project_root_path(body.project))
+    preview = body.preview or body.dry_run
+
+    def _merge_pr(url: str, repo: str) -> tuple[bool, str]:
+        import subprocess
+
+        merge_res = subprocess.run(
+            ["gh", "pr", "merge", url, "--repo", repo, "--merge", "--delete-branch"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if merge_res.returncode != 0:
+            return False, (
+                merge_res.stderr.strip()
+                or merge_res.stdout.strip()
+                or "merge failed"
+            )
+        return True, "merged"
+
+    async def _run_finish(sprint_pr_url: str):
+        from routers.sprint_finish import FinishSprintBody, finish_sprint_flat
+
+        return await finish_sprint_flat(
+            sprint_label,
+            body.project,
+            FinishSprintBody(
+                confirmed=True,
+                merge_pr=True,
+                sprint_pr_url=sprint_pr_url,
+            ),
+        )
+
+    # Service layer is sync; for uat_signoff we merge via finish in this coroutine
+    # after the preview/lookup step so we stay on the FastAPI event loop.
+    lookup = complete_after_dispatch(
+        project_root=project_root,
+        sprint_label=sprint_label,
+        repo=body.project,
+        preview=True,  # always lookup first without side effects
+        uat_signoff=body.uat_signoff,
+        list_uat_fn=lambda repo_name=None: github_client.list_open_uat_issues(
+            repo_name=repo_name
+        ),
+    )
+    if not lookup.get("ok"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No successful sprint→develop PR found for {sprint_label!r}. "
+                "Dispatch must complete with status=done and sprint_pr_number set."
+            ),
+        )
+    if preview:
+        return lookup
+
+    pr_url = lookup["sprint_pr"]["url"]
+    if body.uat_signoff:
+        finish_result = await _run_finish(pr_url)
+        return {
+            "preview": False,
+            "ok": True,
+            "merged": True,
+            "uat_signoff": True,
+            "sprint_pr": lookup["sprint_pr"],
+            "uat_tickets": lookup.get("uat_tickets") or [],
+            "finish_result": finish_result,
+            "errors": [],
+        }
+
+    ok, detail = _merge_pr(pr_url, body.project)
+    return {
+        "preview": False,
+        "ok": ok,
+        "merged": ok,
+        "uat_signoff": False,
+        "sprint_pr": lookup["sprint_pr"],
+        "uat_tickets": lookup.get("uat_tickets") or [],
+        "detail": detail,
+        "errors": [] if ok else [detail],
+    }
+
+
 @router.post("/api/sprints/plan-next")
 def plan_next_sprint(body: PlanNextSprintBody):
     """Draft the next sprint from the active milestone's backlog (issue #861).

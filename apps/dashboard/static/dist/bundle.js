@@ -6211,6 +6211,10 @@ ${listing}`
                   title="Reconcile this sprint's DB state against GitHub truth"
                   onclick="event.stopPropagation();smgmtReconcileSprint('${escHtml(label)}')">
             <i class="ti ti-refresh"></i> Reconcile</button>`}
+          ${!isRunning && tickets.some((t) => t.status === "uat") ? `<button class="smgmt-uat-signoff-btn sc-merge-link" type="button"
+                  title="Close all UAT tickets for this sprint"
+                  onclick="event.stopPropagation();smgmtUatSignoffSprint('${escHtml(label)}')">
+            <i class="ti ti-circle-check"></i> Sign off UAT</button>` : ""}
           <button class="smgmt-finish-btn sc-merge-link ${finishHidden}" ${finishDisabled}
                   title="${finishDisabled ? "No open tickets" : "Merge sprint"}"
                   onclick="smgmtFinishSprint('${escHtml(label)}')">

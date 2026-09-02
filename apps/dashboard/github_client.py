@@ -943,38 +943,107 @@ def list_open_uat_issues_by_sprint_label(sprint_label: str, repo_name: str | Non
     """List open UAT issues for a sprint label, including child labels (sprint-N.1, .2, .3).
 
     Signing off sprint-1022 includes tickets labeled sprint-1022.1, sprint-1022.2, etc.
+
+    Also includes open Sprint Executive Summary issues for this sprint (and children).
+    Those carry ``sprint-summary``/``docs`` labels — NOT ``sprint-N`` — so the
+    sprint number is parsed from the title (same contract as
+    ``startup._finished_sprint_summaries``). Without this, sign-off orphans the
+    summary on the board (issue #2305 AC5).
     """
+    import re
+
+    summary_title_re = re.compile(r"^Sprint (\d+(?:\.\d+)*)\s+Executive Summary$")
+
+    def _label_match(names: set[str]) -> bool:
+        return sprint_label in names or any(
+            n.startswith(sprint_label + ".") for n in names
+        )
+
+    def _summary_match(title: str, names: set[str]) -> bool:
+        # Prefer the documented summary labels, but title is authoritative.
+        m = summary_title_re.match(title or "")
+        if not m:
+            return False
+        summary_label = f"sprint-{m.group(1)}"
+        if not (
+            summary_label == sprint_label
+            or summary_label.startswith(sprint_label + ".")
+        ):
+            return False
+        # Open summary issues are usually sprint-summary/docs; the AC5 test also
+        # models them with UAT. Accept either so a summary is never left orphaned.
+        return bool(names & {"sprint-summary", "docs", "documentation", "UAT"})
+
+    def _to_row(iss: dict) -> dict:
+        return {
+            "number": iss["number"],
+            "title": iss.get("title", ""),
+            "url": iss.get("url", ""),
+        }
+
     r = _r(repo_name)
     mirror = _mirror_issues(r)
     if mirror is not None:
         out = []
+        seen: set[int] = set()
         for iss in mirror:
             if iss.get("state") != "open":
                 continue
-            names = {lbl.get("name") for lbl in iss.get("labels") or [] if isinstance(lbl, dict)}
-            if "UAT" not in names:
+            names = {
+                lbl.get("name")
+                for lbl in iss.get("labels") or []
+                if isinstance(lbl, dict)
+            }
+            title = iss.get("title", "") or ""
+            is_uat_ticket = "UAT" in names and _label_match(names)
+            is_summary = _summary_match(title, names)
+            if not (is_uat_ticket or is_summary):
                 continue
-            if not (sprint_label in names or any(n.startswith(sprint_label + ".") for n in names)):
+            num = iss["number"]
+            if num in seen:
                 continue
-            out.append({
-                "number": iss["number"],
-                "title": iss.get("title", ""),
-                "url": iss.get("url", ""),
-            })
+            seen.add(num)
+            out.append(_to_row(iss))
         return out
-    args = [
+
+    # Fallback: two list calls — UAT tickets + summary-labeled issues — then
+    # filter locally. Avoids requiring the sprint-N label on summaries.
+    uat_issues = _json(
         "issue", "list", "--repo", r,
         "--label", "UAT",
         "--state", "open",
         "--json", "number,title,url,labels",
         "--limit", "200",
-    ]
-    all_issues = _json(*args)
+    )
+    try:
+        summary_issues = _json(
+            "issue", "list", "--repo", r,
+            "--label", "sprint-summary",
+            "--state", "open",
+            "--json", "number,title,url,labels",
+            "--limit", "200",
+        )
+    except Exception:
+        summary_issues = []
+
     out = []
-    for iss in all_issues:
-        names = {lbl.get("name") for lbl in iss.get("labels") or [] if isinstance(lbl, dict)}
-        if sprint_label in names or any(n.startswith(sprint_label + ".") for n in names):
-            out.append({"number": iss["number"], "title": iss.get("title", ""), "url": iss.get("url", "")})
+    seen: set[int] = set()
+    for iss in list(uat_issues) + list(summary_issues):
+        names = {
+            lbl.get("name")
+            for lbl in iss.get("labels") or []
+            if isinstance(lbl, dict)
+        }
+        title = iss.get("title", "") or ""
+        is_uat_ticket = "UAT" in names and _label_match(names)
+        is_summary = _summary_match(title, names)
+        if not (is_uat_ticket or is_summary):
+            continue
+        num = iss["number"]
+        if num in seen:
+            continue
+        seen.add(num)
+        out.append(_to_row(iss))
     return out
 
 

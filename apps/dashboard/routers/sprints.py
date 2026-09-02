@@ -119,13 +119,18 @@ def rerun_sprint(sprint_label: str, body: SprintRerunBody | None = None):
 
 
 class SprintDispatchBody(BaseModel):
-    """Body for POST /api/sprints/{label}/dispatch (issue #2315).
+    """Body for POST /api/sprints/{label}/dispatch (issue #2315 / #2353).
 
-    ``tickets`` is executed in the order given. The runner never sorts or
-    reorders it — ticket sequencing belongs to the operator (#2311).
+    Non-empty ``tickets`` are executed in the order given — the runner never
+    sorts or reorders that list (#2311). When ``tickets`` is empty (or
+    ``all`` is true), open issues for the sprint label are resolved from the
+    issues mirror and ordered by ascending issue number unless
+    ``order="dag"``.
     """
 
-    tickets: list[int]
+    tickets: list[int] = []
+    all: bool = False
+    order: str | None = None  # "dag" | None (default: ascending issue number)
     repo: str | None = None
     cwd: str | None = None
     baseline_note: str | None = None
@@ -137,6 +142,58 @@ def _commander_repo_root():
     return Path(config.__file__).resolve().parent.parent.parent
 
 
+def _apply_dag_order(sprint_label: str, project: str, tickets: list[int]) -> list[int]:
+    """Reorder ``tickets`` using the existing DAG preview; keep unknowns last."""
+    preview = sprints_service.dag_order_preview(sprint_label, project)
+    new_order = preview.get("new_order") or []
+    ticket_set = set(tickets)
+    ordered = [n for n in new_order if n in ticket_set]
+    seen = set(ordered)
+    return ordered + [n for n in tickets if n not in seen]
+
+
+def _resolve_dispatch_tickets(
+    sprint_label: str,
+    body: SprintDispatchBody,
+    *,
+    repo: str | None,
+) -> list[int]:
+    """Resolve the ticket list for a dispatch call (issue #2353).
+
+    Explicit non-empty ``tickets`` win (order preserved). Otherwise open
+    issues for the exact sprint label are loaded (child labels like
+    ``sprint-N.1`` are excluded). Default order is ascending issue number;
+    ``order="dag"`` uses :func:`sprints_service.dag_order_preview`.
+    """
+    if body.tickets:
+        tickets = list(body.tickets)
+    else:
+        import github_client
+        from services.sprint_manager.ticket_retry import open_issue_numbers_for_label
+
+        tickets = open_issue_numbers_for_label(github_client, sprint_label, repo)
+
+    if not tickets:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"no open tickets for label {sprint_label!r}"
+                if not body.tickets
+                else "tickets must not be empty"
+            ),
+        )
+
+    if (body.order or "").lower() == "dag":
+        if not repo:
+            raise HTTPException(
+                status_code=400,
+                detail="order=dag requires repo (or sprint.yaml repo_name)",
+            )
+        tickets = _apply_dag_order(sprint_label, repo, tickets)
+
+    return tickets
+
+
 @router.post("/api/sprints/{sprint_label}/dispatch")
 def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
     """Start a dispatch run for a sprint and return its handle (issue #2315).
@@ -146,6 +203,10 @@ def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
     elevating anything itself.
 
     Returns immediately; poll ``GET /api/sprints/dispatch/{run_id}`` for status.
+
+    When ``tickets`` is omitted/empty (or ``all: true``), open issues carrying
+    this sprint label are resolved automatically (#2353). Child labels
+    (``sprint-N.1``) are not included when dispatching parent ``sprint-N``.
     """
     from pathlib import Path
 
@@ -155,9 +216,8 @@ def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
         start_run,
     )
 
-    if not body.tickets:
-        raise HTTPException(status_code=400, detail="tickets must not be empty")
-
+    # Empty ``tickets`` (or ``all: true``) resolves open issues for the label
+    # (#2353). Explicit non-empty ``tickets`` always win, even with ``all``.
     repo_root = _commander_repo_root()
     cwd = Path(body.cwd) if body.cwd else repo_root
     if not cwd.exists():
@@ -178,6 +238,8 @@ def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
 
     repo = body.repo or config.repo_name or None
 
+    tickets = _resolve_dispatch_tickets(sprint_label, body, repo=repo)
+
     # Sprint-branch model: create sprint/sprint-N from develop before
     # dispatching tickets so feature branches have a stable base (#2329).
     sprint_branch = None
@@ -195,7 +257,7 @@ def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
 
     run = start_run(
         sprint_label,
-        body.tickets,
+        tickets,
         repo=repo,
         repo_root=repo_root,
         cwd=cwd,

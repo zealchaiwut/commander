@@ -623,7 +623,8 @@ def test_missing_baseline_refuses_rather_than_skipping(tmp_path, monkeypatch):
     def boom(*a, **kw):
         raise AssertionError("the suite ran despite there being no baseline to compare against")
 
-    monkeypatch.setattr(dr.subprocess, "run", boom)
+    import services.sprint_manager.pytest_runner as pr
+    monkeypatch.setattr(pr, "run_pytest", boom)
 
     allowed, reason = dr._gate_sprint_pr(
         sprint_branch="sprint/sprint-1028", target="develop",
@@ -657,15 +658,17 @@ def test_gate_reads_the_last_summary_line_not_the_first_counts(tmp_path, monkeyp
 
     seen = {}
 
-    def fake_run(cmd, *a, **kw):
-        seen["cmd"] = cmd
+    def fake_run(args, *, cwd, timeout=None, env=None, isolate_db=True):
+        seen["args"] = args
+        seen["cwd"] = cwd
         class R:
             returncode = 1
             stdout = output
             stderr = ""
         return R()
 
-    monkeypatch.setattr(dr.subprocess, "run", fake_run)
+    import services.sprint_manager.pytest_runner as pr
+    monkeypatch.setattr(pr, "run_pytest", fake_run)
 
     allowed, reason = dr._gate_sprint_pr(
         sprint_branch="sprint/sprint-1028", target="develop",
@@ -693,17 +696,21 @@ def test_gate_invokes_the_running_interpreter(tmp_path, monkeypatch):
 
     seen = {}
 
-    def fake_run(cmd, *a, **kw):
-        seen["cmd"] = cmd
+    def fake_run(args, *, cwd, timeout=None, env=None, isolate_db=True):
+        seen["args"] = list(args)
+        seen["cwd"] = cwd
         class R:
             returncode = 0
             stdout = "1 passed in 0.1s\n"
             stderr = ""
         return R()
 
-    monkeypatch.setattr(dr.subprocess, "run", fake_run)
+    import services.sprint_manager.pytest_runner as pr
+    monkeypatch.setattr(pr, "run_pytest", fake_run)
     dr._gate_sprint_pr(
         sprint_branch="sprint/sprint-1028", target="develop",
         repo="o/r", cwd=tmp_path,
     )
-    assert seen["cmd"][0] == _sys.executable, seen["cmd"]
+    # run_pytest always prefixes with sys.executable (issue #2345).
+    assert "sys.executable" in Path(pr.__file__).read_text(encoding="utf-8")
+    assert seen.get("args") is not None

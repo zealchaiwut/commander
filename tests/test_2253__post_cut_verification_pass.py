@@ -7,9 +7,13 @@ AC coverage:
 - AC3: pytest collection-error count at or below 25 (this caps collection
        ERRORS, not test failures — the suite carries ~2442 failures, see #2338)
 - AC4: Server imports without ModuleNotFoundError from deleted orchestrator modules
+
+Issue #2345: collection used to spawn a full-tree ``pytest --co`` once per AC3/AC4
+assertion. That is now a single module-scoped cached collect, so AC3/AC4 share one nested collect instead of four.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -36,18 +40,21 @@ def client():
     return TestClient(server.app)
 
 
-def _collect_errors() -> str:
-    """Run pytest --collect-only and return combined stdout+stderr."""
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", str(TESTS_DIR), str(DASH_TESTS_DIR),
-         "--co", "--tb=no", "-q"],
-        capture_output=True,
-        text=True,
+@pytest.fixture(scope="module")
+def collection_output() -> str:
+    """One process-group-safe full-tree ``--co`` for the whole module (#2345)."""
+    from services.sprint_manager.pytest_runner import run_pytest
+
+    result = run_pytest(
+        [str(TESTS_DIR), str(DASH_TESTS_DIR), "--co", "--tb=no", "-q"],
         cwd=str(REPO_ROOT),
+        timeout=300,
     )
-    return result.stdout + result.stderr
+    return (result.stdout or "") + (result.stderr or "")
 
 
+
+# ── AC1
 # ── AC1: key UI-surface endpoints respond without 5xx ─────────────────────────
 
 class TestKeyUISurfacesRespondWithout5xx:
@@ -144,7 +151,6 @@ class TestLookoutContractEndpoints:
         assert isinstance(body["sprints"], list), (
             f"'sprints' value should be a list, got {type(body['sprints'])}"
         )
-        # Also check pagination keys are present (lookout contract shape)
         for key in ("offset", "limit", "total"):
             assert key in body, f"Pagination key '{key}' missing from history response"
 
@@ -156,7 +162,6 @@ class TestLookoutContractEndpoints:
             f"expected 200. Body: {resp.text[:300]}"
         )
         body = resp.json()
-        # Project brief must carry at least a project/date identifier
         assert "project" in body or "slug" in body or "repo" in body, (
             f"Brief response missing project identifier. Got keys: {list(body.keys())}"
         )
@@ -165,18 +170,12 @@ class TestLookoutContractEndpoints:
 # ── AC3: collection error count at or below baseline ──────────────────────────
 
 class TestScopedGateBaseline:
-    """AC3: pytest collection errors stay at or below 25.
+    """AC3: pytest collection errors stay at or below 25."""
 
-    This caps collection ERRORS, a different metric from test failures. The
-    suite carries ~2442 failures (#2338); conflating the two is what the old
-    "25-failure baseline" wording did. The threshold below is correct.
-    """
-
-    def test_collection_error_count_at_most_baseline(self):
+    def test_collection_error_count_at_most_baseline(self, collection_output):
         """AC3: collection error count ≤ 25 (sprint exit gate baseline)."""
-        output = _collect_errors()
         error_lines = [
-            line for line in output.splitlines()
+            line for line in collection_output.splitlines()
             if line.startswith("ERROR ")
         ]
         assert len(error_lines) <= 25, (
@@ -191,28 +190,24 @@ class TestScopedGateBaseline:
 class TestNoDeletedModuleImportErrors:
     """AC4: server starts clean — no import errors from removed orchestrator modules."""
 
-    def test_no_sprint_manager_module_import_error(self):
+    def test_no_sprint_manager_module_import_error(self, collection_output):
         """AC4: no test file fails due to missing sprint_manager.py module."""
-        output = _collect_errors()
         assert "No module named 'services.sprint_manager.sprint_manager'" \
-               not in output, \
+               not in collection_output, \
                "Found test(s) still importing the deleted sprint_manager.py module"
 
-    def test_no_dispatch_module_import_error(self):
+    def test_no_dispatch_module_import_error(self, collection_output):
         """AC4: no test file fails due to missing dispatch.py module."""
-        output = _collect_errors()
-        assert "No module named 'services.sprint_manager.dispatch'" not in output, \
+        assert "No module named 'services.sprint_manager.dispatch'" not in collection_output, \
                "Found test(s) still importing the deleted dispatch module"
 
-    def test_no_pipeline_module_import_error(self):
+    def test_no_pipeline_module_import_error(self, collection_output):
         """AC4: no test file fails due to missing pipeline.py module."""
-        output = _collect_errors()
-        assert "No module named 'services.sprint_manager.pipeline'" not in output, \
+        assert "No module named 'services.sprint_manager.pipeline'" not in collection_output, \
                "Found test(s) still importing the deleted pipeline module"
 
     def test_server_imports_without_orchestrator_modules(self):
         """AC4: `import server` succeeds — no unresolved orchestrator imports."""
-        import os
         result = subprocess.run(
             [sys.executable, "-c",
              "import sys; sys.path.insert(0, 'apps/dashboard'); "

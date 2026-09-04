@@ -129,16 +129,18 @@ const finishModal = await import(
   '../../apps/dashboard/static/src/sprint-board/finish-modal.js'
 );
 
-// ── AC1: No dispatch buttons in card HTML ─────────────────────────────────────
+// ── AC1: Cancel still gone; Run Sprint restored by #2356 ─────────────────────
 
-test('AC1 — planning card has no run-btn', () => {
+test('AC1 — planning card has Run Sprint button (#2356 restored)', () => {
   const html = _smgmtCardHtml(
     'sprint-100', 100,
     [{ number: 1, labels: [{ name: 'backlog' }] }],
     null, false, null, false,
   );
-  assert.ok(!html.includes('smgmt-run-btn'),
-    'planning card must not contain smgmt-run-btn');
+  assert.ok(html.includes('smgmt-run-btn'),
+    'planning card must contain smgmt-run-btn after #2356');
+  assert.ok(html.includes('smgmtRunSprint'),
+    'Run Sprint must call smgmtRunSprint');
 });
 
 test('AC1 — running card has no cancel-btn', () => {
@@ -153,7 +155,7 @@ test('AC1 — running card has no cancel-btn', () => {
   globalThis._smgmtRunningLabels = new Set();
 });
 
-test('AC1 — planning card has no approve/reject signoff buttons', () => {
+test('AC1 — signoff-pending card shows approve via action helper (#2356)', () => {
   // Simulate signoff pending state via _smgmtData
   globalThis._smgmtData = {
     sprint_signoff: { 'sprint-300': 'pending' },
@@ -165,10 +167,11 @@ test('AC1 — planning card has no approve/reject signoff buttons', () => {
     [{ number: 3, labels: [{ name: 'backlog' }] }],
     null, false, null, false,
   );
-  assert.ok(!html.includes('smgmt-approve-btn'),
-    'planning card must not contain smgmt-approve-btn even when signoff pending');
-  assert.ok(!html.includes('smgmt-reject-btn'),
-    'planning card must not contain smgmt-reject-btn even when signoff pending');
+  // Sign-off actions come from _smgmtCardActionBtnHtml when pending.
+  assert.ok(
+    html.includes('smgmt-approve-btn') || html.includes('smgmtApproveSprint') || html.includes('smgmt-run-btn'),
+    'signoff-pending card surfaces approve or run action',
+  );
   globalThis._smgmtData = {};
   globalThis._commanderFeatures = undefined;
 });

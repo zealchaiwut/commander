@@ -35,9 +35,14 @@ from typing import Callable, Optional
 
 RUNTIME_DIRNAME = "runtime"
 STEPS = ("coder", "tester")
+# Once-per-sprint wrap-up after every ticket's tester step succeeds, before the
+# sprint→develop PR opens (issue #2343). Not part of the per-ticket loop.
+WRAPUP_STEPS = ("reviewer", "documentor")
 
 DEFAULT_MODEL = os.environ.get("COMMANDER_DISPATCH_MODEL", "sonnet")
 DEFAULT_AGENT_TIMEOUT = int(os.environ.get("COMMANDER_DISPATCH_AGENT_TIMEOUT", "3600"))
+DEFAULT_REVIEWER_MODEL = "claude-haiku-4-5"
+DEFAULT_DOCUMENTOR_MODEL = "claude-sonnet-4-6"
 
 # Appended to every agent prompt. With the gate pipeline deleted, the
 # instructions given to an agent are most of the quality bar that remains, so
@@ -85,6 +90,7 @@ class DispatchRun:
     current_issue: Optional[int] = None
     current_step: Optional[str] = None
     failed_issue: Optional[int] = None
+    failed_step: Optional[str] = None  # set on wrap-up failure (#2343)
     outcomes: list[StepOutcome] = field(default_factory=list)
     started_at: str = ""
     finished_at: str = ""
@@ -101,6 +107,7 @@ class DispatchRun:
             "current_issue": self.current_issue,
             "current_step": self.current_step,
             "failed_issue": self.failed_issue,
+            "failed_step": self.failed_step,
             "outcomes": [o.to_dict() for o in self.outcomes],
             "started_at": self.started_at,
             "finished_at": self.finished_at,
@@ -250,13 +257,28 @@ class ProjectDispatchConfig:
     coder_worktree: Path
     tester_worktree: Path
     coder_model: Optional[str] = None
+    reviewer_model: Optional[str] = None
+    documentor_model: Optional[str] = None
 
     def prompt_for(self, step: str, issue_url: str) -> str:
         template = self.coder_prompt if step == "coder" else self.tester_prompt
         return template.replace("{issue_url}", issue_url)
 
     def worktree_for(self, step: str) -> Path:
+        # Wrap-up steps (reviewer/documentor) run against the coder worktree —
+        # that is where the sprint branch tip lives for the sprint→develop PR.
+        if step in ("reviewer", "documentor"):
+            return self.coder_worktree
         return self.coder_worktree if step == "coder" else self.tester_worktree
+
+    def model_for(self, step: str) -> Optional[str]:
+        if step == "coder":
+            return self.coder_model
+        if step == "reviewer":
+            return self.reviewer_model
+        if step == "documentor":
+            return self.documentor_model
+        return None
 
 
 class DispatchConfigError(RuntimeError):
@@ -309,6 +331,8 @@ def load_project_config(project_root: Path) -> ProjectDispatchConfig:
         coder_worktree=Path(worktrees["coder"]),
         tester_worktree=Path(worktrees["tester"]),
         coder_model=agent_config.get("coder_model"),
+        reviewer_model=agent_config.get("reviewer_model"),
+        documentor_model=agent_config.get("documentor_model"),
     )
 
 
@@ -533,13 +557,13 @@ def _gate_sprint_pr(
     # and read as a refusal.
     timeout = int(os.environ.get("COMMANDER_BASELINE_TIMEOUT", "1800"))
 
+    # Process-group kill on timeout so nested pytest grandchildren cannot
+    # survive as PPID-1 orphans (issue #2345).
+    from services.sprint_manager.pytest_runner import run_pytest
+
     try:
-        result = subprocess.run(
-            # sys.executable, not "python3": the system python3 is 3.9 on
-            # zeal-server and cannot even import this codebase. finish_feature.py
-            # already does this.
-            [sys.executable, "-m", "pytest"] + pytest_args,
-            cwd=str(cwd), capture_output=True, text=True, timeout=timeout,
+        result = run_pytest(
+            pytest_args, cwd=str(cwd), timeout=timeout,
         )
         output = (result.stdout or "") + (result.stderr or "")
     except subprocess.TimeoutExpired:
@@ -615,6 +639,58 @@ def _open_sprint_pr(run: DispatchRun, *, cwd: Path) -> Optional[int]:
     return None
 
 
+def _env_flag_truthy(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _wrapup_skipped(step: str) -> bool:
+    """Escape hatches from issue #2343 AC5."""
+    if step == "reviewer":
+        return _env_flag_truthy("COMMANDER_SKIP_REVIEW")
+    if step == "documentor":
+        return _env_flag_truthy("COMMANDER_SKIP_DOCS")
+    return False
+
+
+def build_wrapup_prompt(step: str, run: DispatchRun) -> str:
+    """Prompt for a once-per-sprint wrap-up agent (reviewer / documentor)."""
+    branch = run.sprint_branch or "(no sprint branch)"
+    tickets = ", ".join(f"#{n}" for n in run.tickets) or "(none)"
+    if step == "reviewer":
+        return (
+            f"You are the sprint reviewer for {run.repo} / {run.sprint_label}.\n"
+            f"Sprint branch: {branch}\n"
+            f"Tickets in this dispatch (order preserved): {tickets}\n\n"
+            "Run the equivalent of `/rev` against the sprint branch: review the "
+            "merged ticket diffs vs their specs, post a structured review comment "
+            "on the sprint summary (or open follow-up tickets for non-blockers), "
+            "then exit. Do not open the sprint→develop PR — dispatch owns that.\n"
+        )
+    if step == "documentor":
+        return (
+            f"You are the sprint documentor for {run.repo} / {run.sprint_label}.\n"
+            f"Sprint branch: {branch}\n"
+            f"Tickets in this dispatch (order preserved): {tickets}\n\n"
+            "Run the documenter agent against the sprint branch: update README / "
+            "CHANGELOG / architecture docs for what shipped, commit on the sprint "
+            "branch so the docs ride in the same sprint→develop PR. Do not open "
+            "that PR — dispatch owns that.\n"
+        )
+    raise ValueError(f"unknown wrap-up step: {step!r}")
+
+
+def _wrapup_model(step: str, config: Optional[ProjectDispatchConfig]) -> str:
+    if config is not None:
+        configured = config.model_for(step)
+        if configured:
+            return configured
+    if step == "reviewer":
+        return DEFAULT_REVIEWER_MODEL
+    if step == "documentor":
+        return DEFAULT_DOCUMENTOR_MODEL
+    return DEFAULT_MODEL
+
+
 def execute_run(
     run: DispatchRun,
     *,
@@ -631,8 +707,9 @@ def execute_run(
     tickets are never attempted after a failure — continuing past one is how a
     broken ticket poisons the ones that build on it.
 
-    When a sprint branch is active (``run.sprint_branch`` is set), opens a PR
-    from ``sprint/sprint-N`` into ``develop`` after all tickets succeed (#2329).
+    When a sprint branch is active (``run.sprint_branch`` is set), runs the
+    once-per-sprint reviewer then documentor steps (issue #2343) and opens a PR
+    from ``sprint/sprint-N`` into ``develop`` after they succeed (#2329).
     """
     spawn = spawn or default_spawn
     run.status = "running"
@@ -660,7 +737,7 @@ def execute_run(
                 config.prompt_for(step, f"https://github.com/{run.repo}/issues/{issue}")
                 if config else None
             )
-            step_model = config.coder_model if (config and step == "coder") else None
+            step_model = config.model_for(step) if config else None
 
             ok, detail = spawn(
                 step, issue, run.repo,
@@ -683,6 +760,52 @@ def execute_run(
             if not ok:
                 run.status = "failed"
                 run.failed_issue = issue
+                run.failed_step = step
+                run.current_issue = None
+                run.current_step = None
+                run.finished_at = _now()
+                save_run(run, repo_root)
+                return run
+
+            save_run(run, repo_root)
+
+    # Once-per-sprint wrap-up before the sprint→develop PR (issue #2343).
+    # Skipped when there is no sprint branch — there is nothing to review/doc
+    # against, and no PR to gate.
+    if run.sprint_branch:
+        for step in WRAPUP_STEPS:
+            if stop_requested(run.run_id, repo_root):
+                run.status = "stopped"
+                run.current_issue = None
+                run.current_step = None
+                run.finished_at = _now()
+                save_run(run, repo_root)
+                return run
+
+            if _wrapup_skipped(step):
+                run.outcomes.append(StepOutcome(
+                    issue=0, step=step, ok=True,
+                    detail=f"skipped via COMMANDER_SKIP_* escape hatch",
+                ))
+                continue
+
+            run.current_issue = None
+            run.current_step = step
+            save_run(run, repo_root)
+
+            step_cwd = config.worktree_for(step) if config else cwd
+            ok, detail = spawn(
+                step, 0, run.repo,
+                cwd=step_cwd,
+                baseline_note=baseline_note,
+                prompt=build_wrapup_prompt(step, run),
+                model=_wrapup_model(step, config),
+            )
+            run.outcomes.append(StepOutcome(issue=0, step=step, ok=ok, detail=detail))
+
+            if not ok:
+                run.status = "failed"
+                run.failed_step = step
                 run.current_issue = None
                 run.current_step = None
                 run.finished_at = _now()
@@ -697,7 +820,8 @@ def execute_run(
     run.finished_at = _now()
 
     # Sprint-branch model: all tickets merged into sprint/sprint-N.  Open
-    # the one PR that brings the sprint into develop (#2329).
+    # the one PR that brings the sprint into develop (#2329). Only reached
+    # after reviewer + documentor succeed (or are skipped) — #2343.
     if run.sprint_branch:
         step_cwd = config.worktree_for("coder") if config else cwd
         pr_num = _open_sprint_pr(run, cwd=step_cwd)

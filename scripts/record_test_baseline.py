@@ -114,10 +114,15 @@ def main() -> None:
 
     print(f"Measuring {args.repo} @ {measured_ref} in {run_root}…")
 
+    # Process-group kill on timeout so nested pytest grandchildren cannot
+    # survive as PPID-1 orphans (issue #2345).
+    from services.sprint_manager.pytest_runner import run_pytest
+
     try:
-        proc = subprocess.run(
-            [sys.executable, "-m", "pytest", *shlex.split(args.pytest_args)],
-            cwd=run_root, capture_output=True, text=True, timeout=args.timeout,
+        proc = run_pytest(
+            shlex.split(args.pytest_args),
+            cwd=run_root,
+            timeout=args.timeout,
         )
     except subprocess.TimeoutExpired:
         print(

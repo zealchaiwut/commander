@@ -151,8 +151,13 @@ def _run_suite_on_branch(branch: str, timeout_seconds: int) -> tuple[str, bool]:
     worktree, where git would refuse.
 
     Returns (combined_output, timed_out).
+
+    Uses a process-group kill on timeout (issue #2345) so nested pytest
+    grandchildren spawned by meta-tests cannot survive as PPID-1 orphans.
     """
     import tempfile
+
+    from services.sprint_manager.pytest_runner import run_pytest
 
     # Default excludes live_http tests so baseline counts are stable across runs (#2339).
     # Use shlex.split so quoted expressions like -m "not live_http" parse correctly.
@@ -166,9 +171,8 @@ def _run_suite_on_branch(branch: str, timeout_seconds: int) -> tuple[str, bool]:
         if not ok:
             return (f"could not create worktree for origin/{branch}: {out}", False)
         try:
-            proc = subprocess.run(
-                [sys.executable, "-m", "pytest", *pytest_args],
-                cwd=wt, capture_output=True, text=True, timeout=timeout_seconds,
+            proc = run_pytest(
+                pytest_args, cwd=wt, timeout=timeout_seconds,
             )
             return ((proc.stdout or "") + (proc.stderr or ""), False)
         except subprocess.TimeoutExpired as exc:

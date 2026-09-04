@@ -1520,15 +1520,21 @@ export function _smgmtCardHtml(
     (finished && !isRunning && !isHasRework && !planBlocksPostRun);
   const showRunningChrome = isRunningView && !isAwaitingMerge;
   const isPostRun = !isRunningView && !planBlocksPostRun && hasLedgerRun;
-  // Dispatch controls removed (issue #2251). Action button logic is preserved
-  // in _smgmtCardActionBtnHtml() for reference; preflight warnings are still
-  // accessible via the Preflight button on planning-state cards.
-  const actionBtn = (!isRunning && !isLinger && !isHasRework && !isPostRun && !finished)
+  // Dispatch via API (#2356) + preflight warnings on planning cards.
+  const canRun = _smgmtHasDispatchableTickets(tickets || []);
+  const runBtnHtml = (!isRunning && !isLinger && !isHasRework && !isPostRun && !finished)
+    ? _smgmtCardActionBtnHtml(label, {
+        isRunning, isLinger, isHasRework, isPostRun,
+        canRun, tickets,
+      })
+    : '';
+  const preflightBtn = (!isRunning && !isLinger && !isHasRework && !isPostRun && !finished)
     ? `<button class="smgmt-preflight-warnings-btn" type="button"
               title="View preflight warnings for this sprint"
               onclick="smgmtOpenPreflightWarnings('${escHtml(label)}')">
          <i class="ti ti-alert-circle"></i> Preflight</button>`
     : '';
+  const actionBtn = `${runBtnHtml}${preflightBtn}`;
 
   const isOutcomeCompleted =
     isReadyToMerge || isHasRework || outcomeState === "completed";
@@ -1737,11 +1743,10 @@ export function _smgmtCardHtml(
     ? `<span class="smgmt-stale-no-tickets-notice" title="No open tickets remain on this sprint"><i class="ti ti-alert-circle"></i> stale — no tickets</span>`
     : "";
 
-  // Pre-dispatch guidance note (issue #2310): visible only on draft sprints that
-  // have never been run and are not yet finished. The run button was removed in
-  // the shrink milestone — dispatch now happens in a Claude Code session.
+  // Pre-dispatch guidance (#2356): Run Sprint hits the dispatch API; overnight
+  // / Hermes may also POST the same endpoint (or /overnight).
   const dispatchNoteHtml = (!isRunning && !hasLedgerRun && !finished)
-    ? `<div class="smgmt-dispatch-note"><i class="ti ti-terminal-2" aria-hidden="true"></i> Dispatch is a Claude Code session — run <code>/coder</code> then <code>/tester</code> per ticket, in dependency order.</div>`
+    ? `<div class="smgmt-dispatch-note"><i class="ti ti-player-play" aria-hidden="true"></i> Use <strong>Run Sprint</strong> to start <code>POST /api/sprints/{label}/dispatch</code> (resolves open tickets for this label). Overnight: <code>/overnight</code> then poll status.</div>`
     : "";
 
   return `

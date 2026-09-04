@@ -150,6 +150,82 @@ def load_run(run_id: str, repo_root: Path) -> Optional[dict]:
         return None
 
 
+_ACTIVE_DISPATCH_STATUSES = frozenset({"queued", "running"})
+
+
+def list_dispatch_runs(
+    repo_root: Path,
+    *,
+    statuses: Optional[set[str] | frozenset[str]] = None,
+    sprint_label: Optional[str] = None,
+    repo: Optional[str] = None,
+) -> list[dict]:
+    """Load ``dispatch-*.json`` records under ``.commander/runtime`` (#2355).
+
+    Local files only — no GitHub. ``statuses`` defaults to active
+    (``queued`` / ``running``). Matching is exact on ``sprint_label`` when
+    given; ``repo`` matches the stored ``repo`` field (owner/repo) when given.
+    """
+    wanted = statuses if statuses is not None else _ACTIVE_DISPATCH_STATUSES
+    root = runtime_dir(repo_root)
+    if not root.is_dir():
+        return []
+    out: list[dict] = []
+    for path in sorted(root.glob("dispatch-*.json")):
+        if path.name.endswith(".stop"):
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        if wanted is not None and data.get("status") not in wanted:
+            continue
+        if sprint_label is not None and data.get("sprint_label") != sprint_label:
+            continue
+        if repo is not None:
+            run_repo = data.get("repo") or ""
+            if run_repo and run_repo != repo and not _repo_aliases_match(run_repo, repo):
+                continue
+        out.append(data)
+    return out
+
+
+def _repo_aliases_match(a: str, b: str) -> bool:
+    """True when owner/repo and bare slug refer to the same project."""
+    a = (a or "").strip()
+    b = (b or "").strip()
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    return a.split("/")[-1] == b.split("/")[-1]
+
+
+def dispatch_live_fields(run: dict) -> dict:
+    """Compact dispatch block for Running / live snapshots (#2355).
+
+    Clients that need tick-level progress should poll
+    ``GET /api/sprints/dispatch/{run_id}`` — SSE may also emit ``dispatch``
+    events when the JSON file changes, but polling is the supported contract.
+    """
+    run_id = run.get("run_id")
+    return {
+        "run_id": run_id,
+        "status": run.get("status"),
+        "current_issue": run.get("current_issue"),
+        "current_step": run.get("current_step"),
+        "failed_issue": run.get("failed_issue"),
+        "tickets": list(run.get("tickets") or []),
+        "remaining": list(run.get("remaining") or []),
+        "outcomes": list(run.get("outcomes") or [])[-10:],
+        "started_at": run.get("started_at"),
+        "finished_at": run.get("finished_at"),
+        "poll_url": f"/api/sprints/dispatch/{run_id}" if run_id else None,
+    }
+
+
 def request_stop(run_id: str, repo_root: Path) -> bool:
     """Ask a run to stop at the next step boundary. Returns False if unknown."""
     if load_run(run_id, repo_root) is None:

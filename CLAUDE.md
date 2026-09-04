@@ -242,21 +242,29 @@ To migrate an existing flat project to nested:
 ## Dispatch — how sprints actually run
 
 The autonomous orchestrator was deleted in the 2026-08 shrink. Dispatch is a
-per-ticket `/coder` → `/tester` loop. Two ways to trigger it:
+per-ticket coder → tester loop inside Commander. Claude Code overnight should
+**only call HTTP** — never spawn `claude -p --dangerously-skip-permissions`
+itself.
 
-**Via the API** (preferred, issues #2314/#2315):
+**Via the API** (preferred, issues #2314/#2315/#2353–#2357):
 
 ```
-POST /api/sprints/{label}/dispatch   {"tickets": [80, 81], "repo": "owner/repo"}
+POST /api/sprints/{label}/dispatch   {"all": true, "repo": "owner/repo"}
+                                     # or {"tickets": [80, 81], "repo": "..."}
 GET  /api/sprints/dispatch/{run_id}          live status
 POST /api/sprints/dispatch/{run_id}/stop     stop at the next step boundary
+POST /api/sprints/{label}/overnight          babysitter retry loop (#2354)
+GET  /api/sprints/overnight/{id}
 POST /api/sprints/{label}/rerun              reset failed tickets (#2318)
+POST /api/sprints/{label}/complete-after-dispatch   merge sprint PR (#2357)
 ```
 
-Tickets run **in the order given** — the runner never sorts or reorders. It
-stops on the first failed step rather than continuing into dependent tickets.
-Rerun does **not** dispatch; resetting and running are separate calls so a reset
-can be inspected first.
+`POST /api/sprints/run` is **deleted** — do not use it.
+
+Empty `tickets` / `"all": true` resolves open issues for the sprint label
+(#2353). Explicit ticket lists still preserve caller order. The runner stops
+on the first failed step. Rerun does **not** dispatch; resetting and running
+are separate calls.
 
 **By hand**, one ticket at a time:
 

@@ -48,6 +48,8 @@ and (planned) OpenAPI YAML. Visual / BA Design Refs live in `DESIGN.md`.
 | Doc | Role |
 |-----|------|
 | [`DESIGN.md`](DESIGN.md) | UI / Design Refs headings for BA |
+| [`docs/requirements/`](docs/requirements/) | Capability IDs (REQ-*) indexed over ADRs/milestones |
+| [`docs/api/overnight.yaml`](docs/api/overnight.yaml) | OpenAPI subset for overnight / Hermes HTTP |
 | [`docs/agent-guide.md`](docs/agent-guide.md) | HTTP recipes for Hermes / Claude Code |
 | [`docs/architecture/`](docs/architecture/) | Technical design chapters |
 | [`docs/decisions/`](docs/decisions/) | ADRs (discussion outcomes) |

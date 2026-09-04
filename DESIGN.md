@@ -159,9 +159,10 @@ is absent in a non-Commander project, warn and skip Design Refs.
 ### Hermes / Claude Code HTTP
 
 Overnight recipe and error conventions:
-[docs/agent-guide.md](docs/agent-guide.md). Planned checked-in OpenAPI YAML
-will mirror the Hermes-critical + overnight surface; until then, `/openapi.json`
-plus the agent guide are authoritative.
+[docs/agent-guide.md](docs/agent-guide.md). Checked-in OpenAPI subset:
+[docs/api/overnight.yaml](docs/api/overnight.yaml). Capability IDs:
+[docs/requirements/](docs/requirements/). Full runtime schema remains
+`GET /openapi.json`.
 
 ---
 

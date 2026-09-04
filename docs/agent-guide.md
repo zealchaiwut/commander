@@ -1,8 +1,10 @@
 # Commander Agent Operate Guide
 
 Canonical workflow recipes for external agents. The full API schema is at
-`GET /openapi.json` (~60 routers). This guide documents the call chains an
-external agent needs to operate the Commander platform end-to-end.
+`GET /openapi.json` (~60 routers). The **reviewed overnight / Hermes subset**
+(OpenAPI YAML) is [`docs/api/overnight.yaml`](api/overnight.yaml). Capability
+IDs: [`docs/requirements/`](requirements/). This guide documents the call
+chains an external agent needs to operate the Commander platform end-to-end.
 
 Served by `GET /api/agent-guide` as `{content, version}`.
 

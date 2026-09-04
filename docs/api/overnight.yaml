@@ -1,0 +1,780 @@
+openapi: 3.0.3
+info:
+  title: Commander — Overnight & Hermes HTTP surface
+  description: |
+    Spec-Driven Development contract for Claude Code / Hermes overnight and the
+    dashboard paths that share the same backend.
+
+    **Runtime source of truth** for the full app remains `GET /openapi.json`.
+    This file is the **reviewed subset** for dispatch, overnight, running/live,
+    finish / UAT sign-off, and complete-after-dispatch.
+
+    Deleted routes (do not call): `POST /api/sprints/run`,
+    `DELETE /api/sprints/run/{label}`, `/api/scheduler/*`.
+
+    Requirements: `docs/requirements/dispatch-overnight.md`,
+    `running-live.md`, `finish-signoff.md`, `security-auth.md`.
+    Recipes: `docs/agent-guide.md`.
+  version: "1.0.0"
+  contact:
+    name: Commander operators
+
+servers:
+  - url: http://localhost:8000
+    description: PRD dashboard (default)
+  - url: http://localhost:8001
+    description: UAT dashboard
+
+tags:
+  - name: dispatch
+    description: Queue consumer — coder/tester (+ wrap-up) per ticket
+  - name: overnight
+    description: Babysitter — dispatch / reset / retry loop
+  - name: running
+    description: Running pane and live snapshots
+  - name: finish
+    description: Merge sprint PR, Finish, UAT sign-off
+  - name: meta
+    description: Agent guide and schema discovery
+
+security:
+  - bearerAuth: []
+  - {}  # GET/SSE open when token unset or path is read-only
+
+paths:
+  /api/sprints/{sprint_label}/dispatch:
+    post:
+      tags: [dispatch]
+      operationId: dispatchSprint
+      summary: Start a dispatch run (REQ-DISPATCH-01..04)
+      description: |
+        Privileged agent spawn runs inside Commander. Empty `tickets` or
+        `all: true` resolves open issues for the exact sprint label.
+      parameters:
+        - $ref: "#/components/parameters/SprintLabel"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SprintDispatchBody"
+            examples:
+              byLabel:
+                summary: Resolve all open tickets for the label
+                value:
+                  all: true
+                  repo: zealchaiwut/commander
+              explicit:
+                summary: Explicit order
+                value:
+                  tickets: [80, 81]
+                  repo: zealchaiwut/commander
+      responses:
+        "200":
+          description: Run started (may still be queued/running)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DispatchRun"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+      security:
+        - bearerAuth: []
+
+  /api/sprints/dispatch/{run_id}:
+    get:
+      tags: [dispatch]
+      operationId: getDispatchRun
+      summary: Poll dispatch run status
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Current dispatch snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DispatchRun"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security: []
+
+  /api/sprints/dispatch/{run_id}/stop:
+    post:
+      tags: [dispatch]
+      operationId: stopDispatchRun
+      summary: Stop at next step boundary
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Stop requested
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id: { type: string }
+                  stop_requested: { type: boolean }
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  /api/sprints/{sprint_label}/overnight:
+    post:
+      tags: [overnight]
+      operationId: overnightSprint
+      summary: Start overnight babysitter (REQ-OVERNIGHT-01)
+      parameters:
+        - $ref: "#/components/parameters/SprintLabel"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SprintOvernightBody"
+            example:
+              all: true
+              repo: zealchaiwut/commander
+              max_retries: 2
+      responses:
+        "200":
+          description: Overnight handle
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OvernightRun"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+      security:
+        - bearerAuth: []
+
+  /api/sprints/overnight/{overnight_id}:
+    get:
+      tags: [overnight]
+      operationId: getOvernightRun
+      summary: Poll overnight status (REQ-OVERNIGHT-02)
+      parameters:
+        - $ref: "#/components/parameters/OvernightId"
+      responses:
+        "200":
+          description: Overnight snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OvernightRun"
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security: []
+
+  /api/sprints/overnight/{overnight_id}/stop:
+    post:
+      tags: [overnight]
+      operationId: stopOvernightRun
+      summary: Stop at next dispatch/retry boundary (REQ-OVERNIGHT-03)
+      parameters:
+        - $ref: "#/components/parameters/OvernightId"
+      responses:
+        "200":
+          description: Stop requested
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  overnight_id: { type: string }
+                  stop_requested: { type: boolean }
+        "404":
+          $ref: "#/components/responses/NotFound"
+      security:
+        - bearerAuth: []
+
+  /api/sprints/{sprint_label}/rerun:
+    post:
+      tags: [dispatch]
+      operationId: rerunSprint
+      summary: Reset failed tickets to dispatchable (does not start dispatch)
+      parameters:
+        - $ref: "#/components/parameters/SprintLabel"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                repo:
+                  type: string
+                  nullable: true
+                dry_run:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: Reset result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "502":
+          description: Rerun failed
+      security:
+        - bearerAuth: []
+
+  /api/sprints/{sprint_label}/complete-after-dispatch:
+    post:
+      tags: [finish, overnight]
+      operationId: completeAfterDispatch
+      summary: Merge sprint PR from green dispatch; optional UAT finish (REQ-FINISH-03..04)
+      parameters:
+        - $ref: "#/components/parameters/SprintLabel"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteAfterDispatchBody"
+            examples:
+              preview:
+                value:
+                  project: zealchaiwut/commander
+                  preview: true
+              mergeAndSignoff:
+                value:
+                  project: zealchaiwut/commander
+                  uat_signoff: true
+      responses:
+        "200":
+          description: Preview or completion result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompleteAfterDispatchResult"
+        "409":
+          description: No successful sprint_pr_number on a done dispatch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+      security:
+        - bearerAuth: []
+
+  /api/running:
+    get:
+      tags: [running]
+      operationId: getRunningSnapshot
+      summary: Running pane snapshot (REQ-RUNNING-01)
+      parameters:
+        - name: project
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/OwnerRepo"
+          description: owner/repo
+      responses:
+        "200":
+          description: Active sprint / dispatch snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunningSnapshot"
+        "404":
+          description: No running sprint for project
+      security: []
+
+  /api/sprints/{sprint_label}/live:
+    get:
+      tags: [running]
+      operationId: getSprintLive
+      summary: Live JSON snapshot including dispatch fields when active
+      parameters:
+        - $ref: "#/components/parameters/SprintLabel"
+        - name: project
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/OwnerRepo"
+      responses:
+        "200":
+          description: Live snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SprintLive"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+      security: []
+
+  /api/sprints/{sprint_label}/live/stream:
+    get:
+      tags: [running]
+      operationId: streamSprintLive
+      summary: SSE live stream (snapshot, log_line, dispatch, complete)
+      parameters:
+        - $ref: "#/components/parameters/SprintLabel"
+        - name: project
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/OwnerRepo"
+      responses:
+        "200":
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+      security: []
+
+  /api/sprints/{sprint_label}/finish-preview:
+    get:
+      tags: [finish]
+      operationId: finishPreview
+      summary: Preview Merge Sprint (PR, UAT tickets)
+      parameters:
+        - $ref: "#/components/parameters/SprintLabel"
+        - name: project
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/OwnerRepo"
+      responses:
+        "200":
+          description: Finish preview payload
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+      security: []
+
+  /api/sprints/{sprint_label}/finish:
+    post:
+      tags: [finish]
+      operationId: finishSprint
+      summary: Merge Sprint / close issues (REQ-FINISH-01)
+      parameters:
+        - $ref: "#/components/parameters/SprintLabel"
+        - name: project
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/OwnerRepo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FinishSprintBody"
+      responses:
+        "200":
+          description: Finish result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Running sprint, rework guard, or merge failure
+      security:
+        - bearerAuth: []
+
+  /api/sprints/{sprint_label}/uat-preview:
+    get:
+      tags: [finish]
+      operationId: uatPreview
+      summary: Dry-run per-sprint UAT sign-off (#2305)
+      parameters:
+        - $ref: "#/components/parameters/SprintLabel"
+        - name: project
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/OwnerRepo"
+      responses:
+        "200":
+          description: Issues that would close
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+      security: []
+
+  /api/sprints/{sprint_label}/uat-signoff:
+    post:
+      tags: [finish]
+      operationId: uatSignoff
+      summary: Per-sprint UAT sign-off (REQ-FINISH-02)
+      parameters:
+        - $ref: "#/components/parameters/SprintLabel"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project]
+              properties:
+                project:
+                  $ref: "#/components/schemas/OwnerRepo"
+      responses:
+        "200":
+          description: Sign-off result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+      security:
+        - bearerAuth: []
+
+  /api/sprints/history:
+    get:
+      tags: [finish]
+      operationId: sprintHistory
+      summary: Sprint history for a project
+      parameters:
+        - name: project
+          in: query
+          required: true
+          schema:
+            $ref: "#/components/schemas/OwnerRepo"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: History rows
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+      security: []
+
+  /api/agent-guide:
+    get:
+      tags: [meta]
+      operationId: agentGuide
+      summary: Markdown recipes for external agents
+      responses:
+        "200":
+          description: Guide payload
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content: { type: string }
+                  version: { type: string }
+      security: []
+
+  /openapi.json:
+    get:
+      tags: [meta]
+      operationId: fullOpenApi
+      summary: Full FastAPI-generated schema (all routers)
+      responses:
+        "200":
+          description: Complete OpenAPI document
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+      security: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: |
+        Optional `COMMANDER_API_TOKEN`. Required on POST/PUT/PATCH/DELETE when
+        set. GET/SSE open. Localhost hooks exempt (REQ-SEC-02).
+
+  parameters:
+    SprintLabel:
+      name: sprint_label
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^sprint-\d+(\.\d+)?$'
+        example: sprint-1030
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema:
+        type: string
+    OvernightId:
+      name: overnight_id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    OwnerRepo:
+      type: string
+      description: Canonical project id owner/repo (#2064)
+      example: zealchaiwut/commander
+      pattern: '^.+/.+$'
+
+    SprintDispatchBody:
+      type: object
+      properties:
+        tickets:
+          type: array
+          items: { type: integer }
+          description: Explicit order; empty + all resolves by label
+          default: []
+        all:
+          type: boolean
+          default: false
+          description: Resolve open issues for the sprint label
+        order:
+          type: string
+          nullable: true
+          enum: [dag, null]
+          description: Optional DAG reorder of the resolved set
+        repo:
+          $ref: "#/components/schemas/OwnerRepo"
+        cwd:
+          type: string
+          nullable: true
+        baseline_note:
+          type: string
+          nullable: true
+
+    SprintOvernightBody:
+      type: object
+      properties:
+        tickets:
+          type: array
+          items: { type: integer }
+          default: []
+        all:
+          type: boolean
+          default: true
+        max_retries:
+          type: integer
+          minimum: 0
+          default: 2
+          description: Retries after the first failed dispatch
+        repo:
+          $ref: "#/components/schemas/OwnerRepo"
+        cwd:
+          type: string
+          nullable: true
+        baseline_note:
+          type: string
+          nullable: true
+
+    CompleteAfterDispatchBody:
+      type: object
+      required: [project]
+      properties:
+        project:
+          $ref: "#/components/schemas/OwnerRepo"
+        uat_signoff:
+          type: boolean
+          default: false
+        preview:
+          type: boolean
+          default: false
+        dry_run:
+          type: boolean
+          default: false
+          description: Alias of preview
+
+    FinishSprintBody:
+      type: object
+      required: [confirmed]
+      properties:
+        confirmed:
+          type: boolean
+        merge_pr:
+          type: boolean
+          default: false
+        sprint_pr_url:
+          type: string
+          nullable: true
+        confirm_rework:
+          type: boolean
+          default: false
+        move_non_uat_to:
+          type: string
+          default: ""
+        selected_ticket_numbers:
+          type: array
+          items: { type: integer }
+          default: []
+
+    StepOutcome:
+      type: object
+      properties:
+        issue: { type: integer }
+        step: { type: string }
+        ok: { type: boolean }
+        detail: { type: string }
+        finished_at: { type: string }
+
+    DispatchRun:
+      type: object
+      properties:
+        run_id: { type: string }
+        sprint_label: { type: string }
+        tickets:
+          type: array
+          items: { type: integer }
+        repo:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [queued, running, done, failed, stopped]
+        current_issue:
+          type: integer
+          nullable: true
+        current_step:
+          type: string
+          nullable: true
+        failed_issue:
+          type: integer
+          nullable: true
+        outcomes:
+          type: array
+          items:
+            $ref: "#/components/schemas/StepOutcome"
+        remaining:
+          type: array
+          items: { type: integer }
+        started_at: { type: string }
+        finished_at: { type: string }
+        sprint_branch:
+          type: string
+          nullable: true
+        sprint_pr_number:
+          type: integer
+          nullable: true
+
+    OvernightRun:
+      type: object
+      properties:
+        overnight_id: { type: string }
+        sprint_label: { type: string }
+        tickets:
+          type: array
+          items: { type: integer }
+        repo:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [queued, dispatching, retrying, done, exhausted, stopped]
+        phase: { type: string }
+        attempt: { type: integer }
+        max_retries: { type: integer }
+        dispatch_run_ids:
+          type: array
+          items: { type: string }
+        current_dispatch_id:
+          type: string
+          nullable: true
+        last_failed_issue:
+          type: integer
+          nullable: true
+        started_at: { type: string }
+        finished_at: { type: string }
+        detail: { type: string }
+
+    CompleteAfterDispatchResult:
+      type: object
+      properties:
+        preview: { type: boolean }
+        ok: { type: boolean }
+        reason:
+          type: string
+          nullable: true
+        sprint_pr:
+          type: object
+          nullable: true
+          additionalProperties: true
+        uat_tickets:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        merged: { type: boolean }
+        uat_signoff: { type: boolean }
+        finish_result:
+          type: object
+          nullable: true
+          additionalProperties: true
+        errors:
+          type: array
+          items: { type: string }
+        detail: { type: string }
+
+    RunningSnapshot:
+      type: object
+      additionalProperties: true
+      properties:
+        sprint_label: { type: string }
+        project: { type: string }
+        source:
+          type: string
+          description: plan or dispatch
+        run_id:
+          type: string
+          nullable: true
+        dispatch:
+          type: object
+          nullable: true
+          additionalProperties: true
+        current_ticket:
+          type: object
+          nullable: true
+          additionalProperties: true
+        issues:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    SprintLive:
+      type: object
+      additionalProperties: true
+      description: Live snapshot; may include dispatch and run_id (#2355)
+
+    ErrorDetail:
+      type: object
+      properties:
+        detail:
+          oneOf:
+            - type: string
+            - type: object
+              additionalProperties: true
+
+  responses:
+    BadRequest:
+      description: Invalid body or empty ticket resolve
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorDetail"
+    NotFound:
+      description: Unknown id or project
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorDetail"

@@ -4,11 +4,13 @@ AC coverage:
 - AC1: Tests importing the deleted orchestrator modules are removed
 - AC2: agent_browser_runner tests retained
 - AC3: Tests for state_machine, reconciliation, summary, Finish, Deploy retained
+
+Issue #2345: this file used to spawn a full-tree ``pytest tests/ --co`` once
+per AC1 assertion (6×). Those nested collects, when orphaned by an outer suite
+timeout, were a major source of the runaway process tree. Collection is now cached once per module via a process-group-safe runner.
 """
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -17,69 +19,54 @@ REPO_ROOT = Path(__file__).parent.parent
 TESTS_DIR = REPO_ROOT / "tests"
 DASH_TESTS_DIR = REPO_ROOT / "apps" / "dashboard" / "tests"
 
-_DELETED_MODULES = (
-    "sprint_manager",
-    "dispatch",
-    "pipeline",
-    "concurrent_scheduler",
-    "worktree_pool",
-)
 
 
-def _collect_errors() -> str:
-    """Run pytest --collect-only and return stderr+stdout as a string."""
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", str(TESTS_DIR), str(DASH_TESTS_DIR),
-         "--co", "--tb=no", "-q"],
-        capture_output=True,
-        text=True,
+@pytest.fixture(scope="module")
+def collection_output() -> str:
+    """Run full-tree ``--co`` once and cache. Process-group-safe (#2345)."""
+    from services.sprint_manager.pytest_runner import run_pytest
+
+    result = run_pytest(
+        [str(TESTS_DIR), str(DASH_TESTS_DIR), "--co", "--tb=no", "-q"],
         cwd=str(REPO_ROOT),
+        timeout=300,
     )
-    return result.stdout + result.stderr
+    return (result.stdout or "") + (result.stderr or "")
 
 
 # ── AC1: deleted-module imports are gone ──────────────────────────────────────
 
 class TestDeletedModuleImportsRemoved:
-    def test_no_sprint_manager_import_error(self):
+    def test_no_sprint_manager_import_error(self, collection_output):
         """AC1: no test file fails to import due to missing sprint_manager."""
-        output = _collect_errors()
         assert "ModuleNotFoundError: No module named 'services.sprint_manager.sprint_manager'" \
-               not in output, \
+               not in collection_output, \
                "Found test(s) still importing the deleted sprint_manager.py module"
 
-    def test_no_dispatch_import_error(self):
+    def test_no_dispatch_import_error(self, collection_output):
         """AC1: no test file fails to import due to missing dispatch module."""
-        output = _collect_errors()
-        assert "No module named 'services.sprint_manager.dispatch'" not in output, \
+        assert "No module named 'services.sprint_manager.dispatch'" not in collection_output, \
                "Found test(s) still importing the deleted dispatch.py module"
-        assert "No module named 'dispatch'" not in output or \
-               "No module named 'services.sprint_manager.dispatch'" not in output, \
-               "Found test(s) still importing the deleted dispatch module"
 
-    def test_no_pipeline_import_error(self):
+    def test_no_pipeline_import_error(self, collection_output):
         """AC1: no test file fails to import due to missing pipeline module."""
-        output = _collect_errors()
-        assert "No module named 'services.sprint_manager.pipeline'" not in output, \
+        assert "No module named 'services.sprint_manager.pipeline'" not in collection_output, \
                "Found test(s) still importing the deleted pipeline.py module"
 
-    def test_no_concurrent_scheduler_import_error(self):
+    def test_no_concurrent_scheduler_import_error(self, collection_output):
         """AC1: no test file fails to import due to missing concurrent_scheduler."""
-        output = _collect_errors()
-        assert "No module named 'services.sprint_manager.concurrent_scheduler'" not in output, \
+        assert "No module named 'services.sprint_manager.concurrent_scheduler'" not in collection_output, \
                "Found test(s) still importing the deleted concurrent_scheduler.py module"
 
-    def test_no_worktree_pool_import_error(self):
+    def test_no_worktree_pool_import_error(self, collection_output):
         """AC1: no test file fails to import due to missing worktree_pool."""
-        output = _collect_errors()
-        assert "No module named 'services.sprint_manager.worktree_pool'" not in output, \
+        assert "No module named 'services.sprint_manager.worktree_pool'" not in collection_output, \
                "Found test(s) still importing the deleted worktree_pool.py module"
 
-    def test_collection_error_count_at_most_baseline(self):
+    def test_collection_error_count_at_most_baseline(self, collection_output):
         """AC1+AC4: collection error count ≤ 25 (the pre-existing baseline)."""
-        output = _collect_errors()
         error_lines = [
-            line for line in output.splitlines()
+            line for line in collection_output.splitlines()
             if line.startswith("ERROR ")
         ]
         assert len(error_lines) <= 25, (
@@ -98,14 +85,17 @@ class TestAgentBrowserRunnerRetained:
 
     def test_709_collects_without_error(self):
         """AC2: agent_browser_runner test file collects without import error."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest",
-             str(TESTS_DIR / "test_709__agent_browser_runner.py"),
+        from services.sprint_manager.pytest_runner import run_pytest
+
+        result = run_pytest(
+            [str(TESTS_DIR / "test_709__agent_browser_runner.py"),
              "--co", "--tb=no", "-q"],
-            capture_output=True, text=True, cwd=str(REPO_ROOT),
+            cwd=str(REPO_ROOT),
+            timeout=60,
         )
-        assert "ERROR" not in (result.stdout + result.stderr), \
-               "agent_browser_runner test file fails to collect: " + result.stdout + result.stderr
+        out = (result.stdout or "") + (result.stderr or "")
+        assert "ERROR" not in out, \
+               "agent_browser_runner test file fails to collect: " + out
         assert result.returncode == 0, \
                "pytest --collect-only returned non-zero for test_709"
 
@@ -118,15 +108,19 @@ class TestRetainedModuleTestsPresent:
         "test_2050__state_machine_approve_reject.py",
     ])
     def test_state_machine_tests_retained(self, test_file):
-        """AC3: state_machine test files retained and collect OK."""
+        """AC3: state-machine test files retained and collect OK."""
+        from services.sprint_manager.pytest_runner import run_pytest
+
         path = TESTS_DIR / test_file
         assert path.exists(), f"State-machine test file missing: {test_file}"
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", str(path), "--co", "--tb=no", "-q"],
-            capture_output=True, text=True, cwd=str(REPO_ROOT),
+        result = run_pytest(
+            [str(path), "--co", "--tb=no", "-q"],
+            cwd=str(REPO_ROOT),
+            timeout=60,
         )
-        assert "ERROR" not in (result.stdout + result.stderr), \
-               f"{test_file} fails to collect:\n{result.stdout}{result.stderr}"
+        out = (result.stdout or "") + (result.stderr or "")
+        assert "ERROR" not in out, \
+               f"{test_file} fails to collect:\n{out}"
 
     @pytest.mark.parametrize("test_file", [
         "test_1163__sprint_summary_materialize.py",
@@ -135,14 +129,18 @@ class TestRetainedModuleTestsPresent:
     ])
     def test_summary_tests_retained(self, test_file):
         """AC3: summary test files retained and collect OK."""
+        from services.sprint_manager.pytest_runner import run_pytest
+
         path = TESTS_DIR / test_file
         assert path.exists(), f"Summary test file missing: {test_file}"
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", str(path), "--co", "--tb=no", "-q"],
-            capture_output=True, text=True, cwd=str(REPO_ROOT),
+        result = run_pytest(
+            [str(path), "--co", "--tb=no", "-q"],
+            cwd=str(REPO_ROOT),
+            timeout=60,
         )
-        assert "ERROR" not in (result.stdout + result.stderr), \
-               f"{test_file} fails to collect:\n{result.stdout}{result.stderr}"
+        out = (result.stdout or "") + (result.stderr or "")
+        assert "ERROR" not in out, \
+               f"{test_file} fails to collect:\n{out}"
 
     @pytest.mark.parametrize("test_file", [
         "test_2086__finish_merge_safety.py",
@@ -151,14 +149,18 @@ class TestRetainedModuleTestsPresent:
     ])
     def test_finish_tests_retained(self, test_file):
         """AC3: Finish flow test files retained and collect OK."""
+        from services.sprint_manager.pytest_runner import run_pytest
+
         path = TESTS_DIR / test_file
         assert path.exists(), f"Finish flow test file missing: {test_file}"
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", str(path), "--co", "--tb=no", "-q"],
-            capture_output=True, text=True, cwd=str(REPO_ROOT),
+        result = run_pytest(
+            [str(path), "--co", "--tb=no", "-q"],
+            cwd=str(REPO_ROOT),
+            timeout=60,
         )
-        assert "ERROR" not in (result.stdout + result.stderr), \
-               f"{test_file} fails to collect:\n{result.stdout}{result.stderr}"
+        out = (result.stdout or "") + (result.stderr or "")
+        assert "ERROR" not in out, \
+               f"{test_file} fails to collect:\n{out}"
 
     @pytest.mark.parametrize("test_file", [
         "test_722__deploy_config.py",
@@ -167,14 +169,18 @@ class TestRetainedModuleTestsPresent:
     ])
     def test_deploy_tests_retained(self, test_file):
         """AC3: Deploy test files retained and collect OK."""
+        from services.sprint_manager.pytest_runner import run_pytest
+
         path = TESTS_DIR / test_file
         assert path.exists(), f"Deploy test file missing: {test_file}"
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", str(path), "--co", "--tb=no", "-q"],
-            capture_output=True, text=True, cwd=str(REPO_ROOT),
+        result = run_pytest(
+            [str(path), "--co", "--tb=no", "-q"],
+            cwd=str(REPO_ROOT),
+            timeout=60,
         )
-        assert "ERROR" not in (result.stdout + result.stderr), \
-               f"{test_file} fails to collect:\n{result.stdout}{result.stderr}"
+        out = (result.stdout or "") + (result.stderr or "")
+        assert "ERROR" not in out, \
+               f"{test_file} fails to collect:\n{out}"
 
     @pytest.mark.parametrize("test_file", [
         "test_1162__reconcile_fix_sprint_counts.py",
@@ -183,11 +189,15 @@ class TestRetainedModuleTestsPresent:
     ])
     def test_reconciliation_tests_retained(self, test_file):
         """AC3: reconciliation test files retained and collect OK."""
+        from services.sprint_manager.pytest_runner import run_pytest
+
         path = TESTS_DIR / test_file
         assert path.exists(), f"Reconciliation test file missing: {test_file}"
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest", str(path), "--co", "--tb=no", "-q"],
-            capture_output=True, text=True, cwd=str(REPO_ROOT),
+        result = run_pytest(
+            [str(path), "--co", "--tb=no", "-q"],
+            cwd=str(REPO_ROOT),
+            timeout=60,
         )
-        assert "ERROR" not in (result.stdout + result.stderr), \
-               f"{test_file} fails to collect:\n{result.stdout}{result.stderr}"
+        out = (result.stdout or "") + (result.stderr or "")
+        assert "ERROR" not in out, \
+               f"{test_file} fails to collect:\n{out}"

@@ -67,6 +67,124 @@ def _local_issue_size_and_minutes(
     return raw_size, raw_minutes
 
 
+def _snapshot_from_dispatch(project: str, run: dict) -> dict:
+    """Build a Running-pane snapshot from an API dispatch JSON record (#2355)."""
+    from services.sprint_manager.dispatch_runner import dispatch_live_fields
+
+    tickets = list(run.get("tickets") or [])
+    outcomes = list(run.get("outcomes") or [])
+    done_issues = {
+        o.get("issue") for o in outcomes
+        if o.get("step") == "tester" and o.get("ok")
+    }
+    failed_issue = run.get("failed_issue")
+    current_issue = run.get("current_issue")
+    current_step = run.get("current_step")
+
+    issues_out: list[dict] = []
+    done_count = 0
+    failed_count = 0
+    for num in tickets:
+        if num in done_issues:
+            status = "done"
+            done_count += 1
+            agent_status = None
+            agent = None
+        elif failed_issue is not None and num == failed_issue:
+            status = "skipped"
+            failed_count += 1
+            agent_status = "failed"
+            agent = None
+        elif current_issue is not None and num == current_issue:
+            status = "in-progress"
+            agent_status = "running"
+            agent = current_step if current_step in ("coder", "tester") else None
+        else:
+            status = "pending"
+            agent_status = None
+            agent = None
+        issues_out.append({
+            "number": num,
+            "title": "",
+            "status": status,
+            "agent_status": agent_status,
+            "agent": agent,
+            "elapsed_secs": None,
+            "size": None,
+            "minutes": None,
+            "dispatch_level": 0,
+            "coder_model": None,
+            "coder_backend": None,
+            "coder_provider": None,
+            "tester_attempt_count": 0,
+            "coder_attempt": 0,
+            "pipeline_stage": current_step if num == current_issue else None,
+            "category": None,
+            "failure_reason": None,
+        })
+
+    total_count = len(tickets)
+    complete_count = done_count + failed_count
+    pending_count = total_count - complete_count
+    current_ticket = (
+        {"number": current_issue, "title": ""} if current_issue is not None else None
+    )
+    active_agents: list[dict] = []
+    if current_issue is not None and current_step in ("coder", "tester"):
+        active_agents = [{
+            "name": current_step,
+            "ticket": current_ticket,
+            "pid": None,
+        }]
+
+    dispatch = dispatch_live_fields(run)
+    return {
+        "sprint_label": run.get("sprint_label"),
+        "project": project,
+        "source": "dispatch",
+        "dispatch": dispatch,
+        "run_id": run.get("run_id"),
+        "time_spent_sec": 0,
+        "started_at": run.get("started_at") or None,
+        "current_ticket": current_ticket,
+        "active_agents": active_agents,
+        "pipeline_mode": False,
+        "levels": [],
+        "done_count": done_count,
+        "failed_count": failed_count,
+        "skipped_count": 0,
+        "pending_count": pending_count,
+        "total_count": total_count,
+        "complete_count": complete_count,
+        "est_remaining_minutes": 0,
+        "issues": issues_out,
+        "llm_provider": None,
+        "active_coder_slots": 1 if current_step == "coder" else 0,
+        "active_tester_slots": 1 if current_step == "tester" else 0,
+        "max_coder_slots": 1,
+        "max_tester_slots": 1,
+        "run_state": "running",
+    }
+
+
+def _active_dispatch_for_project(project: str, project_root: Path) -> Optional[dict]:
+    """Newest active dispatch-*.json for this project (local files only)."""
+    from services.sprint_manager.dispatch_runner import list_dispatch_runs
+
+    # runtime_dir(project_root) → <project>/.commander/runtime/dispatch-*.json
+    runs = list_dispatch_runs(project_root, repo=project)
+    if not runs:
+        return None
+    # Prefer running over queued; then newest started_at
+    runs.sort(
+        key=lambda r: (
+            0 if r.get("status") == "running" else 1,
+            r.get("started_at") or "",
+        )
+    )
+    return runs[0]
+
+
 def build_running_snapshot(project: str) -> Optional[dict]:
     """Build the running sprint snapshot for the Running pane's first paint.
 
@@ -77,18 +195,22 @@ def build_running_snapshot(project: str) -> Optional[dict]:
       - server._any_sprint_running (reads plan.json + PID files — local disk)
       - server._sprint_statuses (in-memory dict)
       - <commander>/sprints/<label>-state.json (local disk fallback)
+      - ``.commander/runtime/dispatch-*.json`` for API dispatch (#2355)
       - SQLite agent_runs via live_metrics helpers
 
     No GitHub API client methods are invoked.
     """
     srv = _server()
+    project_root = srv._project_root_path(project)
 
     running = srv._any_sprint_running(project=project)
     if not running:
-        return None
+        dispatch_run = _active_dispatch_for_project(project, project_root)
+        if dispatch_run is None:
+            return None
+        return _snapshot_from_dispatch(project, dispatch_run)
 
     sprint_label: str = running["sprint_label"]
-    project_root = srv._project_root_path(project)
     commander = srv._commander_dir(project_root)
 
     # Check plan.json terminal state (plan.json is a local disk file)
@@ -277,6 +399,7 @@ def build_running_snapshot(project: str) -> Optional[dict]:
     payload: dict = {
         "sprint_label":          sprint_label,
         "project":               project,
+        "source":                "plan",
         "time_spent_sec":        time_spent_sec,
         "started_at":            started_at_str,
         "current_ticket":        current_ticket,
@@ -297,6 +420,18 @@ def build_running_snapshot(project: str) -> Optional[dict]:
         **_live_metrics.lane_capacity(status_data),
         **_live_metrics.running_metrics(sprint_label, project),
     }
+
+    # Attach API-dispatch progress when present for this label (#2355).
+    from services.sprint_manager.dispatch_runner import (
+        dispatch_live_fields,
+        list_dispatch_runs,
+    )
+    dispatch_runs = list_dispatch_runs(
+        project_root, sprint_label=sprint_label, repo=project,
+    )
+    if dispatch_runs:
+        payload["dispatch"] = dispatch_live_fields(dispatch_runs[0])
+        payload["run_id"] = dispatch_runs[0].get("run_id")
 
     if plan_terminal:
         # Freeze in-flight fields for a sprint that has ended

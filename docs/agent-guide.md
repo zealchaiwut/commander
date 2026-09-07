@@ -1,8 +1,10 @@
 # Commander Agent Operate Guide
 
 Canonical workflow recipes for external agents. The full API schema is at
-`GET /openapi.json` (~60 routers). This guide documents the call chains an
-external agent needs to operate the Commander platform end-to-end.
+`GET /openapi.json` (~60 routers). The **reviewed overnight / Hermes subset**
+(OpenAPI YAML) is [`docs/api/overnight.yaml`](api/overnight.yaml). Capability
+IDs: [`docs/requirements/`](requirements/). This guide documents the call
+chains an external agent needs to operate the Commander platform end-to-end.
 
 Served by `GET /api/agent-guide` as `{content, version}`.
 
@@ -85,32 +87,80 @@ Content-Type: application/json
 }
 ```
 
-### Step 3 — Run the sprint (async, 202 Accepted)
+### Step 3 — Dispatch the sprint (API — preferred)
+
+`POST /api/sprints/run` was **deleted** in the 2026-08 shrink. Use the restored
+dispatch API (#2315 / #2353):
 
 ```
-POST /api/sprints/run
+POST /api/sprints/{sprint_label}/dispatch
 Content-Type: application/json
 
-{"label": "sprint-N", "project": "owner/repo"}
+{"all": true, "repo": "owner/repo"}
 ```
 
-### Step 4 — Poll live state until terminal
+Empty `tickets` / `"all": true` resolves open issues for that sprint label.
+Explicit `"tickets": [N, …]` still works (order preserved).
+
+Returns immediately with `run_id`. Poll:
 
 ```
+GET /api/sprints/dispatch/{run_id}
+```
+
+Or stop at the next step boundary:
+
+```
+POST /api/sprints/dispatch/{run_id}/stop
+```
+
+### Step 3b — Overnight babysitter (optional, #2354)
+
+For unattended retry-until-done (Claude Code overnight should only call HTTP):
+
+```
+POST /api/sprints/{sprint_label}/overnight
+Content-Type: application/json
+
+{"all": true, "repo": "owner/repo", "max_retries": 2}
+```
+
+Poll `GET /api/sprints/overnight/{overnight_id}`; stop with
+`POST /api/sprints/overnight/{overnight_id}/stop`.
+
+### Step 4 — Poll live / Running view
+
+```
+GET /api/running?project=owner/repo
 GET /api/sprints/{sprint_label}/live?project=owner/repo
 ```
 
-Key response fields:
-- `status` — `"running"` | `"done"` | `"failed"` | `"cancelled"`
-- `issues` — per-ticket coder/tester states
+API dispatch progress comes from `.commander/runtime/dispatch-*.json` (#2355).
+Tick-level clients may poll `GET /api/sprints/dispatch/{run_id}`. SSE
+(`/live/stream`) also emits `dispatch` events when that JSON changes.
 
-Poll until `status` is not `"running"`. Alternatively stream events via SSE:
+Alternatively stream:
 
 ```
 GET /api/sprints/{sprint_label}/live/stream?project=owner/repo
 ```
 
-### Step 5 — Get the outcome
+### Step 5 — Complete after a green dispatch (#2357)
+
+```
+POST /api/sprints/{sprint_label}/complete-after-dispatch
+Content-Type: application/json
+
+{"project": "owner/repo", "preview": true}
+```
+
+Then without preview (merge PR; set `"uat_signoff": true` to also run Finish):
+
+```
+{"project": "owner/repo", "uat_signoff": true}
+```
+
+### Step 6 — History / outcome
 
 ```
 GET /api/sprints/history?project=owner/repo
@@ -199,6 +249,7 @@ no letters or spaces.
 
 ### 409 sprint-already-running
 
-Only one sprint may run per project at a time. Check the running sprint with
-`GET /api/sprints/history` and cancel it via `DELETE /api/sprints/run/{sprint_label}`
-before starting a new one.
+Only one sprint may run per project at a time. Check `GET /api/running?project=`
+and stop an API dispatch with `POST /api/sprints/dispatch/{run_id}/stop` (or
+overnight with `POST /api/sprints/overnight/{overnight_id}/stop`) before starting
+a new one. `DELETE /api/sprints/run/{label}` was removed with the orchestrator.

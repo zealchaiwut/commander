@@ -416,6 +416,19 @@ Plus the lookout contract endpoints (see S4-7).
 > "scoped" gate: `suite_health_gate.py` runs the full suite. Left in place
 > above rather than edited, because what the milestone believed at the time is
 > the point of this note.
+>
+> **Correction, 2026-09-02 (#2345).** After #2339 unblocked full-suite runs, two
+> latent problems surfaced: (1) meta-tests `#2252`/`#2253` spawned full-tree
+> `pytest --co` repeatedly, and suite-timeout paths (`finish_feature`,
+> `record_test_baseline`, dispatch gate, suite health) used
+> `subprocess.run(timeout=…)` which only SIGKILLs the direct child — nested
+> grandchildren survived as PPID-1 orphans and grew into a runaway tree;
+> (2) overlapping orphans sharing `/tmp/commander-pytest.db` amplified the
+> ~125 order-dependent failure class first pinned in #2337. Fix: process-group
+> kill + unique DB via `services/sprint_manager/pytest_runner.py`, and
+> cache/AST the meta-test collects so a full suite no longer nests 6–10
+> full-tree `--co` runs. Re-record the baseline after this lands — the
+> previous baseline is not trustworthy under overlapping orphans.
 
 ---
 

@@ -163,6 +163,9 @@ def issues_for_label(github_client, sprint_label: str, repo: Optional[str] = Non
     ``sprint-1.1``. Child labels are never minted here, but historical ones
     exist in both repos, so a non-numeric label falls back to filtering the
     open-issue list rather than raising.
+
+    Matching is **exact label name only**: dispatching ``sprint-N`` does **not**
+    include issues labelled only ``sprint-N.1`` / ``sprint-N.2`` (#2353).
     """
     suffix = sprint_label.removeprefix("sprint-")
     try:
@@ -173,6 +176,29 @@ def issues_for_label(github_client, sprint_label: str, repo: Optional[str] = Non
             i for i in issues
             if any(lbl.get("name") == sprint_label for lbl in i.get("labels", []))
         ]
+
+
+def open_issue_numbers_for_label(
+    github_client,
+    sprint_label: str,
+    repo: Optional[str] = None,
+) -> list[int]:
+    """Open issue numbers for ``sprint_label``, sorted ascending (issue #2353).
+
+    Default dispatch order when the caller omits ``tickets`` / passes
+    ``"all": true``. Child sprint labels are excluded (exact-label match via
+    :func:`issues_for_label`).
+    """
+    numbers: list[int] = []
+    for issue in issues_for_label(github_client, sprint_label, repo):
+        state = (issue.get("state") or "open").lower()
+        if state != "open":
+            continue
+        try:
+            numbers.append(int(issue["number"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return sorted(numbers)
 
 
 def reset_sprint(

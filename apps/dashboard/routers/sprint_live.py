@@ -719,6 +719,34 @@ def get_sprint_live_snapshot(sprint_label: str, project: str):
         "fix_round_max":        fix_round_max,
         **_live_metrics.running_metrics(sprint_label, project),
     }
+
+    # API dispatch progress (#2355). Tick-level clients should poll poll_url.
+    from services.sprint_manager.dispatch_runner import (
+        dispatch_live_fields,
+        list_dispatch_runs,
+    )
+    d_runs = list_dispatch_runs(project_root, sprint_label=sprint_label, repo=project)
+    if d_runs:
+        payload["dispatch"] = dispatch_live_fields(d_runs[0])
+        payload["run_id"] = d_runs[0].get("run_id")
+        # When plan/state has no current ticket, prefer dispatch's.
+        if current_ticket is None and d_runs[0].get("current_issue") is not None:
+            payload["current_ticket"] = {
+                "number": d_runs[0]["current_issue"],
+                "title": "",
+            }
+            step = d_runs[0].get("current_step")
+            if step in ("coder", "tester") and not active_agents:
+                payload["active_agents"] = [{
+                    "name": step,
+                    "ticket": payload["current_ticket"],
+                    "pid": None,
+                }]
+                payload["active_agent"] = {
+                    "name": step, "model": None, "pid": None,
+                    "ticket": payload["current_ticket"],
+                }
+
     if plan_terminal:
         payload = _live_freeze_terminal_fields(payload, plan)
     return payload
@@ -769,14 +797,17 @@ def _find_issue_log(log_dir: Path, issue_num: int) -> Optional[Path]:
 async def get_sprint_live_stream(sprint_label: str, project: str, request: Request):
     """SSE endpoint that streams incremental log-line events as they occur.
 
-    Events emitted (issue #1777):
+    Events emitted (issue #1777 / #2355):
     - event: snapshot   data: <full live snapshot JSON>  (on connect + every ~5 s)
     - event: log_line   data: {"timestamp": "...", "type": "...", "message": "..."}
                              optional "issue_num": N for per-worker routing (AC5)
+    - event: dispatch   data: <dispatch_live_fields> when dispatch-*.json changes
     - event: complete   data: {"reason": "stopped"}   (when sprint ends)
 
-    Data source: tails the most recent sprint-run-<label>-*.log file for
-    orchestrator log_line events, plus sprint-issue-N.log for per-issue events.
+    Data sources: tails ``sprint-run-<label>-*.log`` when present, plus
+    ``.commander/runtime/dispatch-*.json`` for API dispatch runs (#2355).
+    Tick-level dispatch progress is also available via
+    ``GET /api/sprints/dispatch/{run_id}`` (preferred poll contract).
     """
     srv = _server()
     if not srv._SPRINT_LABEL_RE.match(sprint_label):
@@ -787,24 +818,36 @@ async def get_sprint_live_stream(sprint_label: str, project: str, request: Reque
     log_dir = commander / "logs"
 
     async def _stream():
+        from services.sprint_manager.dispatch_runner import (
+            dispatch_live_fields,
+            list_dispatch_runs,
+            runtime_dir,
+        )
+
         log_path: Optional[Path] = None
         for _ in range(20):
             log_path = _find_latest_sprint_log(log_dir, sprint_label)
             if log_path:
                 break
+            # API dispatch may have no orchestrator log — don't wait the full
+            # 2s if a dispatch JSON is already active (#2355).
+            if list_dispatch_runs(project_root, sprint_label=sprint_label, repo=project):
+                break
             await asyncio.sleep(0.1)
 
-        if not log_path:
+        has_dispatch = bool(
+            list_dispatch_runs(project_root, sprint_label=sprint_label, repo=project)
+        )
+        if not log_path and not has_dispatch:
             yield f"event: complete\ndata: {json.dumps({'reason': 'no_log_file'})}\n\n"
             return
 
-        try:
-            file_size = log_path.stat().st_size
-        except OSError:
-            file_size = 0
-
-        # Start tailing from the current end (only new lines going forward).
-        current_offset = file_size
+        current_offset = 0
+        if log_path:
+            try:
+                current_offset = log_path.stat().st_size
+            except OSError:
+                current_offset = 0
 
         # Emit initial snapshot so the board can bootstrap without a separate REST call.
         snap = None
@@ -833,32 +876,56 @@ async def get_sprint_live_stream(sprint_label: str, project: str, request: Reque
             pass
 
         snapshot_tick = 0
+        last_dispatch_mtime: float = 0.0
+        dispatch_runtime = runtime_dir(project_root)
 
         while True:
             if await request.is_disconnected():
                 return
 
             is_running = srv._is_sprint_running(project_root, sprint_label)
+            d_runs = list_dispatch_runs(
+                project_root, sprint_label=sprint_label, repo=project,
+            )
+            dispatch_active = bool(d_runs)
 
             # ── Tail orchestrator/dispatch log ────────────────────────────────
-            try:
-                file_size = log_path.stat().st_size
-            except OSError:
-                file_size = current_offset
-
-            if file_size > current_offset:
+            if log_path:
                 try:
-                    with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
-                        fh.seek(current_offset)
-                        new_text = fh.read(file_size - current_offset)
-                    current_offset = file_size
-
-                    new_lines = new_text.splitlines()
-                    parsed = _parse_log_lines_for_live(new_lines, limit=len(new_lines))
-                    for entry in parsed:
-                        yield f"event: log_line\ndata: {json.dumps(entry)}\n\n"
+                    file_size = log_path.stat().st_size
                 except OSError:
-                    pass
+                    file_size = current_offset
+
+                if file_size > current_offset:
+                    try:
+                        with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+                            fh.seek(current_offset)
+                            new_text = fh.read(file_size - current_offset)
+                        current_offset = file_size
+
+                        new_lines = new_text.splitlines()
+                        parsed = _parse_log_lines_for_live(new_lines, limit=len(new_lines))
+                        for entry in parsed:
+                            yield f"event: log_line\ndata: {json.dumps(entry)}\n\n"
+                    except OSError:
+                        pass
+
+            # ── Emit dispatch JSON changes (#2355) ────────────────────────────
+            if d_runs:
+                run = d_runs[0]
+                run_id = run.get("run_id")
+                mtime = 0.0
+                if run_id:
+                    try:
+                        mtime = (dispatch_runtime / f"dispatch-{run_id}.json").stat().st_mtime
+                    except OSError:
+                        mtime = 0.0
+                if mtime and mtime != last_dispatch_mtime:
+                    last_dispatch_mtime = mtime
+                    yield (
+                        f"event: dispatch\ndata: "
+                        f"{json.dumps(dispatch_live_fields(run))}\n\n"
+                    )
 
             # ── Tail per-issue log files (issue #1777 AC5) ───────────────────
             for num, i_offset in list(issue_log_offsets.items()):
@@ -876,32 +943,36 @@ async def get_sprint_live_stream(sprint_label: str, project: str, request: Reque
                         new_lines = new_text.splitlines()
                         parsed = _parse_log_lines_for_live(new_lines, limit=len(new_lines))
                         for entry in parsed:
-                            entry["issue_num"] = num
+                            entry = {**entry, "issue_num": num}
                             yield f"event: log_line\ndata: {json.dumps(entry)}\n\n"
                     except OSError:
                         pass
 
-            # ── Periodic snapshot for board metric refresh (AC3, AC8) ────────
+            # Discover newly appeared per-issue logs from snapshot tickets.
+            try:
+                for iss in ((snap or {}).get("issues") or []):
+                    num = iss.get("number")
+                    if num is None or num in issue_log_offsets:
+                        continue
+                    p = _find_issue_log(log_dir, num)
+                    if p is not None:
+                        try:
+                            issue_log_offsets[num] = p.stat().st_size
+                        except OSError:
+                            issue_log_offsets[num] = 0
+            except Exception:
+                pass
+
             snapshot_tick += 1
             if snapshot_tick >= _SNAPSHOT_EVERY_N:
                 snapshot_tick = 0
                 try:
                     snap = get_sprint_live_snapshot(sprint_label, project)
                     yield f"event: snapshot\ndata: {json.dumps(snap)}\n\n"
-                    # Register any newly-started issue logs
-                    for iss in (snap.get("issues") or []):
-                        num = iss.get("number")
-                        if num is not None and num not in issue_log_offsets:
-                            p = _find_issue_log(log_dir, num)
-                            if p is not None:
-                                try:
-                                    issue_log_offsets[num] = p.stat().st_size
-                                except OSError:
-                                    issue_log_offsets[num] = 0
                 except Exception:
                     pass
 
-            if not is_running:
+            if not is_running and not dispatch_active:
                 yield f"event: complete\ndata: {json.dumps({'reason': 'stopped'})}\n\n"
                 return
 

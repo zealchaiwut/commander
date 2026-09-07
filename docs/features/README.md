@@ -8,3 +8,9 @@ lands; the documentor keeps existing files current.
 - [API](api.md) — HTTP endpoint reference
 - [Coder backends](coder-backends.md) — Claude Code vs Cline for coder-only dispatch (design; not implemented)
 - [Agent skills](agent-skills.md) — caveman (token-efficient prose) and code-review-graph (review MCP); installed in all clones (see doc)
+
+## Spec-Driven Development (related)
+
+- Capability IDs: [`docs/requirements/`](../requirements/)
+- Overnight OpenAPI subset: [`docs/api/overnight.yaml`](../api/overnight.yaml)
+- Product / Design: [`PRODUCT.md`](../../PRODUCT.md), [`DESIGN.md`](../../DESIGN.md)

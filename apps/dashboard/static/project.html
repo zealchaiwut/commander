@@ -20058,6 +20058,45 @@ async function smgmtDeleteSprint(label) {
   }
 }
 
+// ── Per-sprint UAT sign-off (issue #2305) ──────────────────────────────────
+async function smgmtUatSignoffSprint(label) {
+  const repo = _smgmtRepo();
+  if (!repo) return;
+  const displayName = sprintLabelDisplay(label);
+  let preview;
+  try {
+    const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/uat-preview?project=${encodeURIComponent(repo)}`);
+    if (!res.ok) throw new Error(await res.text());
+    preview = await res.json();
+  } catch (e) {
+    alert('Failed to load sign-off preview: ' + e.message);
+    return;
+  }
+  if (preview.count === 0) {
+    alert(`No open UAT tickets found for ${displayName}.`);
+    return;
+  }
+  const issueList = preview.issues.map(i => `  #${i.number}: ${i.title}`).join('\n');
+  const childNote = preview.child_labels_included ? '\n(Child labels like sprint-N.1, .2, .3 are included.)' : '';
+  if (!confirm(`Sign off ${displayName}?\n\nThis will close ${preview.count} UAT ticket${preview.count !== 1 ? 's' : ''}:\n${issueList}${childNote}`)) return;
+  _smgmtBoardLock(`Signing off ${displayName}…`);
+  try {
+    const res = await fetch(`/api/sprints/${encodeURIComponent(label)}/uat-signoff`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project: repo }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    _smgmtShowToast(`${displayName} signed off — ${data.count} ticket${data.count !== 1 ? 's' : ''} closed.`);
+    await loadSprintMgmt();
+  } catch (e) {
+    alert('Sign-off failed: ' + e.message);
+  } finally {
+    _smgmtBoardUnlock();
+  }
+}
+
 // ── Clean up empty sprints (issue #457) ────────────────────────────────────
 let _smgmtEmptyLabels = [];
 

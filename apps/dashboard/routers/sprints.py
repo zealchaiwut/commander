@@ -119,13 +119,18 @@ def rerun_sprint(sprint_label: str, body: SprintRerunBody | None = None):
 
 
 class SprintDispatchBody(BaseModel):
-    """Body for POST /api/sprints/{label}/dispatch (issue #2315).
+    """Body for POST /api/sprints/{label}/dispatch (issue #2315 / #2353).
 
-    ``tickets`` is executed in the order given. The runner never sorts or
-    reorders it — ticket sequencing belongs to the operator (#2311).
+    Non-empty ``tickets`` are executed in the order given — the runner never
+    sorts or reorders that list (#2311). When ``tickets`` is empty (or
+    ``all`` is true), open issues for the sprint label are resolved from the
+    issues mirror and ordered by ascending issue number unless
+    ``order="dag"``.
     """
 
-    tickets: list[int]
+    tickets: list[int] = []
+    all: bool = False
+    order: str | None = None  # "dag" | None (default: ascending issue number)
     repo: str | None = None
     cwd: str | None = None
     baseline_note: str | None = None
@@ -137,6 +142,58 @@ def _commander_repo_root():
     return Path(config.__file__).resolve().parent.parent.parent
 
 
+def _apply_dag_order(sprint_label: str, project: str, tickets: list[int]) -> list[int]:
+    """Reorder ``tickets`` using the existing DAG preview; keep unknowns last."""
+    preview = sprints_service.dag_order_preview(sprint_label, project)
+    new_order = preview.get("new_order") or []
+    ticket_set = set(tickets)
+    ordered = [n for n in new_order if n in ticket_set]
+    seen = set(ordered)
+    return ordered + [n for n in tickets if n not in seen]
+
+
+def _resolve_dispatch_tickets(
+    sprint_label: str,
+    body: SprintDispatchBody,
+    *,
+    repo: str | None,
+) -> list[int]:
+    """Resolve the ticket list for a dispatch call (issue #2353).
+
+    Explicit non-empty ``tickets`` win (order preserved). Otherwise open
+    issues for the exact sprint label are loaded (child labels like
+    ``sprint-N.1`` are excluded). Default order is ascending issue number;
+    ``order="dag"`` uses :func:`sprints_service.dag_order_preview`.
+    """
+    if body.tickets:
+        tickets = list(body.tickets)
+    else:
+        import github_client
+        from services.sprint_manager.ticket_retry import open_issue_numbers_for_label
+
+        tickets = open_issue_numbers_for_label(github_client, sprint_label, repo)
+
+    if not tickets:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"no open tickets for label {sprint_label!r}"
+                if not body.tickets
+                else "tickets must not be empty"
+            ),
+        )
+
+    if (body.order or "").lower() == "dag":
+        if not repo:
+            raise HTTPException(
+                status_code=400,
+                detail="order=dag requires repo (or sprint.yaml repo_name)",
+            )
+        tickets = _apply_dag_order(sprint_label, repo, tickets)
+
+    return tickets
+
+
 @router.post("/api/sprints/{sprint_label}/dispatch")
 def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
     """Start a dispatch run for a sprint and return its handle (issue #2315).
@@ -146,6 +203,10 @@ def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
     elevating anything itself.
 
     Returns immediately; poll ``GET /api/sprints/dispatch/{run_id}`` for status.
+
+    When ``tickets`` is omitted/empty (or ``all: true``), open issues carrying
+    this sprint label are resolved automatically (#2353). Child labels
+    (``sprint-N.1``) are not included when dispatching parent ``sprint-N``.
     """
     from pathlib import Path
 
@@ -155,9 +216,8 @@ def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
         start_run,
     )
 
-    if not body.tickets:
-        raise HTTPException(status_code=400, detail="tickets must not be empty")
-
+    # Empty ``tickets`` (or ``all: true``) resolves open issues for the label
+    # (#2353). Explicit non-empty ``tickets`` always win, even with ``all``.
     repo_root = _commander_repo_root()
     cwd = Path(body.cwd) if body.cwd else repo_root
     if not cwd.exists():
@@ -178,6 +238,8 @@ def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
 
     repo = body.repo or config.repo_name or None
 
+    tickets = _resolve_dispatch_tickets(sprint_label, body, repo=repo)
+
     # Sprint-branch model: create sprint/sprint-N from develop before
     # dispatching tickets so feature branches have a stable base (#2329).
     sprint_branch = None
@@ -195,7 +257,7 @@ def dispatch_sprint(sprint_label: str, body: SprintDispatchBody):
 
     run = start_run(
         sprint_label,
-        body.tickets,
+        tickets,
         repo=repo,
         repo_root=repo_root,
         cwd=cwd,
@@ -230,6 +292,211 @@ def stop_dispatch_run(run_id: str):
     if not request_stop(run_id, _commander_repo_root()):
         raise HTTPException(status_code=404, detail=f"unknown dispatch run: {run_id}")
     return {"run_id": run_id, "stop_requested": True}
+
+
+class SprintOvernightBody(BaseModel):
+    """Body for POST /api/sprints/{label}/overnight (issue #2354).
+
+    ``max_retries`` is the number of retries *after* the first failed dispatch
+    (default 2). ``max_retries: 0`` exhausts immediately on first failure.
+    Empty ``tickets`` resolves open issues for the label (#2353).
+    """
+
+    tickets: list[int] = []
+    all: bool = True
+    max_retries: int = 2
+    repo: str | None = None
+    cwd: str | None = None
+    baseline_note: str | None = None
+
+
+@router.post("/api/sprints/{sprint_label}/overnight")
+def overnight_sprint(sprint_label: str, body: SprintOvernightBody):
+    """Start an overnight babysitter: dispatch, reset, re-dispatch (#2354).
+
+    Returns immediately with ``overnight_id``. Poll
+    ``GET /api/sprints/overnight/{overnight_id}``. Stop with
+    ``POST /api/sprints/overnight/{overnight_id}/stop``.
+    """
+    from pathlib import Path
+
+    import github_client
+    from services.sprint_manager.dispatch_runner import (
+        DispatchConfigError,
+        load_project_config,
+    )
+    from services.sprint_manager.overnight_runner import start_overnight
+
+    repo_root = _commander_repo_root()
+    cwd = Path(body.cwd) if body.cwd else repo_root
+    if not cwd.exists():
+        raise HTTPException(status_code=400, detail=f"cwd does not exist: {cwd}")
+
+    try:
+        config = load_project_config(cwd)
+    except DispatchConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    repo = body.repo or config.repo_name or None
+    # Reuse dispatch resolution (empty / all → open issues for label).
+    dispatch_body = SprintDispatchBody(
+        tickets=list(body.tickets),
+        all=body.all if not body.tickets else False,
+        repo=repo,
+        cwd=str(cwd),
+        baseline_note=body.baseline_note,
+    )
+    tickets = _resolve_dispatch_tickets(sprint_label, dispatch_body, repo=repo)
+
+    if body.max_retries < 0:
+        raise HTTPException(status_code=400, detail="max_retries must be >= 0")
+
+    run = start_overnight(
+        sprint_label,
+        tickets,
+        repo=repo,
+        repo_root=repo_root,
+        cwd=cwd,
+        max_retries=body.max_retries,
+        config=config,
+        github_client=github_client,
+        background=True,
+    )
+    return run.to_dict()
+
+
+@router.get("/api/sprints/overnight/{overnight_id}")
+def get_overnight_run(overnight_id: str):
+    """Status of an overnight babysitter run (#2354)."""
+    from services.sprint_manager.overnight_runner import load_overnight
+
+    data = load_overnight(overnight_id, _commander_repo_root())
+    if data is None:
+        raise HTTPException(
+            status_code=404, detail=f"unknown overnight run: {overnight_id}"
+        )
+    return data
+
+
+@router.post("/api/sprints/overnight/{overnight_id}/stop")
+def stop_overnight_run(overnight_id: str):
+    """Stop an overnight run at the next dispatch/retry boundary (#2354)."""
+    from services.sprint_manager.overnight_runner import request_stop
+
+    if not request_stop(overnight_id, _commander_repo_root()):
+        raise HTTPException(
+            status_code=404, detail=f"unknown overnight run: {overnight_id}"
+        )
+    return {"overnight_id": overnight_id, "stop_requested": True}
+
+
+class CompleteAfterDispatchBody(BaseModel):
+    """Body for POST /api/sprints/{label}/complete-after-dispatch (#2357).
+
+    ``uat_signoff`` default false: merge the sprint→develop PR only.
+    When true, runs the existing Finish path (merge + close UAT issues).
+    ``preview`` / ``dry_run`` reports the plan without mutating.
+    """
+
+    project: str
+    uat_signoff: bool = False
+    preview: bool = False
+    dry_run: bool = False
+
+
+@router.post("/api/sprints/{sprint_label}/complete-after-dispatch")
+async def complete_after_dispatch_endpoint(
+    sprint_label: str,
+    body: CompleteAfterDispatchBody,
+):
+    """Merge the sprint PR opened by a green dispatch; optional UAT finish (#2357)."""
+    from pathlib import Path
+
+    import github_client
+    from project_resolver import resolve_project_path as _project_root_path
+    from services.sprint_manager.complete_after_dispatch import complete_after_dispatch
+
+    project_root = Path(_project_root_path(body.project))
+    preview = body.preview or body.dry_run
+
+    def _merge_pr(url: str, repo: str) -> tuple[bool, str]:
+        import subprocess
+
+        merge_res = subprocess.run(
+            ["gh", "pr", "merge", url, "--repo", repo, "--merge", "--delete-branch"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if merge_res.returncode != 0:
+            return False, (
+                merge_res.stderr.strip()
+                or merge_res.stdout.strip()
+                or "merge failed"
+            )
+        return True, "merged"
+
+    async def _run_finish(sprint_pr_url: str):
+        from routers.sprint_finish import FinishSprintBody, finish_sprint_flat
+
+        return await finish_sprint_flat(
+            sprint_label,
+            body.project,
+            FinishSprintBody(
+                confirmed=True,
+                merge_pr=True,
+                sprint_pr_url=sprint_pr_url,
+            ),
+        )
+
+    # Service layer is sync; for uat_signoff we merge via finish in this coroutine
+    # after the preview/lookup step so we stay on the FastAPI event loop.
+    lookup = complete_after_dispatch(
+        project_root=project_root,
+        sprint_label=sprint_label,
+        repo=body.project,
+        preview=True,  # always lookup first without side effects
+        uat_signoff=body.uat_signoff,
+        list_uat_fn=lambda repo_name=None: github_client.list_open_uat_issues(
+            repo_name=repo_name
+        ),
+    )
+    if not lookup.get("ok"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"No successful sprint→develop PR found for {sprint_label!r}. "
+                "Dispatch must complete with status=done and sprint_pr_number set."
+            ),
+        )
+    if preview:
+        return lookup
+
+    pr_url = lookup["sprint_pr"]["url"]
+    if body.uat_signoff:
+        finish_result = await _run_finish(pr_url)
+        return {
+            "preview": False,
+            "ok": True,
+            "merged": True,
+            "uat_signoff": True,
+            "sprint_pr": lookup["sprint_pr"],
+            "uat_tickets": lookup.get("uat_tickets") or [],
+            "finish_result": finish_result,
+            "errors": [],
+        }
+
+    ok, detail = _merge_pr(pr_url, body.project)
+    return {
+        "preview": False,
+        "ok": ok,
+        "merged": ok,
+        "uat_signoff": False,
+        "sprint_pr": lookup["sprint_pr"],
+        "uat_tickets": lookup.get("uat_tickets") or [],
+        "detail": detail,
+        "errors": [] if ok else [detail],
+    }
 
 
 @router.post("/api/sprints/plan-next")

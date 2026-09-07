@@ -87,6 +87,65 @@ def approve_sprint(project: str, sprint_label: str) -> dict:
     }
 
 
+def uat_signoff_preview(project: str, sprint_label: str) -> dict:
+    """Return what would be closed by a per-sprint UAT sign-off (dry run).
+
+    Includes child sprint labels (sprint-N.1, .2, .3) per the sign-off contract.
+    """
+    _validate_label(sprint_label)
+    srv = _server()
+    project_root = srv._project_root_path(project)  # noqa: F841 (validates project exists)
+    import github_client as _gc  # noqa: PLC0415
+    issues = _gc.list_open_uat_issues_by_sprint_label(sprint_label, repo_name=project)
+    return {
+        "sprint_label": sprint_label,
+        "count": len(issues),
+        "issues": [{"number": i["number"], "title": i["title"], "url": i["url"]} for i in issues],
+        "child_labels_included": True,
+    }
+
+
+def uat_signoff_apply(project: str, sprint_label: str) -> dict:
+    """Close all open UAT tickets for this sprint label (and child labels).
+
+    Calls approve_issue on each ticket, which adds UAT-approved and closes it.
+    Child sprint labels (sprint-N.1, .2, .3) are included.
+    """
+    _validate_label(sprint_label)
+    srv = _server()
+    project_root = srv._project_root_path(project)  # noqa: F841 (validates project exists)
+    import github_client as _gc  # noqa: PLC0415
+    issues = _gc.list_open_uat_issues_by_sprint_label(sprint_label, repo_name=project)
+    approved = []
+    errors = []
+    for iss in issues:
+        try:
+            _gc.approve_issue(iss["number"], repo_name=project)
+            approved.append(iss["number"])
+        except Exception as e:  # noqa: BLE001
+            errors.append({"number": iss["number"], "error": str(e)})
+
+    srv._emit_dashboard_event(
+        project=project or "dashboard",
+        type="sprint_uat_signed_off",
+        target=sprint_label,
+        detail={
+            "sprint_label": sprint_label,
+            "approved": approved,
+            "errors": errors,
+        },
+        action_id=str(uuid.uuid4()),
+    )
+    return {
+        "ok": not errors,
+        "sprint_label": sprint_label,
+        "approved": approved,
+        "errors": errors,
+        "count": len(approved),
+        "child_labels_included": True,
+    }
+
+
 def reject_sprint(project: str, sprint_label: str) -> dict:
     """Reject a pending sprint: dissolve it and return tickets to the backlog."""
     _validate_label(sprint_label)

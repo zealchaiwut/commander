@@ -180,12 +180,13 @@ def run_gate(
             passed, failed, skipped = _parse_pytest_output(proc.stdout or "")
             duration = 0.0  # duration not captured from injected result
     else:
+        from services.sprint_manager.pytest_runner import run_pytest
+
         t0 = time.monotonic()
         try:
-            proc = subprocess.run(
-                [sys.executable, "-m", "pytest", "--tb=no", "-q", str(tests_dir)],
-                capture_output=True,
-                text=True,
+            # Process-group kill on timeout (issue #2345).
+            proc = run_pytest(
+                ["--tb=no", "-q", str(tests_dir)],
                 cwd=str(root),
                 timeout=timeout_seconds,
             )

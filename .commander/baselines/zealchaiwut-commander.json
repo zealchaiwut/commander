@@ -1,7 +1,7 @@
 {
   "project": "zealchaiwut/commander",
-  "fail": 1851,
-  "pass": 7402,
+  "fail": 1850,
+  "pass": 7403,
   "skip": 78,
   "failed_test_ids": [
     "tests/test_1041__history_card_redesign.py::test_ac2_complete_card_has_no_rerun_in_header",
@@ -448,6 +448,7 @@
     "tests/test_2065__unify_sprint_resource_path.py::test_canonical_conflict_status_e2e_with_mocks",
     "tests/test_2065__unify_sprint_resource_path.py::test_canonical_conflict_status_rejects_invalid_label",
     "tests/test_2065__unify_sprint_resource_path.py::test_canonical_conflict_status_requires_project_param",
+    "tests/test_2065__unify_sprint_resource_path.py::test_canonical_finish_preview_rejects_invalid_label",
     "tests/test_2065__unify_sprint_resource_path.py::test_openapi_nested_conflict_status_is_deprecated",
     "tests/test_2066__response_models_hermes_critical.py::test_openapi_component_schemas_contain_real_properties",
     "tests/test_2066__response_models_hermes_critical.py::test_openapi_sprint_run_has_schema",
@@ -1303,8 +1304,6 @@
     "tests/test_approve_reject_close__5.py::test_ac4_reject_ticket_script_exists",
     "tests/test_approve_reject_close__5.py::test_ac5_update_ticket_accepts_uat_approved",
     "tests/test_approve_reject_close__5.py::test_ac5_update_ticket_uat_approved_closes_with_completed",
-    "tests/test_async_estimate_jobs__1863.py::TestAC2SprintBatch::test_job_progress_field_present",
-    "tests/test_async_estimate_jobs__1863.py::TestAC2SprintBatch::test_returns_202_and_job_id",
     "tests/test_audit_next_sprint_sublabel_callers__410.py::TestCallSiteAudit::test_all_call_sites_pass_existing_label_names",
     "tests/test_audit_next_sprint_sublabel_callers__410.py::TestCallSiteAudit::test_call_site_passes_existing_label_names",
     "tests/test_audit_next_sprint_sublabel_callers__410.py::TestCallSiteAudit::test_rerun_fetches_labels_before_call",
@@ -1636,7 +1635,6 @@
     "tests/test_remove_neon_dualwrite__758.py::test_remove_neon_dualwrite__no_top_level_sprint_repo_import",
     "tests/test_remove_sqlite_sidecar__1965.py::test_remove_sqlite_sidecar__gitignore_entries",
     "tests/test_remove_stale_global_comment__1574.py::test_local_declaration_still_present",
-    "tests/test_remove_venv_symlink__1825.py::test_remove_venv_symlink__venv_symlink_removed",
     "tests/test_render_deploy_restart__725.py::test_render_deploy_restart__deploy_posts_to_render_with_bearer",
     "tests/test_render_deploy_restart__725.py::test_render_deploy_restart__missing_config_is_400_before_call",
     "tests/test_render_deploy_restart__725.py::test_render_deploy_restart__non_render_host_unaffected",
@@ -1809,6 +1807,7 @@
     "tests/test_system_health_routes__1247.py::TestAC4RouteCountUnchanged::test_route_count_equals_baseline",
     "tests/test_token_usage__4.py::test_ac1_token_usage_columns",
     "tests/test_token_usage__4.py::test_ac1_token_usage_table_exists",
+    "tests/test_token_usage__4.py::test_ac2_hook_endpoint_accepts_post",
     "tests/test_token_usage__4.py::test_ac2_hook_exits_zero_with_usage",
     "tests/test_token_usage__4.py::test_ac2_hook_inserts_row_into_db",
     "tests/test_token_usage__4.py::test_ac7_hook_does_not_insert_when_no_usage",
@@ -1856,7 +1855,7 @@
     "tests/test_yml_docs_routing__1428.py::test_yml_routing_via_resolve_coder_model",
     "tests/test_yml_docs_routing__1428.py::test_yml_with_code_is_not_docs_only__1428_ac3"
   ],
-  "recorded_at": "2026-09-08T10:05:45.284793+00:00",
-  "recorded_from_ref": "feature/2345-full-suite-pytest-runs-spawn-runaway-rec",
+  "recorded_at": "2026-09-08T18:30:51.643444+00:00",
+  "recorded_from_ref": "7f233dd3",
   "pytest_args": "tests/ -q -m \"not live_http\""
 }

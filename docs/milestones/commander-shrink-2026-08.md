@@ -465,7 +465,15 @@ Plus the lookout contract endpoints (see S4-7).
 > own tests (pre-existing; the gate does not see ERRORs) — a follow-up, not a
 > determinism problem. Baseline re-recorded from this worktree with
 > `scripts/record_test_baseline.py --repo zealchaiwut/commander --repo-root .`
-> and two consecutive full runs of the same commit compared (see the ticket).
+> Two consecutive full runs of the same commit (`069f6e5a`, `tests/ -q -m "not
+> live_http"`, ~25 min each under concurrent agent load) measured **1851 failed
+> / 7402 passed / 78 skipped / 409 errors** both times with **identical
+> failing-test-id sets** — the AC4 bar. The 409 ERRORs are deterministic and
+> not gated (only `FAILED` lines are compared); 57 of them are the
+> `str(db_file)` fixtures above. Residual order-dependence that is reproducible
+> run-to-run but not isolation-equivalent: rows earlier tests leave in the
+> shared per-run SQLite file (test_845 ×3, test_1758 ×1,
+> test_bulk_create_sprint_assignment ×1 pass alone, fail in-suite).
 
 ---
 

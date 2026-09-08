@@ -131,6 +131,13 @@ def _guard_services_modules():
     which now needs a ``Path`` — so it errors, the ``str`` stays on the shared
     module, and ~200 later tests errored at setup with ``'str' object has no
     attribute 'exists'`` (test_641 passes alone for exactly this reason).
+
+    And it empties ``github_client._cache`` after each test. Its ``sprints:`` /
+    ``labels:`` entries live for 300s, so whether a later test that mocks
+    ``subprocess.run``/``list_sprints`` sees a call or a cache hit depended on
+    wall-clock time since whichever earlier test warmed the same key — a
+    timing-dependent result set (test_1783, test_github_client pass alone and
+    failed in-suite once the module was no longer a leaked fresh copy).
     """
     saved = {k: v for k, v in sys.modules.items() if _is_guarded(k, v)}
     db_mod = saved.get("db")
@@ -142,6 +149,9 @@ def _guard_services_modules():
         and getattr(db_mod, "DB_PATH", None) is not db_path_saved
     ):
         db_mod.DB_PATH = db_path_saved
+    gc_cache = getattr(saved.get("github_client"), "_cache", None)
+    if isinstance(gc_cache, dict):
+        gc_cache.clear()
     # (1) modules first imported during the test — inconsistent with the
     # restored graph (they were bound against the fresh objects), so drop them.
     for k in list(sys.modules.keys()):

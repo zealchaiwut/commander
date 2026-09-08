@@ -156,3 +156,29 @@ def test_step4b_db_path_attribute_restored():
         "in conftest.py must restore db.DB_PATH per test (issue #2345)"
     )
     db.init_db()  # the call that errored ~200 times in a full run
+
+
+# ── step 5: github_client's TTL cache cannot carry over between tests ────────
+#
+# ``sprints:``/``labels:`` entries live 300s, so a test that mocks
+# ``subprocess.run`` and expects a gh call got a cache hit instead whenever an
+# earlier test had warmed the same key recently enough — a wall-clock-dependent
+# outcome (test_1783, test_github_client).
+
+def test_step5_warm_github_client_cache():
+    import github_client as gc
+
+    gc._cache["sprints:owner/repo-2345-probe"] = (float("inf"), ["sprint-1"])
+    assert gc._cached("sprints:owner/repo-2345-probe", lambda: ["fresh"]) == ["sprint-1"]
+
+
+def test_step5b_github_client_cache_is_empty_for_the_next_test():
+    import github_client as gc
+
+    assert "sprints:owner/repo-2345-probe" not in gc._cache, (
+        "github_client._cache carried over from the previous test — the guard "
+        "in conftest.py must empty it per test (issue #2345)"
+    )
+    calls = []
+    assert gc._cached("sprints:owner/repo-2345-probe", lambda: calls.append(1) or ["fresh"]) == ["fresh"]
+    assert calls == [1], "expected a cache miss (the underlying fetch must run)"

@@ -441,6 +441,31 @@ Plus the lookout contract endpoints (see S4-7).
 > through package attributes, not just `sys.modules`) after. Baseline is now
 > trustworthy — re-record with `scripts/record_test_baseline.py --repo
 > zealchaiwut/commander` from a bare worktree on current develop.
+>
+> **Correction, 2026-09-08 (#2345, part C).** Part B's guard was *partial* —
+> `services.*`/`server`/`projects` (later `routers*`) but not `db`,
+> `github_client`, `env_file`, … — and a partial restore is worse than none:
+> after a test that purges-and-reimports `db`+`server`+`routers*` (test_1163,
+> test_631/634, test_2232, …) `server` went back to the original object while
+> `sys.modules["routers.analytics"]`/`["db"]` kept the fresh ones, so tests
+> patching one drove requests through the other. That split, not any diff,
+> produced the 105 "new" analytics/cost/metrics failures in this ticket's first
+> baseline-delta refusal. Three further shared-state leaks were found the same
+> way: fixtures in test_2041/2042/2066 `os.environ.pop("DB_PATH")` at teardown
+> (`db.py` `sys.exit(1)`s on import when it is blank → 632 setup ERRORs in one
+> run, invisible to the gate because only `FAILED` lines are compared), and
+> test_1160's autouse fixture sets `db.DB_PATH = str(...)` then dies in
+> `init_db()` *before* `yield`, so its own restore never runs and ~200 later
+> tests error with `'str' object has no attribute 'exists'`. Fix: the guard is
+> now whole-graph (every first-party module, by name or by file location),
+> scrubs stale parent-package attributes, and restores `os.environ` and
+> `db.DB_PATH` per test; `tests/test_first_party_module_and_env_guard__2345.py`
+> pins each mechanism with a pollute-then-assert pair. The `str(db_file)`
+> fixtures in test_1160/1161/1162/1462 still error deterministically on their
+> own tests (pre-existing; the gate does not see ERRORs) — a follow-up, not a
+> determinism problem. Baseline re-recorded from this worktree with
+> `scripts/record_test_baseline.py --repo zealchaiwut/commander --repo-root .`
+> and two consecutive full runs of the same commit compared (see the ticket).
 
 ---
 

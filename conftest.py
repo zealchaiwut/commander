@@ -16,47 +16,146 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 
-_SYS_MODULES_GUARDED_KEYS = frozenset({"server", "projects", "routers"})
-_SYS_MODULES_GUARDED_PREFIXES = ("services.", "routers.")
+# ── First-party module identity guard (issue #2345, Part B) ────────────────────
+#
+# Every directory that tests/conftest.py puts on sys.path. A bare module name
+# resolved from one of these (``db``, ``server``, ``settings_repo``, ...) or a
+# package rooted here (``services``, ``routers``, ...) is first-party code whose
+# identity must be stable across tests.
+_FIRST_PARTY_DIRS = (
+    _REPO_ROOT / "apps" / "dashboard",
+    _REPO_ROOT / "services" / "sprint_manager",
+    _REPO_ROOT,
+)
+_NEVER_GUARDED_TOP_LEVEL = frozenset({"tests", "conftest", "__init__"})
+_TESTS_DIR_PREFIX = str(_REPO_ROOT / "tests") + os.sep
+_VENV_DIR_PREFIX = str(_REPO_ROOT / "venv") + os.sep
 
 
-def _is_guarded(key: str) -> bool:
-    return key in _SYS_MODULES_GUARDED_KEYS or any(
-        key.startswith(p) for p in _SYS_MODULES_GUARDED_PREFIXES
+def _first_party_top_level_names() -> frozenset:
+    names = set()
+    for d in _FIRST_PARTY_DIRS:
+        if not d.is_dir():
+            continue
+        for p in d.iterdir():
+            if p.suffix == ".py":
+                names.add(p.stem)
+            elif p.is_dir() and (p / "__init__.py").exists():
+                names.add(p.name)
+    return frozenset(names - _NEVER_GUARDED_TOP_LEVEL)
+
+
+_FIRST_PARTY_TOP_LEVEL = _first_party_top_level_names()
+_guard_cache: dict = {}
+
+
+def _is_guarded(key: str, mod=None) -> bool:
+    """True if ``key`` names a first-party module whose identity must be restored.
+
+    A key qualifies by name (its top-level component is a module/package in one
+    of ``_FIRST_PARTY_DIRS`` — this also catches bare ``types.ModuleType`` stubs
+    installed under a first-party name) or by location (its ``__file__`` lives in
+    the repo, outside ``tests/`` and ``venv/`` — this catches modules loaded under
+    an ad-hoc bare name such as ``logs_service``).
+    """
+    top = key.partition(".")[0]
+    if top in _FIRST_PARTY_TOP_LEVEL:
+        return True
+    if top in _NEVER_GUARDED_TOP_LEVEL:
+        return False
+    cached = _guard_cache.get(key)
+    if cached is not None:
+        return cached
+    f = getattr(mod, "__file__", None)
+    result = (
+        isinstance(f, str)
+        and f.startswith(str(_REPO_ROOT) + os.sep)
+        and not f.startswith(_TESTS_DIR_PREFIX)
+        and not f.startswith(_VENV_DIR_PREFIX)
+        and "site-packages" not in f
     )
+    if mod is not None:
+        _guard_cache[key] = result
+    return result
+
+
+def _scrub_parent_attribute(key: str, stale, *parents) -> None:
+    """Drop ``parent.<child>`` when it still points at a module we removed."""
+    parent_key, _, child = key.rpartition(".")
+    if not parent_key:
+        return
+    for parent in parents:
+        if parent is not None and getattr(parent, child, None) is stale:
+            try:
+                delattr(parent, child)
+            except (AttributeError, TypeError):
+                pass
 
 
 @pytest.fixture(autouse=True)
 def _guard_services_modules():
-    """Restore services.*, server, projects, routers, and routers.* module objects after each test.
+    """Restore every first-party module object in sys.modules after each test.
 
-    Several test fixtures (test_643, test_644, test_681, test_727, test_747)
-    purge these keys from sys.modules before importing a fresh server/services
-    stack with a test-specific config. Other test files (test_783, test_808,
-    test_1161, test_reconcile_preview_project_404__2069) install a stub
-    ``routers`` module to load individual router files without triggering
-    ``routers/__init__.py``. Without cleanup, the replaced module objects
-    persist for the rest of the session, breaking monkeypatches in subsequent
-    tests that were applied to the *original* module objects.
+    Dozens of test fixtures purge ``server``, ``db``, ``routers*``, ``services.*``,
+    ``github_client``, ``env_file``, ... from sys.modules and re-import them to get
+    a fresh server stack with test-specific config (test_643/644/681/727/747,
+    test_1163, test_631/634, test_1864, test_2232, the ``fresh_db`` fixtures, and
+    more). Whatever they leave behind persists for the rest of the session.
 
-    This autouse fixture snapshots the relevant sys.modules entries before each
-    test and restores them after, so the pollution cannot escape the test that
-    caused it (issue #2345, same class as #2337).
+    Two things go wrong when that pollution escapes:
+
+    * a later test monkeypatches the *original* module object while the app now
+      routes through the *fresh* one (or vice versa), so the patch never lands —
+      the #2337 class; and
+    * restoring only *some* of the graph is worse than restoring none of it. An
+      earlier revision of this fixture restored ``server``/``services.*`` but not
+      ``routers.*``/``db``: ``server`` went back to the original object (routing
+      to the original router modules) while ``sys.modules["routers.analytics"]``
+      still held the fresh one, so tests patching ``routers.analytics`` never
+      affected the handler that actually ran. That split alone produced ~100
+      "new" failures across the analytics/cost/metrics endpoint tests.
+
+    So the guard is deliberately whole-graph: it snapshots every first-party
+    module (by name or by location — see ``_is_guarded``) before each test and
+    afterwards (1) drops first-party modules first imported *during* the test,
+    scrubbing the parent-package attribute so ``from pkg import child`` cannot
+    hand out the dropped object, (2) restores the snapshot, and (3) re-points
+    parent-package attributes at the restored objects (a bare
+    ``sys.modules.update`` is not enough — ``services.sprint_manager`` may still
+    point at the fresh child). Issue #2345, same class as #2337.
+
+    It also restores ``db.DB_PATH`` — the most-mutated first-party global in
+    the suite (20+ fixtures assign it directly). A fixture that assigns it and
+    then raises *before* ``yield`` never reaches its own restore: test_1160's
+    autouse fixture sets ``db.DB_PATH = str(...)`` and calls ``init_db()``,
+    which now needs a ``Path`` — so it errors, the ``str`` stays on the shared
+    module, and ~200 later tests errored at setup with ``'str' object has no
+    attribute 'exists'`` (test_641 passes alone for exactly this reason).
     """
-    saved = {k: v for k, v in sys.modules.items() if _is_guarded(k)}
+    saved = {k: v for k, v in sys.modules.items() if _is_guarded(k, v)}
+    db_mod = saved.get("db")
+    db_path_saved = getattr(db_mod, "DB_PATH", None) if db_mod is not None else None
     yield
-    # Remove modules that were added during the test (fresh imports).
+    if (
+        db_mod is not None
+        and db_path_saved is not None
+        and getattr(db_mod, "DB_PATH", None) is not db_path_saved
+    ):
+        db_mod.DB_PATH = db_path_saved
+    # (1) modules first imported during the test — inconsistent with the
+    # restored graph (they were bound against the fresh objects), so drop them.
     for k in list(sys.modules.keys()):
-        if _is_guarded(k) and k not in saved:
-            del sys.modules[k]
-    # Restore modules that were removed or replaced during the test.
+        if k in saved:
+            continue
+        mod = sys.modules[k]
+        if not _is_guarded(k, mod):
+            continue
+        del sys.modules[k]
+        parent_key = k.rpartition(".")[0]
+        _scrub_parent_attribute(k, mod, sys.modules.get(parent_key), saved.get(parent_key))
+    # (2) restore modules that were removed or replaced during the test.
     sys.modules.update(saved)
-    # Also fix parent-package attributes so that getattr(parent, "child") returns
-    # the restored module object — sys.modules update alone is not enough because
-    # the parent package object may still hold a reference to the fresh module
-    # that was imported during the test (e.g., services.sprint_manager was freshly
-    # imported during client_ctx, so services.sprint_manager attribute on the
-    # services package points to the fresh object even after sys.modules restore).
+    # (3) parent-package attributes must resolve to the restored objects too.
     for k in sorted(saved, key=len):
         if "." not in k:
             continue
@@ -67,6 +166,25 @@ def _guard_services_modules():
                 setattr(parent, child_name, saved[k])
             except (AttributeError, TypeError):
                 pass
+
+
+@pytest.fixture(autouse=True)
+def _guard_os_environ():
+    """Restore os.environ after each test.
+
+    Several tests assign ``os.environ[...]`` directly (not via ``monkeypatch``),
+    e.g. ``DB_PATH`` in test_783 — a fresh ``import db`` in any later test then
+    binds to that test's throwaway database. Same pollution class as the module
+    guard above (issue #2345, AC3).
+    """
+    saved = dict(os.environ)
+    yield
+    for k in list(os.environ):
+        if k not in saved:
+            del os.environ[k]
+    for k, v in saved.items():
+        if os.environ.get(k) != v:
+            os.environ[k] = v
 
 
 def _uat_server_reachable() -> bool:

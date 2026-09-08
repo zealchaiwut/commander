@@ -8,10 +8,62 @@ import socket
 import sys
 from pathlib import Path
 
+import pytest
+
 # Add repo root to sys.path
 _REPO_ROOT = Path(__file__).parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+
+_SYS_MODULES_GUARDED_KEYS = frozenset({"server", "projects"})
+_SYS_MODULES_GUARDED_PREFIX = "services."
+
+
+@pytest.fixture(autouse=True)
+def _guard_services_modules():
+    """Restore services.*, server, and projects module objects after each test.
+
+    Several test fixtures (test_643, test_644, test_681, test_727, test_747)
+    purge these keys from sys.modules before importing a fresh server/services
+    stack with a test-specific config. Without cleanup, the replaced module
+    objects persist for the rest of the session, breaking monkeypatches in
+    subsequent tests that were applied to the *original* module objects.
+
+    This autouse fixture snapshots the relevant sys.modules entries before each
+    test and restores them after, so the pollution cannot escape the test that
+    caused it (issue #2345, same class as #2337).
+    """
+    saved = {
+        k: v for k, v in sys.modules.items()
+        if k in _SYS_MODULES_GUARDED_KEYS or k.startswith(_SYS_MODULES_GUARDED_PREFIX)
+    }
+    yield
+    # Remove modules that were added during the test (fresh imports).
+    for k in list(sys.modules.keys()):
+        if (
+            (k in _SYS_MODULES_GUARDED_KEYS or k.startswith(_SYS_MODULES_GUARDED_PREFIX))
+            and k not in saved
+        ):
+            del sys.modules[k]
+    # Restore modules that were removed or replaced during the test.
+    sys.modules.update(saved)
+    # Also fix parent-package attributes so that getattr(parent, "child") returns
+    # the restored module object — sys.modules update alone is not enough because
+    # the parent package object may still hold a reference to the fresh module
+    # that was imported during the test (e.g., services.sprint_manager was freshly
+    # imported during client_ctx, so services.sprint_manager attribute on the
+    # services package points to the fresh object even after sys.modules restore).
+    for k in sorted(saved, key=len):
+        if "." not in k:
+            continue
+        parent_key, _, child_name = k.rpartition(".")
+        parent = sys.modules.get(parent_key)
+        if parent is not None:
+            try:
+                setattr(parent, child_name, saved[k])
+            except (AttributeError, TypeError):
+                pass
 
 
 def _uat_server_reachable() -> bool:

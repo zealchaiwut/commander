@@ -417,7 +417,7 @@ Plus the lookout contract endpoints (see S4-7).
 > above rather than edited, because what the milestone believed at the time is
 > the point of this note.
 >
-> **Correction, 2026-09-02 (#2345).** After #2339 unblocked full-suite runs, two
+> **Correction, 2026-09-02 (#2345, part A).** After #2339 unblocked full-suite runs, two
 > latent problems surfaced: (1) meta-tests `#2252`/`#2253` spawned full-tree
 > `pytest --co` repeatedly, and suite-timeout paths (`finish_feature`,
 > `record_test_baseline`, dispatch gate, suite health) used
@@ -427,8 +427,53 @@ Plus the lookout contract endpoints (see S4-7).
 > ~125 order-dependent failure class first pinned in #2337. Fix: process-group
 > kill + unique DB via `services/sprint_manager/pytest_runner.py`, and
 > cache/AST the meta-test collects so a full suite no longer nests 6–10
-> full-tree `--co` runs. Re-record the baseline after this lands — the
-> previous baseline is not trustworthy under overlapping orphans.
+> full-tree `--co` runs.
+>
+> **Correction, 2026-09-08 (#2345, part B).** Root cause of the ~125-test
+> non-determinism identified: test fixtures in `test_643`, `test_644`,
+> `test_681`, `test_727`, and `test_747` purge `services.*`, `server`, and
+> `projects` from `sys.modules` to force a fresh import, but do not restore
+> those entries after the test. Subsequent tests whose monkeypatches reference
+> the original module objects find them gone, causing non-deterministic failures.
+> Fix: `_guard_services_modules` autouse fixture in root `conftest.py` snapshots
+> the relevant `sys.modules` entries before each test and restores them
+> (including parent-package attributes, since `importlib.import_module` resolves
+> through package attributes, not just `sys.modules`) after. Baseline is now
+> trustworthy — re-record with `scripts/record_test_baseline.py --repo
+> zealchaiwut/commander` from a bare worktree on current develop.
+>
+> **Correction, 2026-09-08 (#2345, part C).** Part B's guard was *partial* —
+> `services.*`/`server`/`projects` (later `routers*`) but not `db`,
+> `github_client`, `env_file`, … — and a partial restore is worse than none:
+> after a test that purges-and-reimports `db`+`server`+`routers*` (test_1163,
+> test_631/634, test_2232, …) `server` went back to the original object while
+> `sys.modules["routers.analytics"]`/`["db"]` kept the fresh ones, so tests
+> patching one drove requests through the other. That split, not any diff,
+> produced the 105 "new" analytics/cost/metrics failures in this ticket's first
+> baseline-delta refusal. Three further shared-state leaks were found the same
+> way: fixtures in test_2041/2042/2066 `os.environ.pop("DB_PATH")` at teardown
+> (`db.py` `sys.exit(1)`s on import when it is blank → 632 setup ERRORs in one
+> run, invisible to the gate because only `FAILED` lines are compared), and
+> test_1160's autouse fixture sets `db.DB_PATH = str(...)` then dies in
+> `init_db()` *before* `yield`, so its own restore never runs and ~200 later
+> tests error with `'str' object has no attribute 'exists'`. Fix: the guard is
+> now whole-graph (every first-party module, by name or by file location),
+> scrubs stale parent-package attributes, and restores `os.environ` and
+> `db.DB_PATH` per test; `tests/test_first_party_module_and_env_guard__2345.py`
+> pins each mechanism with a pollute-then-assert pair. The `str(db_file)`
+> fixtures in test_1160/1161/1162/1462 still error deterministically on their
+> own tests (pre-existing; the gate does not see ERRORs) — a follow-up, not a
+> determinism problem. Baseline re-recorded from this worktree with
+> `scripts/record_test_baseline.py --repo zealchaiwut/commander --repo-root .`
+> Two consecutive full runs of the same commit (`069f6e5a`, `tests/ -q -m "not
+> live_http"`, ~25 min each under concurrent agent load) measured **1851 failed
+> / 7402 passed / 78 skipped / 409 errors** both times with **identical
+> failing-test-id sets** — the AC4 bar. The 409 ERRORs are deterministic and
+> not gated (only `FAILED` lines are compared); 57 of them are the
+> `str(db_file)` fixtures above. Residual order-dependence that is reproducible
+> run-to-run but not isolation-equivalent: rows earlier tests leave in the
+> shared per-run SQLite file (test_845 ×3, test_1758 ×1,
+> test_bulk_create_sprint_assignment ×1 pass alone, fail in-suite).
 
 ---
 

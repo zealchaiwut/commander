@@ -8,10 +8,193 @@ import socket
 import sys
 from pathlib import Path
 
+import pytest
+
 # Add repo root to sys.path
 _REPO_ROOT = Path(__file__).parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+
+# ── First-party module identity guard (issue #2345, Part B) ────────────────────
+#
+# Every directory that tests/conftest.py puts on sys.path. A bare module name
+# resolved from one of these (``db``, ``server``, ``settings_repo``, ...) or a
+# package rooted here (``services``, ``routers``, ...) is first-party code whose
+# identity must be stable across tests.
+_FIRST_PARTY_DIRS = (
+    _REPO_ROOT / "apps" / "dashboard",
+    _REPO_ROOT / "services" / "sprint_manager",
+    _REPO_ROOT,
+)
+_NEVER_GUARDED_TOP_LEVEL = frozenset({"tests", "conftest", "__init__"})
+_TESTS_DIR_PREFIX = str(_REPO_ROOT / "tests") + os.sep
+_VENV_DIR_PREFIX = str(_REPO_ROOT / "venv") + os.sep
+
+
+def _first_party_top_level_names() -> frozenset:
+    names = set()
+    for d in _FIRST_PARTY_DIRS:
+        if not d.is_dir():
+            continue
+        for p in d.iterdir():
+            if p.suffix == ".py":
+                names.add(p.stem)
+            elif p.is_dir() and (p / "__init__.py").exists():
+                names.add(p.name)
+    return frozenset(names - _NEVER_GUARDED_TOP_LEVEL)
+
+
+_FIRST_PARTY_TOP_LEVEL = _first_party_top_level_names()
+_guard_cache: dict = {}
+
+
+def _is_guarded(key: str, mod=None) -> bool:
+    """True if ``key`` names a first-party module whose identity must be restored.
+
+    A key qualifies by name (its top-level component is a module/package in one
+    of ``_FIRST_PARTY_DIRS`` — this also catches bare ``types.ModuleType`` stubs
+    installed under a first-party name) or by location (its ``__file__`` lives in
+    the repo, outside ``tests/`` and ``venv/`` — this catches modules loaded under
+    an ad-hoc bare name such as ``logs_service``).
+    """
+    top = key.partition(".")[0]
+    if top in _FIRST_PARTY_TOP_LEVEL:
+        return True
+    if top in _NEVER_GUARDED_TOP_LEVEL:
+        return False
+    cached = _guard_cache.get(key)
+    if cached is not None:
+        return cached
+    f = getattr(mod, "__file__", None)
+    result = (
+        isinstance(f, str)
+        and f.startswith(str(_REPO_ROOT) + os.sep)
+        and not f.startswith(_TESTS_DIR_PREFIX)
+        and not f.startswith(_VENV_DIR_PREFIX)
+        and "site-packages" not in f
+    )
+    if mod is not None:
+        _guard_cache[key] = result
+    return result
+
+
+def _scrub_parent_attribute(key: str, stale, *parents) -> None:
+    """Drop ``parent.<child>`` when it still points at a module we removed."""
+    parent_key, _, child = key.rpartition(".")
+    if not parent_key:
+        return
+    for parent in parents:
+        if parent is not None and getattr(parent, child, None) is stale:
+            try:
+                delattr(parent, child)
+            except (AttributeError, TypeError):
+                pass
+
+
+@pytest.fixture(autouse=True)
+def _guard_services_modules():
+    """Restore every first-party module object in sys.modules after each test.
+
+    Dozens of test fixtures purge ``server``, ``db``, ``routers*``, ``services.*``,
+    ``github_client``, ``env_file``, ... from sys.modules and re-import them to get
+    a fresh server stack with test-specific config (test_643/644/681/727/747,
+    test_1163, test_631/634, test_1864, test_2232, the ``fresh_db`` fixtures, and
+    more). Whatever they leave behind persists for the rest of the session.
+
+    Two things go wrong when that pollution escapes:
+
+    * a later test monkeypatches the *original* module object while the app now
+      routes through the *fresh* one (or vice versa), so the patch never lands —
+      the #2337 class; and
+    * restoring only *some* of the graph is worse than restoring none of it. An
+      earlier revision of this fixture restored ``server``/``services.*`` but not
+      ``routers.*``/``db``: ``server`` went back to the original object (routing
+      to the original router modules) while ``sys.modules["routers.analytics"]``
+      still held the fresh one, so tests patching ``routers.analytics`` never
+      affected the handler that actually ran. That split alone produced ~100
+      "new" failures across the analytics/cost/metrics endpoint tests.
+
+    So the guard is deliberately whole-graph: it snapshots every first-party
+    module (by name or by location — see ``_is_guarded``) before each test and
+    afterwards (1) drops first-party modules first imported *during* the test,
+    scrubbing the parent-package attribute so ``from pkg import child`` cannot
+    hand out the dropped object, (2) restores the snapshot, and (3) re-points
+    parent-package attributes at the restored objects (a bare
+    ``sys.modules.update`` is not enough — ``services.sprint_manager`` may still
+    point at the fresh child). Issue #2345, same class as #2337.
+
+    It also restores ``db.DB_PATH`` — the most-mutated first-party global in
+    the suite (20+ fixtures assign it directly). A fixture that assigns it and
+    then raises *before* ``yield`` never reaches its own restore: test_1160's
+    autouse fixture sets ``db.DB_PATH = str(...)`` and calls ``init_db()``,
+    which now needs a ``Path`` — so it errors, the ``str`` stays on the shared
+    module, and ~200 later tests errored at setup with ``'str' object has no
+    attribute 'exists'`` (test_641 passes alone for exactly this reason).
+
+    And it empties ``github_client._cache`` after each test. Its ``sprints:`` /
+    ``labels:`` entries live for 300s, so whether a later test that mocks
+    ``subprocess.run``/``list_sprints`` sees a call or a cache hit depended on
+    wall-clock time since whichever earlier test warmed the same key — a
+    timing-dependent result set (test_1783, test_github_client pass alone and
+    failed in-suite once the module was no longer a leaked fresh copy).
+    """
+    saved = {k: v for k, v in sys.modules.items() if _is_guarded(k, v)}
+    db_mod = saved.get("db")
+    db_path_saved = getattr(db_mod, "DB_PATH", None) if db_mod is not None else None
+    yield
+    if (
+        db_mod is not None
+        and db_path_saved is not None
+        and getattr(db_mod, "DB_PATH", None) is not db_path_saved
+    ):
+        db_mod.DB_PATH = db_path_saved
+    gc_cache = getattr(saved.get("github_client"), "_cache", None)
+    if isinstance(gc_cache, dict):
+        gc_cache.clear()
+    # (1) modules first imported during the test — inconsistent with the
+    # restored graph (they were bound against the fresh objects), so drop them.
+    for k in list(sys.modules.keys()):
+        if k in saved:
+            continue
+        mod = sys.modules[k]
+        if not _is_guarded(k, mod):
+            continue
+        del sys.modules[k]
+        parent_key = k.rpartition(".")[0]
+        _scrub_parent_attribute(k, mod, sys.modules.get(parent_key), saved.get(parent_key))
+    # (2) restore modules that were removed or replaced during the test.
+    sys.modules.update(saved)
+    # (3) parent-package attributes must resolve to the restored objects too.
+    for k in sorted(saved, key=len):
+        if "." not in k:
+            continue
+        parent_key, _, child_name = k.rpartition(".")
+        parent = sys.modules.get(parent_key)
+        if parent is not None:
+            try:
+                setattr(parent, child_name, saved[k])
+            except (AttributeError, TypeError):
+                pass
+
+
+@pytest.fixture(autouse=True)
+def _guard_os_environ():
+    """Restore os.environ after each test.
+
+    Several tests assign ``os.environ[...]`` directly (not via ``monkeypatch``),
+    e.g. ``DB_PATH`` in test_783 — a fresh ``import db`` in any later test then
+    binds to that test's throwaway database. Same pollution class as the module
+    guard above (issue #2345, AC3).
+    """
+    saved = dict(os.environ)
+    yield
+    for k in list(os.environ):
+        if k not in saved:
+            del os.environ[k]
+    for k, v in saved.items():
+        if os.environ.get(k) != v:
+            os.environ[k] = v
 
 
 def _uat_server_reachable() -> bool:

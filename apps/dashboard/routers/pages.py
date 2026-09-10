@@ -29,6 +29,7 @@ _VALID_PROJECT_TABS = {
     "notes", "settings", "global-settings", "roadmap",
     "failures",
     "brain",
+    "deploy",  # direct/deep-link support for the homepage deploy-status pill
     # "logs", "metrics", "status" removed in #2025 — kept as redirects below
 }
 

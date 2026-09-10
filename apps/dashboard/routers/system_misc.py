@@ -100,6 +100,8 @@ def get_deploy_overview():
         merged = srv._merged_deploy_config(slug, repo)
         srv._enrich_local_working_dirs(repo, merged)
         srv._enrich_deploy_readiness(merged)
+        srv._enrich_deploy_git_facts(merged)
+        srv._enrich_deploy_prs(repo, merged)
         for card in srv._deploy_overview_entries_for(slug, merged):
             cfg = merged.get(card["env"], {})
             card["deploy_ready"] = cfg.get("deploy_ready", card["host"] == "render")
@@ -111,8 +113,16 @@ def get_deploy_overview():
             card["stop_errors"] = cfg.get("stop_errors", [])
             card["start_errors"] = cfg.get("start_errors", [])
             if card["host"] == "local":
-                card["git_sha"] = srv._GIT_SHA
-                card["git_commit_msg"] = srv._GIT_COMMIT_MSG
+                # Per-environment facts (issue: Deploy-tab-extension milestone) —
+                # previously every card showed this dashboard process's own
+                # build sha (_GIT_SHA) regardless of project/env. Commander's
+                # own prd card keeps that as a reasonable proxy (this process
+                # IS commander prd), but every other card now shows its real
+                # checked-out commit.
+                card["git_sha"] = cfg.get("current_commit") or srv._GIT_SHA
+                card["git_commit_msg"] = cfg.get("current_commit_msg") or srv._GIT_COMMIT_MSG
+                card["commits_behind"] = cfg.get("commits_behind")
+                card["open_pr"] = cfg.get("open_pr")
                 card["server_started_at"] = srv._STARTED_AT
                 card["last_deployed_at"] = srv._deploy_times.get(f"{slug}/{card['env']}")
             environments.append(card)

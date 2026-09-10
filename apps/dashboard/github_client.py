@@ -852,12 +852,31 @@ def find_open_pr_for_head(head_branch: str, repo_name: str | None = None) -> dic
     return _cached(key, fetch)
 
 
+def find_open_pr_for_base(base_branch: str, repo_name: str | None = None) -> dict | None:
+    """Return the first open PR whose base (target) branch matches base_branch, or None.
+
+    Used for the Deploy tab's "deploy-relevant PR" — e.g. the open sprint->develop
+    PR for a uat environment, or a develop->main promotion PR for a prd/local one.
+    Cached at 30s TTL (key pr_base:{repo}:{branch}) — invalidated on PR mutations.
+    """
+    r = _r(repo_name)
+    key = f"pr_base:{r}:{base_branch}"
+    def fetch():
+        try:
+            prs = _json("api", f"repos/{r}/pulls?state=open&base={base_branch}")
+            return _pr_from_rest(prs[0]) if prs else None
+        except subprocess.CalledProcessError:
+            return None
+    return _cached(key, fetch)
+
+
 def merge_pr(pr_number: int, repo_name: str | None = None) -> None:
     """Merge a PR by number using a merge commit (preserves history)."""
     r = _r(repo_name)
     _run("pr", "merge", str(pr_number), "--repo", r, "--merge")
     invalidate(f"pr:{r}:")
     invalidate(f"pr_head:{r}:")
+    invalidate(f"pr_base:{r}:")
 
 
 def repo_config() -> dict:

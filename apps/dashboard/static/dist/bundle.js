@@ -922,7 +922,7 @@
       return { slug: null, tab: "sprint-mgmt", view, filter };
     const slug = decodeURIComponent(m[1]);
     const rawTab = m[2] || "";
-    const tab = rawTab === "tickets" ? "tickets" : rawTab === "sprint" ? "sprint-mgmt" : rawTab === "bulk-create" ? "bulk-create" : rawTab === "failures" ? "failures" : rawTab === "brain" ? "brain" : rawTab === "settings" ? "settings" : rawTab === "global-settings" ? "global-settings" : "sprint-mgmt";
+    const tab = rawTab === "tickets" ? "tickets" : rawTab === "sprint" ? "sprint-mgmt" : rawTab === "bulk-create" ? "bulk-create" : rawTab === "failures" ? "failures" : rawTab === "brain" ? "brain" : rawTab === "deploy" ? "deploy" : rawTab === "settings" ? "settings" : rawTab === "global-settings" ? "global-settings" : "sprint-mgmt";
     return { slug, tab, view, filter };
   }
   function parseUrl2() {

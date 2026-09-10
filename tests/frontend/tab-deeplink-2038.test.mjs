@@ -46,6 +46,18 @@ test('brain → "brain"', () => {
   assert.equal(result.slug, 'commander');
 });
 
+// Deploy-tab-extension milestone: same class of bug as failures/brain above —
+// the server's _VALID_PROJECT_TABS allowlist (pages.py) was updated to accept
+// "deploy" so the homepage's deploy-status pill can deep-link into it, but
+// this separate client-side ternary chain was initially missed, so the page
+// loaded correctly yet silently activated the Sprint pane instead.
+test('deploy → "deploy"', () => {
+  const result = _parseUrlImpl('/project/crux/deploy', '');
+  assert.equal(result.tab, 'deploy',
+    'deploy must map to "deploy", not fall through to sprint-mgmt');
+  assert.equal(result.slug, 'crux');
+});
+
 // ── Pre-existing valid tabs still map correctly ───────────────────────────────
 
 test('tickets → "tickets"', () => {

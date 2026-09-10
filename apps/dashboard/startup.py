@@ -1330,6 +1330,148 @@ def _enrich_deploy_readiness(config: dict) -> None:
         entry["start_errors"] = start_errors
 
 
+def _current_commit(working_dir: str) -> Optional[str]:
+    """Short HEAD sha actually checked out in *working_dir*, or None.
+
+    Cheap and local — no network. Best-effort: any failure returns None rather
+    than raising, since this backs a display-only Deploy-card field. Replaces
+    the previous behaviour of showing this dashboard process's own build sha
+    (``_GIT_SHA``) on every card regardless of which project/env it was for.
+    """
+    if not working_dir:
+        return None
+    try:
+        result = subprocess.run(
+            _deploy_actions.build_short_head_sha_command(),
+            capture_output=True, text=True, cwd=working_dir, timeout=10,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _current_commit_msg(working_dir: str) -> Optional[str]:
+    """HEAD's commit subject line in *working_dir*, or None. Cheap, local, best-effort."""
+    if not working_dir:
+        return None
+    try:
+        result = subprocess.run(
+            _deploy_actions.build_head_commit_msg_command(),
+            capture_output=True, text=True, cwd=working_dir, timeout=10,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _commits_behind(working_dir: str, branch: str) -> Optional[int]:
+    """How many commits HEAD is behind origin/<branch> in *working_dir*, or None.
+
+    Fetches first so the comparison reflects the real remote tip. Best-effort:
+    any failure (offline, missing dir, timeout) returns None — surfaced as
+    "unknown" on the card, not "0" (those mean different things to an operator
+    deciding whether to deploy).
+    """
+    if not working_dir or not branch:
+        return None
+    try:
+        fetch = subprocess.run(
+            _deploy_actions.build_fetch_quiet_command(branch),
+            capture_output=True, text=True, cwd=working_dir, timeout=30,
+        )
+        if fetch.returncode != 0:
+            return None
+        result = subprocess.run(
+            _deploy_actions.build_rev_list_count_command(branch),
+            capture_output=True, text=True, cwd=working_dir, timeout=30,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return None
+
+
+def _enrich_deploy_git_facts(config: dict) -> None:
+    """Attach per-environment ``current_commit`` + ``commits_behind`` (cached).
+
+    A git fetch per card on every dashboard load is real network/CPU cost
+    across 5 projects x up to 3 envs, so ``commits_behind`` (which fetches) is
+    cached briefly via the same ``aggregate_cache`` namespace pattern used for
+    ``/api/home``. ``current_commit``/``current_commit_msg`` are pure-local
+    and cheap, so they're not cached — always fresh.
+
+    All of this project's local envs are enriched concurrently (thread pool —
+    every call here is a blocking subprocess, not CPU-bound, so the GIL isn't
+    a bottleneck). A cold cache on a project with N local envs previously took
+    the *sum* of each env's git-fetch time (each up to a 30s timeout); this
+    caps it at the *slowest single env* instead — found via an actual
+    browser click-through where the homepage's deploy-status pill took ~15s+
+    to populate on a cold cache, run sequentially across up to 13 envs
+    project-by-project.
+    """
+    import aggregate_cache  # noqa: PLC0415
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
+    local_envs = [
+        (env, entry) for env, entry in (config or {}).items()
+        if isinstance(entry, dict) and entry.get("host") == "local"
+    ]
+    if not local_envs:
+        return
+
+    def _one(env_entry: tuple[str, dict]) -> None:
+        _env, entry = env_entry
+        working_dir = entry.get("working_dir") or ""
+        branch = entry.get("branch") or ""
+        entry["current_commit"] = _current_commit(working_dir)
+        entry["current_commit_msg"] = _current_commit_msg(working_dir)
+
+        cache_key = f"{working_dir}:{branch}"
+        cached = aggregate_cache.get(cache_key, "deploy_commits_behind")
+        if cached is not None:
+            entry["commits_behind"] = cached[0].get("value")
+            return
+        behind = _commits_behind(working_dir, branch)
+        aggregate_cache.store(cache_key, "deploy_commits_behind", {"value": behind}, ttl_s=45)
+        entry["commits_behind"] = behind
+
+    with ThreadPoolExecutor(max_workers=max(len(local_envs), 1)) as pool:
+        list(pool.map(_one, local_envs))  # list() to propagate any worker exception
+
+
+def _enrich_deploy_prs(repo: str, config: dict) -> None:
+    """Attach the deploy-relevant open PR (if any) to each local env entry.
+
+    "Deploy-relevant" means the open PR (if any) whose base branch matches the
+    environment's configured branch — e.g. an open sprint->develop PR for a uat
+    entry, or a develop->main promotion PR for prd/local. Not a full open-PR
+    listing for the repo (github_client.find_open_pr_for_base already caches at
+    30s TTL, so this doesn't add extra request volume on repeat loads).
+    """
+    import github_client as _github_client  # noqa: PLC0415
+
+    for _env, entry in (config or {}).items():
+        if not isinstance(entry, dict) or entry.get("host") != "local":
+            continue
+        branch = entry.get("branch") or ""
+        if not branch:
+            entry["open_pr"] = None
+            continue
+        pr = _github_client.find_open_pr_for_base(branch, repo)
+        entry["open_pr"] = (
+            {"number": pr["number"], "title": pr["title"], "url": pr["url"]}
+            if pr else None
+        )
+
+
 from services.sprint_manager import render_actions as _render_actions  # noqa: E402
 
 

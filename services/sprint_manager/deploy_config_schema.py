@@ -172,6 +172,42 @@ SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
 }
 
 
+# Per-project "Copy PRD → UAT" data-copy strategy (Deploy-tab-copy-prd-to-uat
+# milestone). Each entry describes how to overwrite this project's UAT data
+# store with a fresh copy of PRD's. A project absent here gets no "Copy
+# PRD→UAT" button on its Deploy card — same convention as start_stop_supported.
+#
+#   sqlite_file      → db_filename, resolved against each env's working_dir.
+#   json_dir         → dir_name, resolved against each env's working_dir.
+#   postgres_rowcopy → working_dir + copy_script: a project-owned script
+#                       (generalizes that project's own user_copy.py-style
+#                       tooling) run from working_dir with its .env sourced.
+#                       Commander does not know this project's schema —
+#                       the copy logic lives in the project's own repo.
+COPY_STRATEGIES: dict[str, dict[str, Any]] = {
+    "viral-radar": {
+        "strategy": "sqlite_file",
+        "db_filename": "viral-radar.db",
+    },
+    "asset-studio": {
+        "strategy": "json_dir",
+        "dir_name": "flows",
+    },
+    "perf-coach": {
+        "strategy": "postgres_rowcopy",
+        "working_dir": "/Users/zeal-server/dev/perf-coach/uat",
+        "copy_script": ".venv/bin/python scripts/copy_prd_to_uat.py",
+    },
+    # crux: not yet supported — UAT still runs SQLite while PRD runs
+    # Postgres; needs a same-engine UAT before a copy strategy applies.
+}
+
+
+def copy_strategy_for(slug: str) -> Optional[dict[str, Any]]:
+    """Return the copy-strategy config for *slug*, or None if unsupported."""
+    return COPY_STRATEGIES.get(slug)
+
+
 def seed_for(slug: str) -> dict[str, dict[str, Any]]:
     """Return a deep copy of the seed defaults for *slug* (empty if none)."""
     return copy.deepcopy(SEED_DEFAULTS.get(slug, {}))
@@ -214,6 +250,10 @@ def overview_entries_for(
         # has no clean stop equivalent through this dashboard, so the UI hides the
         # Start/Stop buttons (not disables them) and shows a tooltip instead.
         e["start_stop_supported"] = host == "local"
+        # Deploy-tab-copy-prd-to-uat milestone — "Copy PRD→UAT" only ever
+        # appears on the uat card (direction is hard-locked PRD→UAT), and only
+        # for projects with a registered copy strategy.
+        e["copy_from_prd_supported"] = env == "uat" and copy_strategy_for(slug) is not None
         if host == "local":
             e["branch"] = entry.get("branch") or branch_default(env)
             # issue #769 — surface the run folder + port on the card. working_dir

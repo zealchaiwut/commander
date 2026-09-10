@@ -13,6 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel
 
 from . import deploy_progress_service as _deploy_progress
+from . import data_copy_service as _data_copy
 
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
 _REPO_ROOT = _DASHBOARD_ROOT.parent.parent
@@ -43,6 +44,7 @@ from services.sprint_manager.deploy_config_schema import (  # noqa: E402
     seed_for as _deploy_seed_for,
     merge_seed as _deploy_merge_seed,
     enrich_local_working_dirs as _enrich_working_dirs,
+    copy_strategy_for as _copy_strategy_for,
 )
 import services.sprint_manager.settings_repo as _settings_repo  # noqa: E402
 
@@ -727,6 +729,26 @@ async def start_environment_bg(slug: str, env: str, background_tasks: Background
     if _deploy_progress.is_running(key):
         return {"started": False, "job_key": key, "already_running": True}
     background_tasks.add_task(_deploy_progress.run_start_job, key, slug, env)
+    return {"started": True, "job_key": key}
+
+
+@router.post("/api/projects/{slug}/environments/{env}/copy-prd-bg")
+async def copy_prd_to_uat_bg(slug: str, env: str, background_tasks: BackgroundTasks):
+    """Start "Copy PRD→UAT" as a background job; live-narrated via console-stream.
+
+    Direction is hard-locked PRD→UAT (Deploy-tab-copy-prd-to-uat milestone) —
+    ``env`` must be ``"uat"``, matching where the button appears on the card.
+    Shares the uat card's job key with deploy/restart/stop/start so the copy's
+    progress shows up on the console the operator already watches for that env.
+    """
+    if env != "uat":
+        raise HTTPException(status_code=400, detail="Copy PRD→UAT only targets the uat environment")
+    if _copy_strategy_for(slug) is None:
+        raise HTTPException(status_code=400, detail=f"No copy strategy registered for '{slug}'")
+    key = _deploy_progress.job_key(slug, env)
+    if _deploy_progress.is_running(key):
+        return {"started": False, "job_key": key, "already_running": True}
+    background_tasks.add_task(_data_copy.run_copy_job, key, slug)
     return {"started": True, "job_key": key}
 
 

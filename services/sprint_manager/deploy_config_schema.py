@@ -85,14 +85,20 @@ SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
             "start_script": "bash scripts/deploy-start.sh",
             "stop_script": "bash scripts/deploy-stop.sh",
         },
-        # Always-on local mirror (issue: Deploy-tab-extension milestone). Real
-        # production stays on Render via the `prd` entry above, untouched.
+        # Local sandbox compute-worker instance (repurposed from an earlier
+        # always-on "prd mirror" — real production is Render via the `prd`
+        # entry above; a local web mirror was redundant with that, so this
+        # slot now runs backend.worker_app instead, on the WORKER_PORT already
+        # reserved in this clone's .env. Distinct from the real worker
+        # (com.perfcoach.worker, port 9100, perf-coach/worker/) which keeps
+        # running untouched — this is a sandbox for developing worker-side
+        # changes (e.g. moving admin routes onto the worker).
         "local": {
             "host": "local",
-            "launchd_label": "com.perfcoach.prd",
-            "launchd_plist": "/Users/zeal-server/Library/LaunchAgents/com.perfcoach.prd.plist",
+            "launchd_label": "com.perfcoach.workerlocal",
+            "launchd_plist": "/Users/zeal-server/Library/LaunchAgents/com.perfcoach.workerlocal.plist",
             "branch": "master",
-            "port": 9000,
+            "port": 9101,
             "working_dir": "/Users/zeal-server/dev/perf-coach/main",
         },
     },

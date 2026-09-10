@@ -10,6 +10,9 @@
  * Tab mapping (as of issue #2038):
  *   failures     → 'failures'   (was missing — fell through to sprint-mgmt)
  *   brain        → 'brain'      (was missing — fell through to sprint-mgmt)
+ *   deploy       → 'deploy'     (Deploy-tab-extension milestone — was missing,
+ *                                 fell through to sprint-mgmt despite the server
+ *                                 correctly serving project.html for the URL)
  *   logs         → removed: server returns 302 → /failures before project.html loads
  *   status       → removed: server returns 302 → /failures before project.html loads
  *   metrics      → removed: server returns 302 → /failures before project.html loads
@@ -41,6 +44,7 @@ export function _parseUrlImpl(pathname, search = '') {
             : (rawTab === 'bulk-create')     ? 'bulk-create'
             : (rawTab === 'failures')        ? 'failures'
             : (rawTab === 'brain')           ? 'brain'
+            : (rawTab === 'deploy')          ? 'deploy'
             : (rawTab === 'settings')        ? 'settings'
             : (rawTab === 'global-settings') ? 'global-settings'
             : 'sprint-mgmt';

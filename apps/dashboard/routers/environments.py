@@ -1,13 +1,18 @@
 from __future__ import annotations
 import os
 import sys
+import json
+import asyncio
 import subprocess
 from pathlib import Path
 from typing import Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
+from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel
+
+from . import deploy_progress_service as _deploy_progress
 
 _DASHBOARD_ROOT = Path(__file__).resolve().parent.parent
 _REPO_ROOT = _DASHBOARD_ROOT.parent.parent
@@ -658,6 +663,106 @@ def environment_deploy_status(slug: str, env: str):
         "commit": info["commit"],
         "finished_at": info["finished_at"],
     }
+
+
+@router.post("/api/projects/{slug}/environments/{env}/deploy-bg")
+async def deploy_environment_bg(slug: str, env: str, background_tasks: BackgroundTasks):
+    """Start Deploy as a background job; live-narrated via console-stream.
+
+    Returns {started, job_key} immediately. host=render environments have no
+    multi-phase local chain to narrate — reject here and let the caller fall
+    back to the existing synchronous POST .../deploy for those.
+    """
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if _render_actions.is_render_host(entry):
+        raise HTTPException(status_code=400, detail="Use POST .../deploy for host=render environments")
+    key = _deploy_progress.job_key(slug, env)
+    if _deploy_progress.is_running(key):
+        return {"started": False, "job_key": key, "already_running": True}
+    background_tasks.add_task(_deploy_progress.run_deploy_job, key, slug, env)
+    return {"started": True, "job_key": key}
+
+
+@router.post("/api/projects/{slug}/environments/{env}/restart-bg")
+async def restart_environment_bg(slug: str, env: str, background_tasks: BackgroundTasks):
+    """Start Restart as a background job; live-narrated via console-stream."""
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if _render_actions.is_render_host(entry):
+        raise HTTPException(status_code=400, detail="Use POST .../restart for host=render environments")
+    key = _deploy_progress.job_key(slug, env)
+    if _deploy_progress.is_running(key):
+        return {"started": False, "job_key": key, "already_running": True}
+    background_tasks.add_task(_deploy_progress.run_restart_job, key, slug, env)
+    return {"started": True, "job_key": key}
+
+
+@router.post("/api/projects/{slug}/environments/{env}/stop-bg")
+async def stop_environment_bg(slug: str, env: str, background_tasks: BackgroundTasks):
+    """Start Stop as a background job; live-narrated via console-stream."""
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if _render_actions.is_render_host(entry):
+        raise HTTPException(status_code=400, detail="Stop is not supported for host=render environments")
+    key = _deploy_progress.job_key(slug, env)
+    if _deploy_progress.is_running(key):
+        return {"started": False, "job_key": key, "already_running": True}
+    background_tasks.add_task(_deploy_progress.run_stop_job, key, slug, env)
+    return {"started": True, "job_key": key}
+
+
+@router.post("/api/projects/{slug}/environments/{env}/start-bg")
+async def start_environment_bg(slug: str, env: str, background_tasks: BackgroundTasks):
+    """Start Start as a background job; live-narrated via console-stream."""
+    repo = _resolve_project_slug(slug)
+    merged = _merged_deploy_config(slug, repo)
+    entry = _deploy_actions.get_env_entry(merged, env)
+    if _render_actions.is_render_host(entry):
+        raise HTTPException(status_code=400, detail="Start is not supported for host=render environments")
+    key = _deploy_progress.job_key(slug, env)
+    if _deploy_progress.is_running(key):
+        return {"started": False, "job_key": key, "already_running": True}
+    background_tasks.add_task(_deploy_progress.run_start_job, key, slug, env)
+    return {"started": True, "job_key": key}
+
+
+@router.get("/api/projects/{slug}/environments/{env}/console-stream")
+async def environment_console_stream(slug: str, env: str):
+    """SSE stream of ProgressActivity snapshots for the most recent deploy-action
+    job on this environment (deploy/restart/stop/start share one job key, per
+    environment — see deploy_progress_service.job_key).
+
+    Sends the current snapshot immediately on connect, so reopening the console
+    mid-run resumes rather than losing in-flight output. The background job
+    persists after SSE clients disconnect.
+    """
+    key = _deploy_progress.job_key(slug, env)
+
+    async def event_generator():
+        snapshot = _deploy_progress.get_snapshot(key)
+        if snapshot:
+            yield {"data": json.dumps(snapshot)}
+            if snapshot.get("status") in ("done", "error"):
+                return
+
+        q = _deploy_progress.subscribe(key)
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=30.0)
+                    yield {"data": json.dumps(event)}
+                    if event.get("status") in ("done", "error"):
+                        break
+                except asyncio.TimeoutError:
+                    yield {"data": json.dumps({"ping": True})}
+        finally:
+            _deploy_progress.unsubscribe(key, q)
+
+    return EventSourceResponse(event_generator())
 
 
 @router.get("/api/projects/{slug}/environments")

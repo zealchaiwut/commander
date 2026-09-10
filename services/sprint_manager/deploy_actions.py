@@ -108,6 +108,26 @@ def build_current_branch_command() -> list[str]:
     return ["git", "rev-parse", "--abbrev-ref", "HEAD"]
 
 
+def build_short_head_sha_command() -> list[str]:
+    """Command that prints the current HEAD sha, short form (for Deploy cards)."""
+    return ["git", "rev-parse", "--short", "HEAD"]
+
+
+def build_fetch_quiet_command(branch: str) -> list[str]:
+    """Fetch *branch* from origin quietly (used for the commits-behind check)."""
+    return ["git", "fetch", "origin", branch, "--quiet"]
+
+
+def build_rev_list_count_command(branch: str) -> list[str]:
+    """Command that counts commits HEAD is behind ``origin/<branch>``."""
+    return ["git", "rev-list", "--count", f"HEAD..origin/{branch}"]
+
+
+def build_head_commit_msg_command() -> list[str]:
+    """Command that prints HEAD's commit subject line (for Deploy cards)."""
+    return ["git", "log", "-1", "--pretty=%s"]
+
+
 def branch_mismatch_error(
     current: str, expected: str, working_dir: str
 ) -> Optional[str]:

@@ -396,6 +396,36 @@
         align-items: center;
         gap: 3px;
       }
+      /* deploy-status pill (compact — full controls live in the Deploy tab) */
+      .pb-deploy-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+      }
+      .pbd-dot {
+        font-family: var(--mono);
+        font-size: 9px;
+        font-weight: 700;
+        text-transform: uppercase;
+        padding: 2px 6px;
+        border-radius: var(--radius-full);
+        text-decoration: none;
+        line-height: 1.4;
+      }
+      .pbd-dot--ok {
+        background: var(--green-bg);
+        color: var(--green);
+      }
+      .pbd-dot--behind {
+        background: var(--amber-bg);
+        color: var(--amber);
+      }
+      .pbd-dot--unknown {
+        background: var(--surface-2);
+        color: var(--text-muted);
+      }
+
       .pb-counts .cnt-item.hi {
         color: var(--amber);
       }
@@ -943,6 +973,7 @@
         _dismissFetchError(root);
         _projBySlug = _buildProjBySlug(data.projects);
         root.innerHTML = _renderReport(data);
+        _loadDeployPills();
         return data.generated_at || null;
       }
 
@@ -1022,8 +1053,54 @@
         ${statusPill}
         ${countsHtml}
         ${metaHtml}
+        <span class="pb-deploy-pill" id="pb-deploy-${esc(slug)}"></span>
       </div>
     </div>`;
+      }
+
+      // ── deploy-status pill (compact — full controls stay in the Deploy tab) ────
+      // Progressive enhancement: fetched separately from /api/home so a slow or
+      // failed deploy-overview call never blocks the initial project list from
+      // rendering. One dot per configured local env; render hosts are skipped
+      // here (no meaningful "up/down" from this dashboard for those).
+      async function _loadDeployPills() {
+        let data;
+        try {
+          const resp = await fetch("/api/deploy/overview");
+          if (!resp.ok) return;
+          data = await resp.json();
+        } catch (_) {
+          return;
+        }
+        const bySlug = {};
+        (data.environments || []).forEach((e) => {
+          if (e.host !== "local") return;
+          (bySlug[e.project] = bySlug[e.project] || []).push(e);
+        });
+        Object.keys(bySlug).forEach((slug) => {
+          const el = document.getElementById("pb-deploy-" + slug);
+          if (!el) return;
+          const envs = bySlug[slug];
+          el.innerHTML = envs
+            .map((e) => {
+              const cls =
+                e.commits_behind == null
+                  ? "pbd-dot--unknown"
+                  : e.commits_behind > 0
+                    ? "pbd-dot--behind"
+                    : "pbd-dot--ok";
+              const title =
+                e.env +
+                ": " +
+                (e.commits_behind == null
+                  ? "status unknown"
+                  : e.commits_behind === 0
+                    ? "up to date"
+                    : e.commits_behind + " commit" + (e.commits_behind === 1 ? "" : "s") + " behind");
+              return `<a class="pbd-dot ${cls}" href="/project/${encodeURIComponent(slug)}/deploy" title="${esc(title)}">${esc(e.env)}</a>`;
+            })
+            .join("");
+        });
       }
 
       function _statusPill(p) {

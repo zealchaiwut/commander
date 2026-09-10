@@ -27962,6 +27962,27 @@ function _deployReadinessAlertHtml(c) {
     + '</div>';
 }
 
+// Hidden when 0/unknown — a "0 behind" badge on every card is just noise;
+// commits_behind is null (not 0) when the check couldn't run (offline, etc.),
+// which the operator needs to read differently from "0" when deciding to deploy.
+function _deployBehindRowHtml(c) {
+  if (c.host !== 'local' || c.commits_behind == null || c.commits_behind === 0) return '';
+  return '<div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Behind</span>'
+    + '<span class="deploy-card__meta-val deploy-card__behind-badge">'
+    + c.commits_behind + ' commit' + (c.commits_behind === 1 ? '' : 's')
+    + ' behind origin/' + _deployEsc(c.branch || '?') + '</span></div>';
+}
+
+// Deploy-relevant only (the open PR, if any, targeting this env's branch) —
+// not a full open-PR listing for the repo.
+function _deployPrRowHtml(c) {
+  if (c.host !== 'local' || !c.open_pr) return '';
+  var pr = c.open_pr;
+  return '<div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Open PR</span>'
+    + '<span class="deploy-card__meta-val"><a href="' + _deployEsc(pr.url) + '" target="_blank" rel="noopener">'
+    + '#' + _deployEsc(pr.number) + ' ' + _deployEsc(pr.title) + '</a></span></div>';
+}
+
 function _deployCardHtml(c, i) {
   var hostLabel = c.host === 'render' ? 'Render' : 'local';
   var hostClass = c.host === 'render' ? 'deploy-card__badge--render' : 'deploy-card__badge--local';
@@ -27994,6 +28015,8 @@ function _deployCardHtml(c, i) {
     + '    <div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Commit</span>'
     + '      <span class="deploy-card__meta-val"><span class="is-mono" id="deploy-card-sha-' + i + '">…</span>'
     + '      <span class="deploy-card__commit-msg" id="deploy-card-msg-' + i + '"></span></span></div>'
+    +      _deployBehindRowHtml(c)
+    +      _deployPrRowHtml(c)
     + '    <div class="deploy-card__meta-row"><span class="deploy-card__meta-label">Last deploy</span>'
     + '      <span class="deploy-card__meta-val" id="deploy-card-time-' + i + '">—</span></div>'
     + (c.host !== 'render'
@@ -28484,11 +28507,128 @@ function _deployTouchesThisServer(i) {
   return locPort !== '' && String(c.port) === String(locPort);
 }
 
+// ── Live console (deploy/restart/start/stop) ──────────────────────────────────
+// Streams real progress into the existing log panel via the -bg + SSE
+// console-stream endpoints, instead of dumping the whole result after the
+// action finishes. host=render has no local multi-phase chain to narrate, so
+// deploy/restart fall back to the original synchronous render path below.
+
+function _deployStreamUrl(c) {
+  return '/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+    + encodeURIComponent(c.env) + '/console-stream';
+}
+
+function _deployExecViaStream(i, action, verb) {
+  var c = _deployCards[i];
+  _deployBusyActions(i, verb);
+  _deploySetStatus(i, 'building');
+  _deployLogReset(i);
+  _deployLogPush(i, verb + ' ' + c.env + '…');
+
+  var pushed = 0;
+  var selfTarget = (action === 'restart' || action === 'deploy') && _deployTouchesThisServer(i);
+
+  fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
+        + encodeURIComponent(c.env) + '/' + action + '-bg', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(startRes) {
+      if (!startRes || (!startRes.started && !startRes.already_running)) {
+        _deployLogFinishFailure(i, null, 'Failed to start ' + action);
+        _deployResetActions(i);
+        return;
+      }
+      var es = new EventSource(_deployStreamUrl(c));
+      es.onmessage = function(ev) {
+        var snap;
+        try { snap = JSON.parse(ev.data); } catch (e) { return; }
+        if (snap.ping) return;
+        var tail = snap.log_tail || [];
+        for (; pushed < tail.length; pushed++) _deployLogPush(i, tail[pushed]);
+        if (snap.status === 'done') {
+          es.close();
+          _deployFinishStream(i, action, c, true, null);
+        } else if (snap.status === 'error') {
+          es.close();
+          _deployFinishStream(i, action, c, false, snap.error);
+        }
+      };
+      es.onerror = function() {
+        es.close();
+        // A self-restart/self-deploy bounces the dashboard mid-stream — the
+        // connection dropping IS the expected completion signal (AC10).
+        if (selfTarget) { _deployShowReconnectOverlay(); return; }
+        _deployLogFinishFailure(i, null, 'Console stream disconnected — the '
+          + action + ' may still be running; reopening the card will show its result.');
+        _deployResetActions(i);
+        _deployRefreshRunState(i);
+      };
+    })
+    .catch(function(e) {
+      _deployLogFinishFailure(i, null, verb + ' error: ' + e);
+      _deployResetActions(i);
+    });
+}
+
+// Post-stream follow-up per action — mirrors what each old synchronous exec
+// function did after its single fetch resolved (health check, self-restart
+// overlay, run-state refresh). SHA/commit-msg display refreshes on the next
+// tab load (deploy-overview) rather than being patched in optimistically here.
+var _DEPLOY_PAST_TENSE = {
+  deploy: 'Deployed', restart: 'Restarted', start: 'Started', stop: 'Stopped',
+};
+
+function _deployFinishStream(i, action, c, ok, errMsg) {
+  var Verb = action.charAt(0).toUpperCase() + action.slice(1);
+  var past = _DEPLOY_PAST_TENSE[action] || Verb;
+  if (!ok) {
+    _deploySetStatus(i, 'failed');
+    _deployLogFinishFailure(i, null, Verb + ' failed: ' + (errMsg || 'error'));
+    _deployResetActions(i);
+    _deployRefreshRunState(i);
+    return;
+  }
+  if (action === 'deploy' || action === 'restart') {
+    if (action === 'deploy') {
+      _deploySetStatus(i, 'live');
+      var now = new Date().toISOString();
+      _deploySetTime(i, now);
+      if (_deployCards[i]) _deployCards[i].last_deployed_at = now;
+    }
+    if (_deployTouchesThisServer(i)) { _deployShowReconnectOverlay(); return; }
+    _deployHealthCheck(i).then(function(healthOk) {
+      if (healthOk) _deployLogFinishSuccess(i, past);
+      else _deployLogFinishFailure(i, null, 'Health check failed');
+      _deployResetActions(i);
+      _deployRefreshRunState(i);
+    });
+    return;
+  }
+  // start/stop: no dashboard health-check equivalent — trust the run-state probe.
+  _deployLogFinishSuccess(i, past);
+  _deployResetActions(i);
+  _deployRefreshRunState(i);
+}
+
 function _deployExecDeploy(i) {
+  var c = _deployCards[i];
+  if (c.host === 'render') { _deployExecDeployRender(i); return; }
+  _deployExecViaStream(i, 'deploy', 'Deploying');
+}
+
+function _deployExecRestart(i) {
+  var c = _deployCards[i];
+  if (c.host === 'render') { _deployExecRestartRender(i); return; }
+  _deployExecViaStream(i, 'restart', 'Restarting');
+}
+
+// Unchanged original synchronous flow, kept for host=render only (Render
+// deploys/restarts have no local multi-phase chain to narrate — a single
+// trigger call, then the existing status-polling path takes over).
+function _deployExecDeployRender(i) {
   var c = _deployCards[i];
   _deployBusyActions(i, 'Deploying');
   _deploySetStatus(i, 'building');
-  _deployLogReset(i);                                    // AC1: open the panel
+  _deployLogReset(i);
   _deployLogPush(i, 'Deploying ' + c.env + '…');
   fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
         + encodeURIComponent(c.env) + '/deploy', { method: 'POST' })
@@ -28498,53 +28638,29 @@ function _deployExecDeploy(i) {
     .then(function(res) {
       if (!res.ok) {
         _deploySetStatus(i, 'failed');
-        _deployLogFinishFailure(i, 'Deploy failed (' + res.status + '): '
-          + ((res.data && res.data.detail) || 'error'));   // AC9
+        _deployLogFinishFailure(i, null, 'Deploy failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'));
         _deployResetActions(i);
         return;
       }
       var d = res.data || {};
-      // host=render → poll the live build status until live/failed (AC5).
-      if (c.host === 'render' || d.host === 'render') {
-        _deploySetStatus(i, d.status || 'queued');
-        _deployLogPush(i, 'Deploy triggered on Render — tracking build status…');
-        _deployPollRender(i);
-        _deployResetActions(i);
-        return;
-      }
-      // local (AC3): git pull output → restart → health check.
-      var out = (d.pull_output || '').trim();
-      if (out) _deployLogPush(i, out);
-      if (d.head) { _deployLogPush(i, 'HEAD: ' + d.head); _deploySetSha(i, d.head); _deploySetCommitMsg(i, null); }
-      _deploySetStatus(i, 'live');
-      var _deployNow = new Date().toISOString();
-      _deploySetTime(i, _deployNow);
-      if (_deployCards[i]) _deployCards[i].last_deployed_at = _deployNow;
-      // self-restart bounces the dashboard — the reconnect overlay + auto-reload
-      // is the completion signal, so don't health-check a server that's going down.
-      if (_deployIsSelfRestart(res)) { _deployShowReconnectOverlay(); return; }
-      _deployLogPush(i, 'Restarting service…');
-      _deployHealthCheck(i).then(function(ok) {            // AC3 health result
-        if (ok) _deployLogFinishSuccess(i, 'Deployed');    // AC7/AC8 auto-collapse
-        else _deployLogFinishFailure(i, null, 'Health check failed');  // AC9
-        _deployResetActions(i);
-        _deployRefreshRunState(i);                         // #771 AC8
-      });
+      _deploySetStatus(i, d.status || 'queued');
+      _deployLogPush(i, 'Deploy triggered on Render — tracking build status…');
+      _deployPollRender(i);
+      _deployResetActions(i);
     })
     .catch(function(e) {
-      // Network drop mid-restart (older servers) — reconnect instead of FAILED.
-      if (_deployTouchesThisServer(i)) { _deployShowReconnectOverlay(); return; }
       _deploySetStatus(i, 'failed');
-      _deployLogFinishFailure(i, 'Deploy error: ' + e);    // AC9
+      _deployLogFinishFailure(i, null, 'Deploy error: ' + e);
       _deployResetActions(i);
     });
 }
 
-function _deployExecRestart(i) {
+function _deployExecRestartRender(i) {
   var c = _deployCards[i];
   _deployBusyActions(i, 'Restarting');
   _deploySetStatus(i, 'building');
-  _deployLogReset(i);                                    // AC1: open the panel
+  _deployLogReset(i);
   _deployLogPush(i, 'Restarting ' + c.env + '…');
   fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
         + encodeURIComponent(c.env) + '/restart', { method: 'POST' })
@@ -28554,36 +28670,19 @@ function _deployExecRestart(i) {
     .then(function(res) {
       if (!res.ok) {
         _deploySetStatus(i, 'failed');
-        _deployLogFinishFailure(i, 'Restart failed (' + res.status + '): '
-          + ((res.data && res.data.detail) || 'error'));   // AC9
+        _deployLogFinishFailure(i, null, 'Restart failed (' + res.status + '): '
+          + ((res.data && res.data.detail) || 'error'));
         _deployResetActions(i);
         return;
       }
-      // AC10: restarting the dashboard itself → show the reconnect overlay.
-      if (_deployIsSelfRestart(res)) { _deployShowReconnectOverlay(); return; }
-      if (c.host === 'render' || (res.data && res.data.host) === 'render') {
-        _deploySetStatus(i, 'building');
-        _deployLogPush(i, 'Restart triggered on Render — tracking status…');
-        _deployPollRender(i);
-        _deployResetActions(i);
-        return;
-      }
-      // local (AC4): launchctl/script output → post-restart health check.
-      var out = (res.data && (res.data.output || res.data.message) || '').trim();
-      _deployLogPush(i, out || (res.status === 202
-        ? 'Restart accepted — service is bouncing.'
-        : 'Restarted ' + c.env + '.'));
-      _deployHealthCheck(i).then(function(ok) {            // AC4 health result
-        if (ok) _deployLogFinishSuccess(i, 'Restarted');   // AC7/AC8 auto-collapse
-        else _deployLogFinishFailure(i, null, 'Health check failed');  // AC9
-        _deployResetActions(i);
-        _deployRefreshRunState(i);                         // #771 AC8
-      });
+      _deploySetStatus(i, 'building');
+      _deployLogPush(i, 'Restart triggered on Render — tracking status…');
+      _deployPollRender(i);
+      _deployResetActions(i);
     })
     .catch(function(e) {
-      if (_deployTouchesThisServer(i)) { _deployShowReconnectOverlay(); return; }
       _deploySetStatus(i, 'failed');
-      _deployLogFinishFailure(i, 'Restart error: ' + e);   // AC9
+      _deployLogFinishFailure(i, null, 'Restart error: ' + e);
       _deployResetActions(i);
     });
 }
@@ -28602,67 +28701,11 @@ function deployCardStart(i) { _deployExecStart(i); }
 function deployCardStop(i) { _deployExecStop(i); }
 
 function _deployExecStart(i) {
-  var c = _deployCards[i];
-  _deployBusyActions(i, 'Starting');
-  _deployLogReset(i);
-  _deployLogPush(i, 'Starting ' + c.env + '…');
-  fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
-        + encodeURIComponent(c.env) + '/start', { method: 'POST' })
-    .then(function(r) {
-      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
-    })
-    .then(function(res) {
-      if (!res.ok) {
-        _deployLogFinishFailure(i, 'Start failed (' + res.status + '): '
-          + ((res.data && res.data.detail) || 'error'));
-        _deployResetActions(i);
-        _deployRefreshRunState(i);
-        return;
-      }
-      var out = (res.data && (res.data.stdout || res.data.output) || '').trim();
-      _deployLogPush(i, out || ('Started ' + c.env + '.'));
-      _deployLogFinishSuccess(i, 'Started');
-      _deployResetActions(i);
-      _deployRefreshRunState(i);                           // AC8: state updates
-    })
-    .catch(function(e) {
-      _deployLogFinishFailure(i, 'Start error: ' + e);
-      _deployResetActions(i);
-      _deployRefreshRunState(i);
-    });
+  _deployExecViaStream(i, 'start', 'Starting');
 }
 
 function _deployExecStop(i) {
-  var c = _deployCards[i];
-  _deployBusyActions(i, 'Stopping');
-  _deployLogReset(i);
-  _deployLogPush(i, 'Stopping ' + c.env + '…');
-  fetch('/api/projects/' + encodeURIComponent(c.project) + '/environments/'
-        + encodeURIComponent(c.env) + '/stop', { method: 'POST' })
-    .then(function(r) {
-      return r.json().then(function(data) { return { ok: r.ok, status: r.status, data: data }; });
-    })
-    .then(function(res) {
-      if (!res.ok) {
-        _deployLogFinishFailure(i, 'Stop failed (' + res.status + '): '
-          + ((res.data && res.data.detail) || 'error'));
-        _deployResetActions(i);
-        _deployRefreshRunState(i);
-        return;
-      }
-      var out = (res.data && (res.data.stdout || res.data.output) || '').trim();
-      _deployLogPush(i, out || ('Stopped ' + c.env + '.'));
-      // Stop halts the env's own server; the dashboard's /api/health says nothing
-      // about it, so skip the health check and trust the run-state probe instead.
-      _deployLogFinishSuccess(i, 'Stopped');
-      _deployResetActions(i);
-      _deployRefreshRunState(i);                           // AC8: state updates
-    })
-    .catch(function(e) {
-      _deployLogFinishFailure(i, 'Stop error: ' + e);
-      _deployResetActions(i);
-      _deployRefreshRunState(i);
-    });
+  _deployExecViaStream(i, 'stop', 'Stopping');
 }
 
 // Poll the render deploy-status endpoint until live/failed, streaming status.

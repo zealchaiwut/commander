@@ -28,8 +28,14 @@ from typing import Any, Optional
 # The settings key under which deploy config is stored (scope='project').
 DEPLOY_CONFIG_KEY = "deploy_config"
 
-# Only these two environments are in scope.
-SUPPORTED_ENVS: tuple[str, ...] = ("prd", "uat")
+# These three environments are in scope. ``local`` is a third slot for a
+# project whose ``prd`` already means something else (e.g. perf-coach's ``prd``
+# is real Render production) but that also has an always-on local mirror the
+# operator wants to see/control from this tab — see issue discussion in the
+# Deploy-tab-extension milestone. Projects with no cloud production just use
+# ``prd`` directly for their local instance; ``local`` is only needed to avoid
+# a naming collision.
+SUPPORTED_ENVS: tuple[str, ...] = ("prd", "uat", "local")
 
 # Valid host values for an environment entry.
 SUPPORTED_HOSTS: tuple[str, ...] = ("local", "render")
@@ -78,6 +84,73 @@ SEED_DEFAULTS: dict[str, dict[str, dict[str, Any]]] = {
             # deploy-start/deploy-stop scripts shipped in the perf-coach repo.
             "start_script": "bash scripts/deploy-start.sh",
             "stop_script": "bash scripts/deploy-stop.sh",
+        },
+        # Always-on local mirror (issue: Deploy-tab-extension milestone). Real
+        # production stays on Render via the `prd` entry above, untouched.
+        "local": {
+            "host": "local",
+            "launchd_label": "com.perfcoach.prd",
+            "launchd_plist": "/Users/zeal-server/Library/LaunchAgents/com.perfcoach.prd.plist",
+            "branch": "master",
+            "port": 9000,
+            "working_dir": "/Users/zeal-server/dev/perf-coach/main",
+        },
+    },
+    "crux": {
+        "uat": {
+            "host": "local",
+            "launchd_label": "com.crux.uat",
+            "launchd_plist": "/Users/zeal-server/Library/LaunchAgents/com.crux.uat.plist",
+            "branch": "develop",
+            "port": 60392,
+            "working_dir": "/Users/zeal-server/dev/crux/uat",
+        },
+        # Always-on local mirror — crux's real production is Render, deployed
+        # via its own auto-deploy-on-push; not wired through this dashboard
+        # (no render_api_key on file for it).
+        "local": {
+            "host": "local",
+            "launchd_label": "com.crux.prd",
+            "launchd_plist": "/Users/zeal-server/Library/LaunchAgents/com.crux.prd.plist",
+            "branch": "main",
+            "port": 60391,
+            "working_dir": "/Users/zeal-server/dev/crux/main",
+        },
+    },
+    "viral-radar": {
+        "prd": {
+            "host": "local",
+            "launchd_label": "com.viralradar.prd",
+            "launchd_plist": "/Users/zeal-server/Library/LaunchAgents/com.viralradar.prd.plist",
+            "branch": "main",
+            "port": 50181,
+            "working_dir": "/Users/zeal-server/dev/viral-radar/main",
+        },
+        "uat": {
+            "host": "local",
+            "launchd_label": "com.viralradar.uat",
+            "launchd_plist": "/Users/zeal-server/Library/LaunchAgents/com.viralradar.uat.plist",
+            "branch": "develop",
+            "port": 60999,
+            "working_dir": "/Users/zeal-server/dev/viral-radar/uat",
+        },
+    },
+    "asset-studio": {
+        "prd": {
+            "host": "local",
+            "launchd_label": "com.assetstudio.prd",
+            "launchd_plist": "/Users/zeal-server/Library/LaunchAgents/com.assetstudio.prd.plist",
+            "branch": "main",
+            "port": 61315,
+            "working_dir": "/Users/zeal-server/dev/asset-studio/main",
+        },
+        "uat": {
+            "host": "local",
+            "launchd_label": "com.assetstudio.uat",
+            "launchd_plist": "/Users/zeal-server/Library/LaunchAgents/com.assetstudio.uat.plist",
+            "branch": "develop",
+            "port": 61316,
+            "working_dir": "/Users/zeal-server/dev/asset-studio/uat",
         },
     },
     "vector-search-demo": {

@@ -28081,6 +28081,12 @@ function _deployIdleActionsHtml(i) {
           + ' title="Render does not support stop/start through this dashboard">'
           + 'Start / Stop n/a</span>';
   }
+  // Deploy-tab-copy-prd-to-uat milestone — only ever on the uat card, and
+  // only for projects with a registered copy strategy.
+  if (c.copy_from_prd_supported) {
+    html += _deployActionBtn(i, 'deployCardCopyPrdToUat(' + i + ')', 'Copy PRD → UAT',
+              'ti-database-import', 'deploy-btn--danger', false);
+  }
   return html;
 }
 
@@ -28575,6 +28581,7 @@ function _deployExecViaStream(i, action, verb) {
 // tab load (deploy-overview) rather than being patched in optimistically here.
 var _DEPLOY_PAST_TENSE = {
   deploy: 'Deployed', restart: 'Restarted', start: 'Started', stop: 'Stopped',
+  'copy-prd': 'Copied',
 };
 
 function _deployFinishStream(i, action, c, ok, errMsg) {
@@ -28619,6 +28626,19 @@ function _deployExecRestart(i) {
   var c = _deployCards[i];
   if (c.host === 'render') { _deployExecRestartRender(i); return; }
   _deployExecViaStream(i, 'restart', 'Restarting');
+}
+
+// Deploy-tab-copy-prd-to-uat milestone — direction hard-locked PRD→UAT
+// server-side; this confirm is the UI-level safety step from that plan
+// (operator sees what's about to be overwritten before it runs).
+function deployCardCopyPrdToUat(i) {
+  var c = _deployCards[i];
+  if (!confirm('Copy PRD data over ' + c.project + ' UAT?\n\n'
+    + 'This overwrites UAT\'s current data with a fresh copy of PRD\'s. '
+    + 'UAT\'s existing data is backed up first, but this cannot be undone from here.')) {
+    return;
+  }
+  _deployExecViaStream(i, 'copy-prd', 'Copying PRD → UAT');
 }
 
 // Unchanged original synchronous flow, kept for host=render only (Render

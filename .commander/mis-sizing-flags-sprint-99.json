@@ -1,0 +1,10 @@
+{
+  "sprint_label": "sprint-99",
+  "generated_at": "2026-08-21T10:19:53.876532+00:00",
+  "config": {
+    "tier_threshold": 2,
+    "min_events": 2
+  },
+  "flags": [],
+  "audit_log": []
+}

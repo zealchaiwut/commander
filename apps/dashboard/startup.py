@@ -1405,14 +1405,30 @@ def _enrich_deploy_git_facts(config: dict) -> None:
     A git fetch per card on every dashboard load is real network/CPU cost
     across 5 projects x up to 3 envs, so ``commits_behind`` (which fetches) is
     cached briefly via the same ``aggregate_cache`` namespace pattern used for
-    ``/api/home``. ``current_commit`` is pure-local and cheap, so it's not
-    cached — always fresh.
+    ``/api/home``. ``current_commit``/``current_commit_msg`` are pure-local
+    and cheap, so they're not cached — always fresh.
+
+    All of this project's local envs are enriched concurrently (thread pool —
+    every call here is a blocking subprocess, not CPU-bound, so the GIL isn't
+    a bottleneck). A cold cache on a project with N local envs previously took
+    the *sum* of each env's git-fetch time (each up to a 30s timeout); this
+    caps it at the *slowest single env* instead — found via an actual
+    browser click-through where the homepage's deploy-status pill took ~15s+
+    to populate on a cold cache, run sequentially across up to 13 envs
+    project-by-project.
     """
     import aggregate_cache  # noqa: PLC0415
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
 
-    for _env, entry in (config or {}).items():
-        if not isinstance(entry, dict) or entry.get("host") != "local":
-            continue
+    local_envs = [
+        (env, entry) for env, entry in (config or {}).items()
+        if isinstance(entry, dict) and entry.get("host") == "local"
+    ]
+    if not local_envs:
+        return
+
+    def _one(env_entry: tuple[str, dict]) -> None:
+        _env, entry = env_entry
         working_dir = entry.get("working_dir") or ""
         branch = entry.get("branch") or ""
         entry["current_commit"] = _current_commit(working_dir)
@@ -1422,10 +1438,13 @@ def _enrich_deploy_git_facts(config: dict) -> None:
         cached = aggregate_cache.get(cache_key, "deploy_commits_behind")
         if cached is not None:
             entry["commits_behind"] = cached[0].get("value")
-            continue
+            return
         behind = _commits_behind(working_dir, branch)
         aggregate_cache.store(cache_key, "deploy_commits_behind", {"value": behind}, ttl_s=45)
         entry["commits_behind"] = behind
+
+    with ThreadPoolExecutor(max_workers=max(len(local_envs), 1)) as pool:
+        list(pool.map(_one, local_envs))  # list() to propagate any worker exception
 
 
 def _enrich_deploy_prs(repo: str, config: dict) -> None:

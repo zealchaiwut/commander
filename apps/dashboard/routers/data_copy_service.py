@@ -24,6 +24,7 @@ import asyncio
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -133,8 +134,25 @@ async def _run_file_copy(key: str, slug: str, strategy_cfg: dict, *, kind: str) 
         return f"Copied {source_path} → {target_path}"
 
     def _start_uat():
-        env_mod._start_environment(uat_entry)
-        return "Started UAT service"
+        # launchd needs a moment to fully release a service after bootout
+        # before a bootstrap for the same label succeeds — bootstrapping
+        # immediately after _stop_uat's bootout can fail with a transient
+        # "Bootstrap failed: 5: Input/output error" (observed in a real
+        # supervised dry run against viral-radar). Retry with backoff rather
+        # than fail the whole job over a timing race — the copy itself has
+        # already succeeded by this point.
+        last_exc: Exception | None = None
+        for attempt, delay in enumerate((0, 1, 2, 3)):
+            if delay:
+                time.sleep(delay)
+            try:
+                env_mod._start_environment(uat_entry)
+                return "Started UAT service" if attempt == 0 else (
+                    f"Started UAT service (attempt {attempt + 1}, after launchd released the prior instance)"
+                )
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+        raise RuntimeError(f"UAT service failed to start after retries: {last_exc}")
 
     await _progress._run_job(key, "copy-prd-to-uat", [
         ("Validating PRD source", _validate_source),

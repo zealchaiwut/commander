@@ -275,6 +275,85 @@ def test_sqlite_file_copy_backs_up_stops_copies_starts(tmp_path, monkeypatch):
     assert final["status"] == "done"
 
 
+def test_start_uat_retries_past_a_transient_launchd_race(tmp_path, monkeypatch):
+    """A real supervised dry run against viral-radar hit exactly this: bootstrap
+    called immediately after bootout can transiently fail ("Bootstrap failed:
+    5: Input/output error") even though the copy itself succeeded. The start
+    step must retry rather than fail the whole job over a timing race."""
+    prd_dir = tmp_path / "prd"
+    uat_dir = tmp_path / "uat"
+    prd_dir.mkdir()
+    uat_dir.mkdir()
+    (prd_dir / "viral-radar.db").write_bytes(b"PRD-DATA")
+
+    start_attempts: list[int] = []
+
+    def fake_start(entry):
+        start_attempts.append(1)
+        if len(start_attempts) < 3:
+            raise RuntimeError("Bootstrap failed: 5: Input/output error")
+        return {"method": "test"}
+
+    monkeypatch.setattr(env_mod, "_resolve_project_slug", lambda slug: f"owner/{slug}")
+    monkeypatch.setattr(env_mod, "_merged_deploy_config", lambda slug, repo: {
+        "prd": {"host": "local", "working_dir": str(prd_dir)},
+        "uat": {"host": "local", "working_dir": str(uat_dir)},
+    })
+    monkeypatch.setattr(env_mod, "_enrich_local_working_dirs", lambda repo, merged: None)
+    monkeypatch.setattr(env_mod, "_stop_environment", lambda entry: {"method": "test"})
+    monkeypatch.setattr(env_mod, "_start_environment", fake_start)
+    monkeypatch.setattr(dc.time, "sleep", lambda seconds: None)  # don't actually wait in tests
+
+    snapshots: list[dict] = []
+
+    async def fake_emit(key, snapshot):
+        snapshots.append(snapshot)
+        dc._progress._JOBS[key] = snapshot
+
+    monkeypatch.setattr(dc._progress, "_emit", fake_emit)
+
+    asyncio.run(dc.run_copy_job("uat@viral-radar", "viral-radar"))
+
+    assert len(start_attempts) == 3, "should retry past the first two transient failures"
+    assert snapshots[-1]["status"] == "done"
+
+
+def test_start_uat_gives_up_after_exhausting_retries(tmp_path, monkeypatch):
+    """A genuine, non-transient start failure still surfaces as a job error
+    (not swallowed forever) — the retry has a bound."""
+    prd_dir = tmp_path / "prd"
+    uat_dir = tmp_path / "uat"
+    prd_dir.mkdir()
+    uat_dir.mkdir()
+    (prd_dir / "viral-radar.db").write_bytes(b"PRD-DATA")
+
+    def always_fails(entry):
+        raise RuntimeError("plist is genuinely broken")
+
+    monkeypatch.setattr(env_mod, "_resolve_project_slug", lambda slug: f"owner/{slug}")
+    monkeypatch.setattr(env_mod, "_merged_deploy_config", lambda slug, repo: {
+        "prd": {"host": "local", "working_dir": str(prd_dir)},
+        "uat": {"host": "local", "working_dir": str(uat_dir)},
+    })
+    monkeypatch.setattr(env_mod, "_enrich_local_working_dirs", lambda repo, merged: None)
+    monkeypatch.setattr(env_mod, "_stop_environment", lambda entry: {"method": "test"})
+    monkeypatch.setattr(env_mod, "_start_environment", always_fails)
+    monkeypatch.setattr(dc.time, "sleep", lambda seconds: None)
+
+    snapshots: list[dict] = []
+
+    async def fake_emit(key, snapshot):
+        snapshots.append(snapshot)
+        dc._progress._JOBS[key] = snapshot
+
+    monkeypatch.setattr(dc._progress, "_emit", fake_emit)
+
+    asyncio.run(dc.run_copy_job("uat@viral-radar", "viral-radar"))
+
+    assert snapshots[-1]["status"] == "error"
+    assert "plist is genuinely broken" in snapshots[-1]["error"]
+
+
 def test_json_dir_copy_replaces_whole_directory(tmp_path, monkeypatch):
     """AC6: json_dir removes uat's old flows/ dir and replaces it with prd's."""
     prd_dir = tmp_path / "prd"
